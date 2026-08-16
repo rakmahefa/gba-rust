@@ -161,11 +161,10 @@ fn collect_leaders(
         let Some(node) = discovered.get(key) else {
             continue;
         };
-        if is_fallthrough(node) {
-            continue;
-        }
-        for successor in &node.successors {
-            leaders.insert(successor.clone());
+        if !is_fallthrough(node) {
+            for successor in &node.successors {
+                leaders.insert(successor.clone());
+            }
         }
     }
 
@@ -182,7 +181,6 @@ fn partition_blocks(
     leaders: &[BlockKey],
 ) -> (Vec<BasicBlock>, HashMap<BlockKey, BlockId>) {
     let leader_set = leaders.iter().cloned().collect::<HashSet<_>>();
-    let reachable_set = order.iter().cloned().collect::<HashSet<_>>();
     let mut blocks = Vec::new();
     let mut ids = HashMap::<BlockKey, BlockId>::new();
 
@@ -204,13 +202,14 @@ fn partition_blocks(
             }
 
             let next = node.successors[0].clone();
-            if leader_set.contains(&next) || !reachable_set.contains(&next) {
+            if leader_set.contains(&next) {
                 break;
             }
             cursor = next;
         }
 
-        let ir = instructions.iter().copied().map(lower).collect();
+        let ir = instructions.iter().copied().map(lower).collect::<Vec<_>>();
+        debug_assert_eq!(instructions.len(), ir.len());
         blocks.push(BasicBlock {
             id,
             key: leader.clone(),
@@ -255,6 +254,7 @@ fn validate_cfg(cfg: &ControlFlowGraph, expected_instruction_count: usize) {
         assert_eq!(block.id, BlockId(seen.len()), "block ids must be contiguous and stable");
         assert!(seen.insert(block.key.clone(), block.id).is_none(), "duplicate block key");
         assert!(!block.instructions.is_empty(), "basic blocks must not be empty");
+        assert_eq!(block.instructions.len(), block.ir.len(), "IR must preserve one entry per instruction");
 
         let first = block.instructions[0];
         assert_eq!(
@@ -271,30 +271,19 @@ fn validate_cfg(cfg: &ControlFlowGraph, expected_instruction_count: usize) {
                 address: instruction.address,
                 mode: instruction.mode,
             };
-            assert!(
-                instruction_owners.insert(key, block.id).is_none(),
-                "basic blocks must not overlap"
-            );
+            assert!(instruction_owners.insert(key, block.id).is_none(), "basic blocks must not overlap");
             if let Some(next) = block.instructions.get(index + 1) {
-                assert_eq!(
-                    instruction.address + instruction.size as u32,
-                    next.address,
-                    "instructions inside a block must be contiguous",
-                );
-                assert_eq!(instruction.mode, next.mode, "instructions inside a block must keep mode");
+                assert_eq!(instruction.address + instruction.size as u32, next.address);
+                assert_eq!(instruction.mode, next.mode);
             }
         }
 
         for successor in &block.successors {
-            assert!(successor.0 < cfg.blocks.len(), "successor must reference a valid block");
+            assert!(successor.0 < cfg.blocks.len());
         }
     }
 
-    assert_eq!(
-        instruction_owners.len(),
-        expected_instruction_count,
-        "every discovered instruction must belong to exactly one basic block",
-    );
+    assert_eq!(instruction_owners.len(), expected_instruction_count);
 }
 
 pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, AnalysisError> {
@@ -302,25 +291,15 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
         return Err(AnalysisError::InvalidEntry(entry));
     }
 
-    let entry_key = BlockKey {
-        address: entry,
-        mode: entry_mode,
-    };
+    let entry_key = BlockKey { address: entry, mode: entry_mode };
     let (order, discovered) = discover_reachable(rom, entry_key.clone())?;
     let leaders = collect_leaders(&order, &discovered, &entry_key);
     let (blocks, ids) = partition_blocks(&order, &discovered, &leaders);
     let entry_id = ids[&entry_key];
-
-    let cfg = ControlFlowGraph {
-        entry: entry_id,
-        blocks,
-    };
+    let cfg = ControlFlowGraph { entry: entry_id, blocks };
     validate_cfg(&cfg, discovered.len());
 
-    Ok(Program {
-        entry: entry_id,
-        cfg,
-    })
+    Ok(Program { entry: entry_id, cfg })
 }
 
 #[cfg(test)]
@@ -333,11 +312,11 @@ mod tests {
 
     #[test]
     fn sequential_arm_instructions_remain_in_one_block() {
-        let bytes = arm_rom(&[0xE3A0_0001, 0xE280_0001]);
+        let bytes = arm_rom(&[0xE3A0_0001, 0xE280_0001, 0xE1A0_0000]);
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
         assert_eq!(program.cfg.blocks.len(), 1);
-        assert_eq!(program.cfg.blocks[0].instructions.len(), 2);
-        assert_eq!(program.cfg.blocks[0].ir.len(), 2);
+        assert_eq!(program.cfg.blocks[0].instructions.len(), 3);
+        assert_eq!(program.cfg.blocks[0].ir.len(), 3);
     }
 
     #[test]
@@ -369,7 +348,6 @@ mod tests {
     fn conditional_backward_branch_does_not_overlap_blocks() {
         let bytes = vec![0x00, 0xD0, 0xC0, 0x46, 0xFC, 0xD0, 0xC0, 0x46];
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
-
         let mut keys = HashSet::new();
         for block in &program.cfg.blocks {
             for instruction in &block.instructions {
@@ -384,9 +362,6 @@ mod tests {
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
         assert_eq!(program.cfg.blocks.len(), 1);
         assert_eq!(program.cfg.blocks[0].instructions.len(), 1);
-        assert!(matches!(
-            program.cfg.blocks[0].instructions[0].kind,
-            InstructionKind::Arm(ArmOp::Unknown)
-        ));
+        assert!(matches!(program.cfg.blocks[0].instructions[0].kind, InstructionKind::Arm(ArmOp::Unknown)));
     }
 }
