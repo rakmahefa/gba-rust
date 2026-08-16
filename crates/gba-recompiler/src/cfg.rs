@@ -113,18 +113,19 @@ fn is_fallthrough(node: &DiscoveredInstruction) -> bool {
     node.successors.len() == 1 && node.successors[0] == next_key(node.instruction)
 }
 
-fn collect_leaders(order: &[BlockKey], discovered: &HashMap<BlockKey, DiscoveredInstruction>, entry: &BlockKey) -> Vec<BlockKey> {
+fn collect_leaders(_order: &[BlockKey], discovered: &HashMap<BlockKey, DiscoveredInstruction>, entry: &BlockKey) -> Vec<BlockKey> {
     let mut leaders = HashSet::<BlockKey>::new();
     leaders.insert(entry.clone());
-    for key in order {
-        let Some(node) = discovered.get(key) else { continue; };
+    for node in discovered.values() {
         if !is_fallthrough(node) {
             for successor in &node.successors {
                 if discovered.contains_key(successor) { leaders.insert(successor.clone()); }
             }
         }
     }
-    order.iter().filter(|key| leaders.contains(*key)).cloned().collect()
+    let mut leaders = leaders.into_iter().collect::<Vec<_>>();
+    leaders.sort_by_key(|key| (key.address, key.mode));
+    leaders
 }
 
 fn partition_blocks(order: &[BlockKey], discovered: &HashMap<BlockKey, DiscoveredInstruction>, leaders: &[BlockKey]) -> (Vec<BasicBlock>, HashMap<BlockKey, BlockId>) {
