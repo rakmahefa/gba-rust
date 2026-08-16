@@ -342,6 +342,15 @@ mod tests {
     }
 
     #[test]
+    fn sequential_arm_instructions_remain_in_one_block() {
+        let bytes = arm_rom(&[0xE3A0_0001, 0xE280_0001]);
+        let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
+        assert_eq!(program.cfg.blocks.len(), 1);
+        assert_eq!(program.cfg.blocks[0].instructions.len(), 2);
+        assert_eq!(program.cfg.blocks[0].ir.len(), 2);
+    }
+
+    #[test]
     fn discovers_arm_branch_and_fallthrough() {
         let bytes = arm_rom(&[0xEA00_0000, 0xE1A0_0000, 0xE1A0_0000]);
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
@@ -369,10 +378,10 @@ mod tests {
     #[test]
     fn conditional_backward_branch_does_not_overlap_blocks() {
         let bytes = vec![
-            0x00, 0xD0, // beq +0 -> 0x08000004
-            0xC0, 0x46, // nop
-            0xFC, 0xD0, // beq -8 -> 0x08000000
-            0xC0, 0x46, // nop
+            0x00, 0xD0,
+            0xC0, 0x46,
+            0xFC, 0xD0,
+            0xC0, 0x46,
         ];
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
 
