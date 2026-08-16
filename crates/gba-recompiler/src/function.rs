@@ -39,6 +39,7 @@ pub struct Function {
     pub key: FunctionKey,
     pub entry: BlockId,
     pub blocks: Vec<BlockId>,
+    pub block_successors: HashMap<BlockId, Vec<BlockId>>,
     pub successors: Vec<FunctionId>,
     pub call_sites: Vec<CallSite>,
     pub return_sites: Vec<ReturnSite>,
@@ -140,6 +141,17 @@ fn discover_function_blocks(cfg: &ControlFlowGraph, entry: BlockId, function_roo
     blocks
 }
 
+fn function_block_edges(cfg: &ControlFlowGraph, blocks: &[BlockId]) -> HashMap<BlockId, Vec<BlockId>> {
+    let block_set = blocks.iter().copied().collect::<HashSet<_>>();
+    blocks.iter().copied().map(|block_id| {
+        let block = &cfg.blocks[block_id.0];
+        let successors = block.successors.iter().copied()
+            .filter(|successor| block_set.contains(successor) && !is_call_edge(block, *successor, cfg))
+            .collect::<Vec<_>>();
+        (block_id, successors)
+    }).collect()
+}
+
 fn analyze_function_edges(
     cfg: &ControlFlowGraph,
     function_id: FunctionId,
@@ -203,6 +215,7 @@ pub fn discover_functions(program: &Program) -> FunctionControlFlowGraph {
     for (index, (key, entry)) in roots.iter().enumerate() {
         let id = FunctionId(index);
         let blocks = discover_function_blocks(cfg, *entry, &root_blocks);
+        let block_successors = function_block_edges(cfg, &blocks);
         for &block in &blocks {
             block_to_function.entry(block).or_insert(id);
         }
@@ -211,6 +224,7 @@ pub fn discover_functions(program: &Program) -> FunctionControlFlowGraph {
             key: *key,
             entry: *entry,
             blocks,
+            block_successors,
             successors: Vec::new(),
             call_sites: Vec::new(),
             return_sites: Vec::new(),
@@ -263,6 +277,7 @@ mod tests {
         assert_eq!(functions.functions[1].key, FunctionKey { address: target, mode: Mode::Arm });
         assert_eq!(functions.functions[0].blocks, vec![program.cfg.entry, BlockId(1)]);
         assert_eq!(functions.functions[1].blocks, vec![BlockId(2)]);
+        assert_eq!(functions.functions[0].block_successors[&BlockId(1)], vec![]);
     }
 
     #[test]
@@ -294,5 +309,6 @@ mod tests {
         let functions = discover_functions(&program);
         assert_eq!(functions.functions.len(), 1);
         assert_eq!(functions.functions[0].blocks.len(), 1);
+        assert!(functions.functions[0].block_successors[&BlockId(0)].is_empty());
     }
 }
