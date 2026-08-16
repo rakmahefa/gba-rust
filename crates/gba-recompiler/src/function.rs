@@ -12,7 +12,7 @@ pub struct FunctionKey {
     pub mode: Mode,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CallTarget {
     Direct(BlockKey),
     Indirect { register: u8, link: bool, mode: Mode },
@@ -81,8 +81,8 @@ fn is_return(instruction: crate::decoder::Instruction) -> bool {
     }
 }
 
-fn block_for_key(cfg: &ControlFlowGraph, key: BlockKey) -> Option<BlockId> {
-    cfg.blocks.iter().find(|block| block.key == key).map(|block| block.id)
+fn block_for_key(cfg: &ControlFlowGraph, key: &BlockKey) -> Option<BlockId> {
+    cfg.blocks.iter().find(|block| block.key == *key).map(|block| block.id)
 }
 
 fn direct_call_target(cfg: &ControlFlowGraph, block: &BasicBlock) -> Option<(BlockId, u32, Mode)> {
@@ -93,7 +93,7 @@ fn direct_call_target(cfg: &ControlFlowGraph, block: &BasicBlock) -> Option<(Blo
         InstructionKind::Thumb(_) => Mode::Thumb,
     };
     let target_key = BlockKey { address: target, mode };
-    Some((block_for_key(cfg, target_key)?, target, mode))
+    Some((block_for_key(cfg, &target_key)?, target, mode))
 }
 
 fn function_roots(program: &Program) -> Vec<(FunctionKey, BlockId)> {
@@ -172,7 +172,7 @@ fn analyze_function_edges(
                 InstructionKind::Thumb(_) => Mode::Thumb,
             };
             let target_key = BlockKey { address: target, mode };
-            let target_block = block_for_key(cfg, target_key);
+            let target_block = block_for_key(cfg, &target_key);
             let return_block = block.successors.iter().copied().find(|successor| Some(*successor) != target_block);
             if let Some(target_block) = target_block {
                 if let Some(&callee) = block_to_function.get(&target_block) {
