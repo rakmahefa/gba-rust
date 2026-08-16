@@ -206,8 +206,6 @@ fn lower_function(function: &SemanticFunction, allocator: &mut ValueAllocator) -
     let mut out_states = HashMap::<BlockId, RegisterState>::new();
     let mut phis = HashMap::<(BlockId, u8), ValueId>::new();
 
-    // Register dataflow converges to the same entry state at every join. We only use
-    // predecessor states here; no instruction is rewritten until the states stabilize.
     for _ in 0..(function.blocks.len().saturating_mul(4).max(4)) {
         let mut changed = false;
         for block in &function.blocks {
@@ -236,9 +234,6 @@ fn lower_function(function: &SemanticFunction, allocator: &mut ValueAllocator) -
     let mut blocks = Vec::with_capacity(function.blocks.len());
     for block in &function.blocks {
         let mut state = if block.id == function.entry {
-            // Entry values are recreated only conceptually; their IDs are the first
-            // definitions in the function and are recovered from the final state by
-            // replaying the entry block below.
             let mut entry = [None; 16];
             for register in 0..16u8 {
                 entry[register as usize] = Some(allocator.fresh(ValueDef::Entry { register }));
@@ -321,13 +316,13 @@ mod tests {
 
     #[test]
     fn branch_join_gets_a_phi_for_divergent_register_state() {
-        // MOV r0,#1; B target; (fallthrough is unreachable for this tiny CFG)
-        // The test exercises the invariant on a real conditional join instead of
-        // relying on synthetic blocks.
+        // CMP r0,#0; BEQ join; MOV r0,#1; B join; ADD r0,r0,#2
         let program = analyze(&arm_rom(&[
-            0xE350_0000, // CMP r0,#0
-            0x03A0_0001, // MOVEQ r0,#1
-            0xE280_0002, // ADD r0,r0,#2
+            0xE350_0000,
+            0x0A00_0002,
+            0xE3A0_0001,
+            0xEA00_0000,
+            0xE280_0002,
         ]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
