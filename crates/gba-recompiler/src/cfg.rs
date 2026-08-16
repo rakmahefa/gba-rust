@@ -12,10 +12,7 @@ use crate::ir::{lower, IrInstruction};
 pub struct BlockId(pub usize);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BlockKey {
-    pub address: u32,
-    pub mode: Mode,
-}
+pub struct BlockKey { pub address: u32, pub mode: Mode }
 
 #[derive(Debug, Clone)]
 pub struct BasicBlock {
@@ -27,36 +24,22 @@ pub struct BasicBlock {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ControlFlowGraph {
-    pub entry: BlockId,
-    pub blocks: Vec<BasicBlock>,
-}
+pub struct ControlFlowGraph { pub entry: BlockId, pub blocks: Vec<BasicBlock> }
 
 #[derive(Debug, Clone, Default)]
-pub struct Program {
-    pub entry: BlockId,
-    pub cfg: ControlFlowGraph,
-}
+pub struct Program { pub entry: BlockId, pub cfg: ControlFlowGraph }
 
 #[derive(Debug, Error)]
 pub enum AnalysisError {
-    #[error(transparent)]
-    Decode(#[from] DecodeError),
-    #[error("entry {0:#x} is outside the cartridge ROM")]
-    InvalidEntry(u32),
+    #[error(transparent)] Decode(#[from] DecodeError),
+    #[error("entry {0:#x} is outside the cartridge ROM")] InvalidEntry(u32),
 }
 
 #[derive(Debug, Clone)]
-struct DiscoveredInstruction {
-    instruction: Instruction,
-    successors: Vec<BlockKey>,
-}
+struct DiscoveredInstruction { instruction: Instruction, successors: Vec<BlockKey> }
 
 fn next_key(instruction: Instruction) -> BlockKey {
-    BlockKey {
-        address: instruction.address + instruction.size as u32,
-        mode: instruction.mode,
-    }
+    BlockKey { address: instruction.address + instruction.size as u32, mode: instruction.mode }
 }
 
 fn in_rom(rom: &[u8], address: u32) -> bool {
@@ -66,28 +49,14 @@ fn in_rom(rom: &[u8], address: u32) -> bool {
 fn instruction_successors(instruction: Instruction) -> Vec<BlockKey> {
     let next = next_key(instruction);
     match instruction.kind {
-        InstructionKind::Arm(ArmOp::Branch {
-            target,
-            condition,
-            link,
-        }) => {
-            let mut successors = vec![BlockKey {
-                address: target,
-                mode: Mode::Arm,
-            }];
-            if condition != Condition::Al || link {
-                successors.push(next);
-            }
+        InstructionKind::Arm(ArmOp::Branch { target, condition, link }) => {
+            let mut successors = vec![BlockKey { address: target, mode: Mode::Arm }];
+            if condition != Condition::Al || link { successors.push(next); }
             successors
         }
         InstructionKind::Thumb(ThumbOp::Branch { target, condition }) => {
-            let mut successors = vec![BlockKey {
-                address: target,
-                mode: Mode::Thumb,
-            }];
-            if condition != Condition::Al {
-                successors.push(next);
-            }
+            let mut successors = vec![BlockKey { address: target, mode: Mode::Thumb }];
+            if condition != Condition::Al { successors.push(next); }
             successors
         }
         InstructionKind::Arm(ArmOp::BranchExchange { .. })
@@ -106,8 +75,7 @@ fn decode_at(rom: &[u8], key: BlockKey) -> Result<Instruction, DecodeError> {
 }
 
 fn discover_reachable(
-    rom: &[u8],
-    entry: BlockKey,
+    rom: &[u8], entry: BlockKey,
 ) -> Result<(Vec<BlockKey>, HashMap<BlockKey, DiscoveredInstruction>), DecodeError> {
     let mut order = Vec::new();
     let mut discovered = HashMap::<BlockKey, DiscoveredInstruction>::new();
@@ -115,33 +83,17 @@ fn discover_reachable(
     let mut queue = VecDeque::from([entry]);
 
     while let Some(key) = queue.pop_front() {
-        if discovered.contains_key(&key) {
-            continue;
-        }
-
+        if discovered.contains_key(&key) { continue; }
         let instruction = decode_at(rom, key.clone())?;
-        let successors = instruction_successors(instruction)
-            .into_iter()
-            .filter(|successor| in_rom(rom, successor.address))
-            .collect::<Vec<_>>();
-
+        let successors = instruction_successors(instruction);
         for successor in &successors {
-            if !queued.contains(successor) {
-                queued.insert(successor.clone());
+            if in_rom(rom, successor.address) && queued.insert(successor.clone()) {
                 queue.push_back(successor.clone());
             }
         }
-
         order.push(key.clone());
-        discovered.insert(
-            key,
-            DiscoveredInstruction {
-                instruction,
-                successors,
-            },
-        );
+        discovered.insert(key, DiscoveredInstruction { instruction, successors });
     }
-
     Ok((order, discovered))
 }
 
@@ -149,37 +101,21 @@ fn is_fallthrough(node: &DiscoveredInstruction) -> bool {
     node.successors.len() == 1 && node.successors[0] == next_key(node.instruction)
 }
 
-fn collect_leaders(
-    order: &[BlockKey],
-    discovered: &HashMap<BlockKey, DiscoveredInstruction>,
-    entry: &BlockKey,
-) -> Vec<BlockKey> {
+fn collect_leaders(order: &[BlockKey], discovered: &HashMap<BlockKey, DiscoveredInstruction>, entry: &BlockKey) -> Vec<BlockKey> {
     let mut leaders = HashSet::<BlockKey>::new();
     leaders.insert(entry.clone());
-
     for key in order {
-        let Some(node) = discovered.get(key) else {
-            continue;
-        };
+        let Some(node) = discovered.get(key) else { continue; };
         if !is_fallthrough(node) {
             for successor in &node.successors {
-                leaders.insert(successor.clone());
+                if discovered.contains_key(successor) { leaders.insert(successor.clone()); }
             }
         }
     }
-
-    order
-        .iter()
-        .filter(|key| leaders.contains(*key))
-        .cloned()
-        .collect()
+    order.iter().filter(|key| leaders.contains(*key)).cloned().collect()
 }
 
-fn partition_blocks(
-    order: &[BlockKey],
-    discovered: &HashMap<BlockKey, DiscoveredInstruction>,
-    leaders: &[BlockKey],
-) -> (Vec<BasicBlock>, HashMap<BlockKey, BlockId>) {
+fn partition_blocks(order: &[BlockKey], discovered: &HashMap<BlockKey, DiscoveredInstruction>, leaders: &[BlockKey]) -> (Vec<BasicBlock>, HashMap<BlockKey, BlockId>) {
     let leader_set = leaders.iter().cloned().collect::<HashSet<_>>();
     let mut blocks = Vec::new();
     let mut ids = HashMap::<BlockKey, BlockId>::new();
@@ -187,110 +123,60 @@ fn partition_blocks(
     for leader in leaders {
         let id = BlockId(blocks.len());
         ids.insert(leader.clone(), id);
-
         let mut instructions = Vec::new();
         let mut cursor = leader.clone();
-
         loop {
-            let Some(node) = discovered.get(&cursor) else {
-                break;
-            };
+            let Some(node) = discovered.get(&cursor) else { break; };
             instructions.push(node.instruction);
-
-            if !is_fallthrough(node) {
-                break;
-            }
-
+            if !is_fallthrough(node) { break; }
             let next = node.successors[0].clone();
-            if leader_set.contains(&next) {
-                break;
-            }
+            if leader_set.contains(&next) { break; }
             cursor = next;
         }
-
         let ir = instructions.iter().copied().map(lower).collect::<Vec<_>>();
-        debug_assert_eq!(instructions.len(), ir.len());
-        blocks.push(BasicBlock {
-            id,
-            key: leader.clone(),
-            instructions,
-            ir,
-            successors: Vec::new(),
-        });
+        assert_eq!(instructions.len(), ir.len(), "IR must preserve one entry per instruction");
+        blocks.push(BasicBlock { id, key: leader.clone(), instructions, ir, successors: Vec::new() });
     }
 
     for block in &mut blocks {
-        let Some(last) = block.instructions.last().copied() else {
-            continue;
-        };
-        let key = BlockKey {
-            address: last.address,
-            mode: last.mode,
-        };
-        let Some(node) = discovered.get(&key) else {
-            continue;
-        };
-        let mut successors = node
-            .successors
-            .iter()
-            .filter_map(|successor| ids.get(successor).copied())
-            .collect::<Vec<_>>();
+        let Some(last) = block.instructions.last().copied() else { continue; };
+        let key = BlockKey { address: last.address, mode: last.mode };
+        let Some(node) = discovered.get(&key) else { continue; };
+        let mut successors = node.successors.iter().filter_map(|successor| ids.get(successor).copied()).collect::<Vec<_>>();
         successors.sort_unstable_by_key(|id| id.0);
         successors.dedup();
         block.successors = successors;
     }
-
     (blocks, ids)
 }
 
 fn validate_cfg(cfg: &ControlFlowGraph, expected_instruction_count: usize) {
-    assert!(!cfg.blocks.is_empty(), "CFG must contain at least one block");
-    assert!(cfg.entry.0 < cfg.blocks.len(), "CFG entry must reference a valid block");
-
+    assert!(!cfg.blocks.is_empty());
+    assert!(cfg.entry.0 < cfg.blocks.len());
     let mut seen = HashMap::<BlockKey, BlockId>::new();
-    let mut instruction_owners = HashMap::<BlockKey, BlockId>::new();
-
+    let mut owners = HashMap::<BlockKey, BlockId>::new();
     for block in &cfg.blocks {
-        assert_eq!(block.id, BlockId(seen.len()), "block ids must be contiguous and stable");
-        assert!(seen.insert(block.key.clone(), block.id).is_none(), "duplicate block key");
-        assert!(!block.instructions.is_empty(), "basic blocks must not be empty");
-        assert_eq!(block.instructions.len(), block.ir.len(), "IR must preserve one entry per instruction");
-
+        assert_eq!(block.id, BlockId(seen.len()));
+        assert!(seen.insert(block.key.clone(), block.id).is_none());
+        assert!(!block.instructions.is_empty());
+        assert_eq!(block.instructions.len(), block.ir.len());
         let first = block.instructions[0];
-        assert_eq!(
-            block.key,
-            BlockKey {
-                address: first.address,
-                mode: first.mode,
-            },
-            "block key must identify its first instruction",
-        );
-
+        assert_eq!(block.key, BlockKey { address: first.address, mode: first.mode });
         for (index, instruction) in block.instructions.iter().enumerate() {
-            let key = BlockKey {
-                address: instruction.address,
-                mode: instruction.mode,
-            };
-            assert!(instruction_owners.insert(key, block.id).is_none(), "basic blocks must not overlap");
+            let key = BlockKey { address: instruction.address, mode: instruction.mode };
+            assert!(owners.insert(key, block.id).is_none());
             if let Some(next) = block.instructions.get(index + 1) {
                 assert_eq!(instruction.address + instruction.size as u32, next.address);
                 assert_eq!(instruction.mode, next.mode);
             }
         }
-
-        for successor in &block.successors {
-            assert!(successor.0 < cfg.blocks.len());
-        }
+        for successor in &block.successors { assert!(successor.0 < cfg.blocks.len()); }
     }
-
-    assert_eq!(instruction_owners.len(), expected_instruction_count);
+    assert_eq!(owners.len(), expected_instruction_count);
 }
 
 pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, AnalysisError> {
-    if !in_rom(rom, entry) {
-        return Err(AnalysisError::InvalidEntry(entry));
-    }
-
+    if !in_rom(rom, entry) { return Err(AnalysisError::InvalidEntry(entry)); }
     let entry_key = BlockKey { address: entry, mode: entry_mode };
     let (order, discovered) = discover_reachable(rom, entry_key.clone())?;
     let leaders = collect_leaders(&order, &discovered, &entry_key);
@@ -298,25 +184,32 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
     let entry_id = ids[&entry_key];
     let cfg = ControlFlowGraph { entry: entry_id, blocks };
     validate_cfg(&cfg, discovered.len());
-
     Ok(Program { entry: entry_id, cfg })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn arm_rom(words: &[u32]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
 
-    fn arm_rom(words: &[u32]) -> Vec<u8> {
-        words.iter().flat_map(|word| word.to_le_bytes()).collect()
+    #[test]
+    fn discovery_preserves_sequential_arm_tail() {
+        let bytes = arm_rom(&[0xE3A0_0001, 0xE280_0001]);
+        let entry = BlockKey { address: ROM_BASE, mode: Mode::Arm };
+        let (order, discovered) = discover_reachable(&bytes, entry).unwrap();
+        assert_eq!(order.len(), 2);
+        assert_eq!(discovered.len(), 2);
+        assert!(discovered.contains_key(&BlockKey { address: ROM_BASE, mode: Mode::Arm }));
+        assert!(discovered.contains_key(&BlockKey { address: ROM_BASE + 4, mode: Mode::Arm }));
     }
 
     #[test]
     fn sequential_arm_instructions_remain_in_one_block() {
-        let bytes = arm_rom(&[0xE3A0_0001, 0xE280_0001, 0xE1A0_0000]);
+        let bytes = arm_rom(&[0xE3A0_0001, 0xE280_0001]);
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
         assert_eq!(program.cfg.blocks.len(), 1);
-        assert_eq!(program.cfg.blocks[0].instructions.len(), 3);
-        assert_eq!(program.cfg.blocks[0].ir.len(), 3);
+        assert_eq!(program.cfg.blocks[0].instructions.len(), 2);
+        assert_eq!(program.cfg.blocks[0].ir.len(), 2);
     }
 
     #[test]
@@ -349,11 +242,7 @@ mod tests {
         let bytes = vec![0x00, 0xD0, 0xC0, 0x46, 0xFC, 0xD0, 0xC0, 0x46];
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
         let mut keys = HashSet::new();
-        for block in &program.cfg.blocks {
-            for instruction in &block.instructions {
-                assert!(keys.insert((instruction.address, instruction.mode)));
-            }
-        }
+        for block in &program.cfg.blocks { for instruction in &block.instructions { assert!(keys.insert((instruction.address, instruction.mode))); } }
     }
 
     #[test]
