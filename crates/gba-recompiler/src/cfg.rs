@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
 use crate::decoder::{
-    decode_arm, decode_thumb, read_arm, read_thumb, ArmOp, Condition, DecodeError, Instruction,
+    decode_arm, decode_thumb, decode_thumb_bl, read_arm, read_thumb, read_thumb_bl, ArmOp, Condition, DecodeError, Instruction,
     InstructionKind, Mode, ThumbOp, ROM_BASE,
 };
 use crate::ir::{lower, IrInstruction};
@@ -59,6 +59,10 @@ fn instruction_successors(instruction: Instruction) -> Vec<BlockKey> {
             if condition != Condition::Al { successors.push(next); }
             successors
         }
+        InstructionKind::Thumb(ThumbOp::BranchLink { target }) => vec![
+            BlockKey { address: target, mode: Mode::Thumb },
+            next,
+        ],
         InstructionKind::Arm(ArmOp::BranchExchange { .. })
         | InstructionKind::Thumb(ThumbOp::BranchExchange { .. })
         | InstructionKind::Arm(ArmOp::Unknown)
@@ -70,7 +74,15 @@ fn instruction_successors(instruction: Instruction) -> Vec<BlockKey> {
 fn decode_at(rom: &[u8], key: BlockKey) -> Result<Instruction, DecodeError> {
     match key.mode {
         Mode::Arm => Ok(decode_arm(key.address, read_arm(rom, key.address)?)),
-        Mode::Thumb => Ok(decode_thumb(key.address, read_thumb(rom, key.address)?)),
+        Mode::Thumb => {
+            let raw = read_thumb(rom, key.address)?;
+            if (raw & 0xF800) == 0xF000 {
+                let (first, second) = read_thumb_bl(rom, key.address)?;
+                Ok(decode_thumb_bl(key.address, first, second))
+            } else {
+                Ok(decode_thumb(key.address, raw))
+            }
+        }
     }
 }
 
@@ -252,5 +264,14 @@ mod tests {
         assert_eq!(program.cfg.blocks.len(), 1);
         assert_eq!(program.cfg.blocks[0].instructions.len(), 1);
         assert!(matches!(program.cfg.blocks[0].instructions[0].kind, InstructionKind::Arm(ArmOp::Unknown)));
+    }
+
+    #[test]
+    fn thumb_bl_is_a_four_byte_call_with_fallthrough() {
+        let bytes = vec![0x00, 0xF0, 0x00, 0xF8, 0xC0, 0x46, 0xC0, 0x46];
+        let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
+        assert_eq!(program.cfg.blocks.len(), 2);
+        assert_eq!(program.cfg.blocks[0].instructions[0].size, 4);
+        assert_eq!(program.cfg.blocks[0].successors.len(), 1);
     }
 }
