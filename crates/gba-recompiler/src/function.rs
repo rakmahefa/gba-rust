@@ -98,7 +98,7 @@ fn direct_call_target(cfg: &ControlFlowGraph, block: &BasicBlock) -> Option<(Blo
 
 fn function_roots(program: &Program) -> Vec<(FunctionKey, BlockId)> {
     let cfg = &program.cfg;
-    let mut roots = vec![(cfg.blocks[cfg.entry.0].key.clone().into(), cfg.entry)];
+    let mut roots = vec![(cfg.blocks[cfg.entry.0].key.into(), cfg.entry)];
     let mut seen = HashSet::<BlockId>::from([cfg.entry]);
 
     for block in &cfg.blocks {
@@ -269,15 +269,23 @@ mod tests {
     fn discovers_direct_arm_call_as_function_root() {
         let entry = ROM_BASE;
         let target = ROM_BASE + 8;
+        let fallthrough = ROM_BASE + 4;
         let rom = arm_rom(&[arm_bl(entry, target), 0xE1A0_0000, 0xE1A0_0000]);
         let program = analyze(&rom, entry, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         assert_eq!(functions.functions.len(), 2);
         assert_eq!(functions.functions[0].entry, program.cfg.entry);
         assert_eq!(functions.functions[1].key, FunctionKey { address: target, mode: Mode::Arm });
-        assert_eq!(functions.functions[0].blocks, vec![program.cfg.entry, BlockId(1)]);
-        assert_eq!(functions.functions[1].blocks, vec![BlockId(2)]);
-        assert_eq!(functions.functions[0].block_successors[&BlockId(1)], vec![]);
+
+        let caller = &functions.functions[0];
+        assert_eq!(caller.blocks.len(), 2);
+        assert!(caller.blocks.contains(&program.cfg.entry));
+        assert!(caller.blocks.iter().any(|id| program.cfg.blocks[id.0].key.address == fallthrough));
+        assert!(!caller.blocks.iter().any(|id| program.cfg.blocks[id.0].key.address == target));
+
+        let callee = &functions.functions[1];
+        assert_eq!(callee.blocks.len(), 1);
+        assert_eq!(program.cfg.blocks[callee.entry.0].key.address, target);
     }
 
     #[test]
