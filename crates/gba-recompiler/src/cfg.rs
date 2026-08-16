@@ -239,7 +239,7 @@ fn partition_blocks(
     (blocks, ids)
 }
 
-fn validate_cfg(cfg: &ControlFlowGraph) {
+fn validate_cfg(cfg: &ControlFlowGraph, expected_instruction_count: usize) {
     assert!(!cfg.blocks.is_empty(), "CFG must contain at least one block");
     assert!(cfg.entry.0 < cfg.blocks.len(), "CFG entry must reference a valid block");
 
@@ -250,6 +250,16 @@ fn validate_cfg(cfg: &ControlFlowGraph) {
         assert_eq!(block.id, BlockId(seen.len()), "block ids must be contiguous and stable");
         assert!(seen.insert(block.key.clone(), block.id).is_none(), "duplicate block key");
         assert!(!block.instructions.is_empty(), "basic blocks must not be empty");
+
+        let first = block.instructions[0];
+        assert_eq!(
+            block.key,
+            BlockKey {
+                address: first.address,
+                mode: first.mode,
+            },
+            "block key must identify its first instruction",
+        );
 
         for (index, instruction) in block.instructions.iter().enumerate() {
             let key = BlockKey {
@@ -274,6 +284,12 @@ fn validate_cfg(cfg: &ControlFlowGraph) {
             assert!(successor.0 < cfg.blocks.len(), "successor must reference a valid block");
         }
     }
+
+    assert_eq!(
+        instruction_owners.len(),
+        expected_instruction_count,
+        "every discovered instruction must belong to exactly one basic block",
+    );
 }
 
 pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, AnalysisError> {
@@ -294,7 +310,7 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
         entry: entry_id,
         blocks,
     };
-    validate_cfg(&cfg);
+    validate_cfg(&cfg, discovered.len());
 
     Ok(Program {
         entry: entry_id,
