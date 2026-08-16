@@ -5,28 +5,15 @@ use crate::ir::{IrInstruction, IrOp, Value};
 use crate::semantic_ir::{FlagEffect, MemoryEffect, MemoryWidth, SemanticBlock, SemanticInstruction, SemanticProgram};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OptimizationKind {
-    IdentityMove,
-    AddZero,
-    SubZero,
-    ConstantFold,
-    ConstantPropagation,
-}
+pub enum OptimizationKind { IdentityMove, AddZero, SubZero, ConstantFold, ConstantPropagation }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimizationChange {
-    pub address: u32,
-    pub kind: OptimizationKind,
-}
+pub struct OptimizationChange { pub address: u32, pub kind: OptimizationKind }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct OptimizationReport {
-    pub changes: Vec<OptimizationChange>,
-}
+pub struct OptimizationReport { pub changes: Vec<OptimizationChange> }
 
-impl OptimizationReport {
-    pub fn changed(&self) -> bool { !self.changes.is_empty() }
-}
+impl OptimizationReport { pub fn changed(&self) -> bool { !self.changes.is_empty() } }
 
 fn propagated_rhs(value: &Value, constants: &HashMap<u8, u32>) -> (Value, bool) {
     match value {
@@ -39,6 +26,8 @@ fn normalize_instruction(instruction: &IrInstruction, constants: &mut HashMap<u8
     let mut normalized = Vec::with_capacity(instruction.ops.len());
     for op in &instruction.ops {
         let op = match op {
+            // r15 is the program counter: even an apparently identity move can alter control flow.
+            IrOp::Mov { dst, src } if *dst == 15 => { constants.clear(); IrOp::Mov { dst: *dst, src: src.clone() } }
             IrOp::Mov { dst, src } => {
                 if matches!(src, Value::Reg(reg) if *reg == *dst) {
                     constants.remove(dst);
@@ -51,6 +40,9 @@ fn normalize_instruction(instruction: &IrInstruction, constants: &mut HashMap<u8
                     IrOp::Mov { dst: *dst, src }
                 }
             }
+            // Keep PC writes opaque for the same reason as MOV PC,PC.
+            IrOp::Add { dst, .. } if *dst == 15 => { constants.clear(); op.clone() }
+            IrOp::Sub { dst, .. } if *dst == 15 => { constants.clear(); op.clone() }
             IrOp::Add { dst, lhs, rhs } => {
                 let (rhs, changed) = propagated_rhs(rhs, constants);
                 if changed { report.changes.push(OptimizationChange { address: instruction.address, kind: OptimizationKind::ConstantPropagation }); }
@@ -166,11 +158,7 @@ mod tests {
             instructions: instructions.into_iter().enumerate().map(|(i, op)| semantic_instruction_from_ir(&IrInstruction { address: 0x0800_0000 + i as u32 * 4, size: 4, ops: vec![op] })).collect(),
             successors: Vec::new(), terminator: SemanticTerminator::Return,
         };
-        SemanticProgram {
-            entry: FunctionId(0),
-            functions: vec![SemanticFunction { id: FunctionId(0), entry: BlockId(0), blocks: vec![block], successors: Vec::new(), calls: Vec::new(), returns: Vec::new() }],
-            block_to_function: [(BlockId(0), FunctionId(0))].into_iter().collect(),
-        }
+        SemanticProgram { entry: FunctionId(0), functions: vec![SemanticFunction { id: FunctionId(0), entry: BlockId(0), blocks: vec![block], successors: Vec::new(), calls: Vec::new(), returns: Vec::new() }], block_to_function: [(BlockId(0), FunctionId(0))].into_iter().collect() }
     }
 
     #[test]
@@ -195,5 +183,14 @@ mod tests {
         let input = program(vec![IrOp::Mov { dst: 0, src: Value::Imm(1) }, IrOp::Cmp { lhs: 0, rhs: Value::Imm(1) }, IrOp::Add { dst: 1, lhs: 0, rhs: Value::Imm(1) }]);
         let (optimized, _) = optimize_semantic_program(&input);
         assert!(matches!(optimized.functions[0].blocks[0].instructions[2].ops[0], IrOp::Add { .. }));
+    }
+
+    #[test]
+    fn does_not_optimize_pc_writes() {
+        let input = program(vec![IrOp::Mov { dst: 15, src: Value::Reg(15) }, IrOp::Add { dst: 15, lhs: 15, rhs: Value::Imm(0) }]);
+        let (optimized, report) = optimize_semantic_program(&input);
+        assert!(report.changes.is_empty());
+        assert_eq!(optimized.functions[0].blocks[0].instructions[0].ops, input.functions[0].blocks[0].instructions[0].ops);
+        assert_eq!(optimized.functions[0].blocks[0].instructions[1].ops, input.functions[0].blocks[0].instructions[1].ops);
     }
 }
