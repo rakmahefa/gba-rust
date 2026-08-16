@@ -124,11 +124,22 @@ fn collect_leaders(_order: &[BlockKey], discovered: &HashMap<BlockKey, Discovere
         }
     }
     let mut leaders = leaders.into_iter().collect::<Vec<_>>();
-    leaders.sort_by_key(|key| (key.address, key.mode));
+    leaders.sort_by(|a, b| {
+        a.address
+            .cmp(&b.address)
+            .then_with(|| mode_sort_key(a.mode).cmp(&mode_sort_key(b.mode)))
+    });
     leaders
 }
 
-fn partition_blocks(order: &[BlockKey], discovered: &HashMap<BlockKey, DiscoveredInstruction>, leaders: &[BlockKey]) -> (Vec<BasicBlock>, HashMap<BlockKey, BlockId>) {
+fn mode_sort_key(mode: Mode) -> u8 {
+    match mode {
+        Mode::Arm => 0,
+        Mode::Thumb => 1,
+    }
+}
+
+fn partition_blocks(_order: &[BlockKey], discovered: &HashMap<BlockKey, DiscoveredInstruction>, leaders: &[BlockKey]) -> (Vec<BasicBlock>, HashMap<BlockKey, BlockId>) {
     let leader_set = leaders.iter().cloned().collect::<HashSet<_>>();
     let mut blocks = Vec::new();
     let mut ids = HashMap::<BlockKey, BlockId>::new();
