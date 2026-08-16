@@ -1,11 +1,13 @@
 pub mod cfg;
 pub mod codegen;
 pub mod decoder;
+pub mod function;
 pub mod ir;
 
 pub use cfg::{analyze, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
 pub use codegen::{generate, RustModule};
-pub use decoder::{decode_arm, decode_thumb, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbOp, ROM_BASE};
+pub use decoder::{decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbOp, ROM_BASE};
+pub use function::{discover_functions, CallSite, CallTarget, Function, FunctionControlFlowGraph, FunctionId, FunctionKey, ReturnSite};
 pub use ir::{lower, IrInstruction, IrOp, Value};
 
 #[cfg(test)]

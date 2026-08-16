@@ -47,6 +47,7 @@ pub enum ThumbOp {
     LoadImm { rd: u8, rn: u8, word_offset: u8 },
     StoreImm { rd: u8, rn: u8, word_offset: u8 },
     Branch { target: u32, condition: Condition },
+    BranchLink { target: u32 },
     BranchExchange { rm: u8 },
     Unknown,
 }
@@ -88,7 +89,11 @@ pub fn decode_arm(address: u32, raw: u32) -> Instruction {
     let condition = arm_condition(raw);
     let op = if raw == 0xE1A0_0000 {
         ArmOp::Nop
+    } else if (raw & 0x0FFF_FFF0) == 0x012F_FF30 {
+        // ARM BLX (register): exchange state and write LR.
+        ArmOp::BranchExchange { rm: (raw & 0xF) as u8, link: true }
     } else if (raw & 0x0FFF_FFF0) == 0x012F_FF10 {
+        // ARM BX (register): exchange state without writing LR.
         ArmOp::BranchExchange { rm: (raw & 0xF) as u8, link: false }
     } else if (raw & 0x0F00_00F0) == 0x0100_0090 && (raw & 0x0200_0000) == 0 {
         ArmOp::BranchExchange { rm: (raw & 0xF) as u8, link: true }
@@ -118,61 +123,78 @@ pub fn decode_arm(address: u32, raw: u32) -> Instruction {
             Operand2::Reg { rm: (raw & 0xF) as u8, shift: ((raw >> 7) & 0x1F) as u8 }
         };
         match opcode {
-            0xD => ArmOp::Mov { rd, op2 },
-            0x4 => ArmOp::Add { rd, rn, op2 },
-            0x2 => ArmOp::Sub { rd, rn, op2 },
-            0xA => ArmOp::Cmp { rn, op2 },
-            _ => ArmOp::Unknown,
+            0xD => ArmOp::Mov { rd, op2 }, 0x4 => ArmOp::Add { rd, rn, op2 },
+            0x2 => ArmOp::Sub { rd, rn, op2 }, 0xA => ArmOp::Cmp { rn, op2 }, _ => ArmOp::Unknown,
         }
-    } else {
-        ArmOp::Unknown
-    };
+    } else { ArmOp::Unknown };
     Instruction { address, mode: Mode::Arm, raw, size: 4, condition, kind: InstructionKind::Arm(op) }
 }
 
 pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
     let top = raw >> 13;
-    let op = if raw == 0x46C0 {
-        ThumbOp::Nop
-    } else if (raw & 0xF800) == 0x2000 {
-        ThumbOp::MovImm { rd: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 }
-    } else if (raw & 0xF800) == 0x3000 {
-        ThumbOp::AddImm { rd: ((raw >> 8) & 7) as u8, rn: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 }
-    } else if (raw & 0xF800) == 0x3800 {
-        ThumbOp::SubImm { rd: ((raw >> 8) & 7) as u8, rn: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 }
-    } else if (raw & 0xF800) == 0x4800 {
-        let rd = ((raw >> 8) & 7) as u8;
-        ThumbOp::LoadImm { rd, rn: 15, word_offset: (raw & 0xFF) as u8 }
-    } else if (raw & 0xF800) == 0x6000 {
-        ThumbOp::StoreImm { rd: (raw & 7) as u8, rn: ((raw >> 3) & 7) as u8, word_offset: ((raw >> 6) & 0x1F) as u8 }
-    } else if top == 0b11100 {
-        let offset = sign_extend(((raw & 0x07FF) as u32) << 1, 12);
-        ThumbOp::Branch { target: address.wrapping_add(4).wrapping_add(offset as u32), condition: Condition::Al }
-    } else if (raw & 0xF000) == 0xD000 && (raw & 0x0F00) != 0x0F00 {
-        let cond = match ((raw >> 8) & 0xF) as u8 {
-            0 => Condition::Eq, 1 => Condition::Ne, 2 => Condition::Cs, 3 => Condition::Cc,
-            4 => Condition::Mi, 5 => Condition::Pl, 6 => Condition::Vs, 7 => Condition::Vc,
-            8 => Condition::Hi, 9 => Condition::Ls, 10 => Condition::Ge, 11 => Condition::Lt,
-            12 => Condition::Gt, 13 => Condition::Le, _ => Condition::Al,
-        };
+    let op = if raw == 0x46C0 { ThumbOp::Nop }
+    else if (raw & 0xF800) == 0x2000 { ThumbOp::MovImm { rd: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 } }
+    else if (raw & 0xF800) == 0x3000 { ThumbOp::AddImm { rd: ((raw >> 8) & 7) as u8, rn: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 } }
+    else if (raw & 0xF800) == 0x3800 { ThumbOp::SubImm { rd: ((raw >> 8) & 7) as u8, rn: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 } }
+    else if (raw & 0xF800) == 0x4800 { ThumbOp::LoadImm { rd: ((raw >> 8) & 7) as u8, rn: 15, word_offset: (raw & 0xFF) as u8 } }
+    else if (raw & 0xF800) == 0x6000 { ThumbOp::StoreImm { rd: (raw & 7) as u8, rn: ((raw >> 3) & 7) as u8, word_offset: ((raw >> 6) & 0x1F) as u8 } }
+    else if top == 0b11100 { let offset = sign_extend(((raw & 0x07FF) as u32) << 1, 12); ThumbOp::Branch { target: address.wrapping_add(4).wrapping_add(offset as u32), condition: Condition::Al } }
+    else if (raw & 0xF000) == 0xD000 && (raw & 0x0F00) != 0x0F00 {
+        let cond = match ((raw >> 8) & 0xF) as u8 { 0 => Condition::Eq, 1 => Condition::Ne, 2 => Condition::Cs, 3 => Condition::Cc, 4 => Condition::Mi, 5 => Condition::Pl, 6 => Condition::Vs, 7 => Condition::Vc, 8 => Condition::Hi, 9 => Condition::Ls, 10 => Condition::Ge, 11 => Condition::Lt, 12 => Condition::Gt, 13 => Condition::Le, _ => Condition::Al };
         let offset = sign_extend(((raw & 0xFF) as u32) << 1, 9);
         ThumbOp::Branch { target: address.wrapping_add(4).wrapping_add(offset as u32), condition: cond }
-    } else if (raw & 0xFF87) == 0x4700 {
-        ThumbOp::BranchExchange { rm: ((raw >> 3) & 0xF) as u8 }
-    } else {
-        ThumbOp::Unknown
-    };
+    } else if (raw & 0xFF87) == 0x4700 { ThumbOp::BranchExchange { rm: ((raw >> 3) & 0xF) as u8 } }
+    else { ThumbOp::Unknown };
     Instruction { address, mode: Mode::Thumb, raw: raw as u32, size: 2, condition: Condition::Al, kind: InstructionKind::Thumb(op) }
+}
+
+pub fn decode_thumb_bl(address: u32, first: u16, second: u16) -> Instruction {
+    let s = ((first >> 10) & 1) as u32;
+    let imm10 = (first & 0x03FF) as u32;
+    let j1 = ((second >> 13) & 1) as u32;
+    let j2 = ((second >> 11) & 1) as u32;
+    let i1 = (!(j1 ^ s)) & 1;
+    let i2 = (!(j2 ^ s)) & 1;
+    let imm11 = (second & 0x07FF) as u32;
+    let immediate = (s << 24) | (i1 << 23) | (i2 << 22) | (imm10 << 12) | (imm11 << 1);
+    let target = address.wrapping_add(4).wrapping_add(sign_extend(immediate, 25) as u32);
+    Instruction { address, mode: Mode::Thumb, raw: ((first as u32) << 16) | second as u32, size: 4, condition: Condition::Al, kind: InstructionKind::Thumb(ThumbOp::BranchLink { target }) }
 }
 
 pub fn read_arm(rom: &[u8], address: u32) -> Result<u32, DecodeError> {
     let offset = address.checked_sub(ROM_BASE).ok_or(DecodeError::OutOfRange(address))? as usize;
-    let bytes = rom.get(offset..offset + 4).ok_or(DecodeError::Truncated(address))?;
-    Ok(u32::from_le_bytes(bytes.try_into().unwrap()))
+    if offset + 4 > rom.len() { return Err(DecodeError::Truncated(address)); }
+    Ok(u32::from_le_bytes(rom[offset..offset + 4].try_into().unwrap()))
 }
 
 pub fn read_thumb(rom: &[u8], address: u32) -> Result<u16, DecodeError> {
     let offset = address.checked_sub(ROM_BASE).ok_or(DecodeError::OutOfRange(address))? as usize;
-    let bytes = rom.get(offset..offset + 2).ok_or(DecodeError::Truncated(address))?;
-    Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+    if offset + 2 > rom.len() { return Err(DecodeError::Truncated(address)); }
+    Ok(u16::from_le_bytes(rom[offset..offset + 2].try_into().unwrap()))
+}
+
+pub fn read_thumb_bl(rom: &[u8], address: u32) -> Result<(u16, u16), DecodeError> {
+    let offset = address.checked_sub(ROM_BASE).ok_or(DecodeError::OutOfRange(address))? as usize;
+    if offset + 4 > rom.len() { return Err(DecodeError::Truncated(address)); }
+    Ok((
+        u16::from_le_bytes(rom[offset..offset + 2].try_into().unwrap()),
+        u16::from_le_bytes(rom[offset + 2..offset + 4].try_into().unwrap()),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_arm_blx_register_as_linked_exchange() {
+        let instruction = decode_arm(ROM_BASE, 0xE12F_FF31);
+        assert_eq!(instruction.kind, InstructionKind::Arm(ArmOp::BranchExchange { rm: 1, link: true }));
+    }
+
+    #[test]
+    fn decodes_arm_bx_register_without_link() {
+        let instruction = decode_arm(ROM_BASE, 0xE12F_FF11);
+        assert_eq!(instruction.kind, InstructionKind::Arm(ArmOp::BranchExchange { rm: 1, link: false }));
+    }
 }
