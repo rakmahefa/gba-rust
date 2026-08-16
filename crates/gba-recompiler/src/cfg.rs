@@ -1,11 +1,14 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use thiserror::Error;
 
-use crate::decoder::{decode_arm, decode_thumb, read_arm, read_thumb, ArmOp, BranchKind, DecodeError, Instruction, InstructionKind, Mode, ThumbOp, ROM_BASE};
+use crate::decoder::{
+    decode_arm, decode_thumb, read_arm, read_thumb, ArmOp, DecodeError, Instruction,
+    InstructionKind, Mode, ThumbOp, ROM_BASE,
+};
 use crate::ir::{lower, IrInstruction};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct BlockId(pub usize);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -43,23 +46,9 @@ pub enum AnalysisError {
     InvalidEntry(u32),
 }
 
-fn branch_targets(ins: Instruction) -> (Option<(u32, Mode)>, bool) {
-    match ins.kind {
-        InstructionKind::Arm(ArmOp::Branch { target, condition, link }) => {
-            let conditional = condition != crate::decoder::Condition::Al;
-            (Some((target, Mode::Arm)), !conditional && !link)
-        }
-        InstructionKind::Arm(ArmOp::BranchExchange { .. }) => (None, true),
-        InstructionKind::Thumb(ThumbOp::Branch { target, condition }) => {
-            let conditional = condition != crate::decoder::Condition::Al;
-            (Some((target, Mode::Thumb)), !conditional)
-        }
-        InstructionKind::Thumb(ThumbOp::BranchExchange { .. }) => (None, true),
-        _ => (None, false),
-    }
+fn next_address(ins: Instruction) -> u32 {
+    ins.address + ins.size as u32
 }
-
-fn next_address(ins: Instruction) -> u32 { ins.address + ins.size as u32 }
 
 pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, AnalysisError> {
     if entry < ROM_BASE || entry - ROM_BASE >= rom.len() as u32 {
@@ -69,7 +58,10 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
     let mut blocks = Vec::<BasicBlock>::new();
     let mut ids = HashMap::<BlockKey, BlockId>::new();
     let mut queue = VecDeque::<BlockKey>::new();
-    let entry_key = BlockKey { address: entry, mode: entry_mode };
+    let entry_key = BlockKey {
+        address: entry,
+        mode: entry_mode,
+    };
     queue.push_back(entry_key.clone());
     ids.insert(entry_key, BlockId(0));
 
@@ -84,44 +76,83 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
                 Mode::Thumb => decode_thumb(pc, read_thumb(rom, pc)?),
             };
             instructions.push(instruction);
-            let (target, terminate) = branch_targets(instruction);
             let next = next_address(instruction);
-            let terminal_unknown_exchange = matches!(
+
+            let terminates = matches!(
                 instruction.kind,
-                InstructionKind::Arm(ArmOp::BranchExchange { .. }) | InstructionKind::Thumb(ThumbOp::BranchExchange { .. })
+                InstructionKind::Arm(ArmOp::Branch { .. })
+                    | InstructionKind::Arm(ArmOp::BranchExchange { .. })
+                    | InstructionKind::Thumb(ThumbOp::Branch { .. })
+                    | InstructionKind::Thumb(ThumbOp::BranchExchange { .. })
             );
-            if target.is_some() || terminate || terminal_unknown_exchange || matches!(instruction.kind, InstructionKind::Arm(ArmOp::Branch { .. }) | InstructionKind::Thumb(ThumbOp::Branch { .. })) {
+            if terminates {
                 break;
             }
+
             pc = next;
-            if pc < ROM_BASE || pc - ROM_BASE >= rom.len() as u32 { break; }
+            if pc < ROM_BASE || pc - ROM_BASE >= rom.len() as u32 {
+                break;
+            }
         }
 
         let ir = instructions.iter().copied().map(lower).collect::<Vec<_>>();
-        let mut block = BasicBlock { id, key: key.clone(), instructions, ir, successors: Vec::new() };
-        let last = *block.instructions.last().expect("block contains at least one instruction");
-
+        let last = *instructions.last().expect("block contains at least one instruction");
         let mut successor_keys = Vec::new();
+
         match last.kind {
-            InstructionKind::Arm(ArmOp::Branch { target, condition, link }) => {
-                successor_keys.push(BlockKey { address: target, mode: Mode::Arm });
+            InstructionKind::Arm(ArmOp::Branch {
+                target,
+                condition,
+                link,
+            }) => {
+                successor_keys.push(BlockKey {
+                    address: target,
+                    mode: Mode::Arm,
+                });
                 if condition != crate::decoder::Condition::Al || link {
-                    successor_keys.push(BlockKey { address: next_address(last), mode: Mode::Arm });
+                    successor_keys.push(BlockKey {
+                        address: next_address(last),
+                        mode: Mode::Arm,
+                    });
                 }
             }
             InstructionKind::Thumb(ThumbOp::Branch { target, condition }) => {
-                successor_keys.push(BlockKey { address: target, mode: Mode::Thumb });
+                successor_keys.push(BlockKey {
+                    address: target,
+                    mode: Mode::Thumb,
+                });
                 if condition != crate::decoder::Condition::Al {
-                    successor_keys.push(BlockKey { address: next_address(last), mode: Mode::Thumb });
+                    successor_keys.push(BlockKey {
+                        address: next_address(last),
+                        mode: Mode::Thumb,
+                    });
                 }
             }
-            InstructionKind::Arm(ArmOp::BranchExchange { .. }) | InstructionKind::Thumb(ThumbOp::BranchExchange { .. }) => {}
-            _ => successor_keys.push(BlockKey { address: next_address(last), mode: key.mode }),
+            InstructionKind::Arm(ArmOp::BranchExchange { .. })
+            | InstructionKind::Thumb(ThumbOp::BranchExchange { .. }) => {}
+            _ => successor_keys.push(BlockKey {
+                address: next_address(last),
+                mode: key.mode,
+            }),
         }
 
+        let mut block = BasicBlock {
+            id,
+            key: key.clone(),
+            instructions,
+            ir,
+            successors: Vec::new(),
+        };
+
         for successor in successor_keys {
-            if successor.address < ROM_BASE || successor.address - ROM_BASE >= rom.len() as u32 { continue; }
-            let successor_id = if let Some(existing) = ids.get(&successor) { *existing } else {
+            if successor.address < ROM_BASE
+                || successor.address - ROM_BASE >= rom.len() as u32
+            {
+                continue;
+            }
+            let successor_id = if let Some(existing) = ids.get(&successor) {
+                *existing
+            } else {
                 let new = BlockId(ids.len());
                 ids.insert(successor.clone(), new);
                 queue.push_back(successor);
@@ -129,7 +160,19 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
             };
             block.successors.push(successor_id);
         }
-        while blocks.len() <= id.0 { blocks.push(BasicBlock { id: BlockId(blocks.len()), key: BlockKey { address: 0, mode: Mode::Arm }, instructions: Vec::new(), ir: Vec::new(), successors: Vec::new() }); }
+
+        while blocks.len() <= id.0 {
+            blocks.push(BasicBlock {
+                id: BlockId(blocks.len()),
+                key: BlockKey {
+                    address: 0,
+                    mode: Mode::Arm,
+                },
+                instructions: Vec::new(),
+                ir: Vec::new(),
+                successors: Vec::new(),
+            });
+        }
         blocks[id.0] = block;
     }
 
@@ -137,8 +180,15 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
         block.successors.sort_unstable_by_key(|b| b.0);
         block.successors.dedup();
     }
-    let cfg = ControlFlowGraph { entry: BlockId(0), blocks };
-    Ok(Program { entry: BlockId(0), cfg })
+
+    let cfg = ControlFlowGraph {
+        entry: BlockId(0),
+        blocks,
+    };
+    Ok(Program {
+        entry: BlockId(0),
+        cfg,
+    })
 }
 
 #[cfg(test)]
@@ -147,7 +197,9 @@ mod tests {
 
     fn rom(words: &[u32]) -> Vec<u8> {
         let mut bytes = Vec::new();
-        for word in words { bytes.extend_from_slice(&word.to_le_bytes()); }
+        for word in words {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
         bytes
     }
 
