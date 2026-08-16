@@ -48,6 +48,7 @@ pub fn lower(ins: Instruction) -> IrInstruction {
         InstructionKind::Thumb(ThumbOp::LoadImm { rd, rn, word_offset }) => vec![IrOp::Load { dst: rd, base: rn, offset: (word_offset as i32) * 4, byte: false }],
         InstructionKind::Thumb(ThumbOp::StoreImm { rd, rn, word_offset }) => vec![IrOp::Store { src: rd, base: rn, offset: (word_offset as i32) * 4, byte: false }],
         InstructionKind::Thumb(ThumbOp::Branch { target, condition }) => vec![IrOp::Branch { target, condition, link: false }],
+        InstructionKind::Thumb(ThumbOp::BranchLink { target }) => vec![IrOp::Branch { target, condition: Condition::Al, link: true }],
         InstructionKind::Thumb(ThumbOp::BranchExchange { rm }) => vec![IrOp::BranchExchange { register: rm, link: false }],
         InstructionKind::Arm(ArmOp::Unknown) | InstructionKind::Thumb(ThumbOp::Unknown) => vec![IrOp::Unknown { address: ins.address, raw: ins.raw, mode: ins.mode }],
     };
