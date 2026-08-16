@@ -96,9 +96,9 @@ mod tests {
     fn keeps_thumb_mode_for_conditional_branch() {
         let bytes = vec![0x00, 0xD0, 0xC0, 0x46, 0xC0, 0x46, 0xC0, 0x46];
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
-        assert_eq!(program.cfg.blocks.len(), 2);
+        assert_eq!(program.cfg.blocks.len(), 3);
         assert_eq!(program.cfg.blocks[0].key.mode, Mode::Thumb);
         assert_eq!(program.cfg.blocks[0].successors.len(), 2);
-        assert_eq!(program.cfg.blocks[1].key.mode, Mode::Thumb);
+        assert!(program.cfg.blocks[0].successors.iter().all(|id| program.cfg.blocks[id.0].key.mode == Mode::Thumb));
     }
 }
