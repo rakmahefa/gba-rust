@@ -18,7 +18,7 @@ pub enum CallTarget {
     Indirect { register: u8, link: bool, mode: Mode },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallSite {
     pub block: BlockId,
     pub instruction_index: usize,
@@ -238,7 +238,7 @@ pub fn discover_functions(program: &Program) -> FunctionControlFlowGraph {
         function.successors = successors;
     }
 
-    let calls = functions.iter().flat_map(|function| function.call_sites.iter().copied()).collect();
+    let calls = functions.iter().flat_map(|function| function.call_sites.iter().cloned()).collect();
     let returns = functions.iter().flat_map(|function| function.return_sites.iter().copied()).collect();
 
     FunctionControlFlowGraph {
