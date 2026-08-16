@@ -98,7 +98,8 @@ fn direct_call_target(cfg: &ControlFlowGraph, block: &BasicBlock) -> Option<(Blo
 
 fn function_roots(program: &Program) -> Vec<(FunctionKey, BlockId)> {
     let cfg = &program.cfg;
-    let mut roots = vec![(cfg.blocks[cfg.entry.0].key.into(), cfg.entry)];
+    let entry_key = cfg.blocks[cfg.entry.0].key.clone();
+    let mut roots = vec![(FunctionKey::from(entry_key), cfg.entry)];
     let mut seen = HashSet::<BlockId>::from([cfg.entry]);
 
     for block in &cfg.blocks {
