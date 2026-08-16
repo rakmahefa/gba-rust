@@ -1,172 +1,279 @@
 # gba-rust
 
-Static Game Boy Advance recompiler that generates Rust and executes the generated program against a native Rust GBA runtime.
+**gba-rust** is a Rust-first **static Game Boy Advance recompiler**. Its goal is to recover executable GBA code from a ROM, lower it into an intermediate representation, generate Rust source, and execute that generated program against a native Rust GBA runtime.
 
-The project is designed around one principle: **the GBA ROM is compiled ahead of time into Rust; the runtime provides the hardware contract**. It is not intended to be a conventional instruction-by-instruction emulator with a UI layered on top.
+The project is deliberately **not centered on instruction-by-instruction interpretation**. The long-term execution model is:
 
-> This project is inspired by the engineering direction of [`arcanite24/gb-recompiled`](https://github.com/arcanite24/gb-recompiled), but the implementation target here is a clean, Rust-first GBA architecture.
+```text
+GBA ROM
+  │
+  ▼
+ARM / Thumb decoding
+  │
+  ▼
+Reachable CFG recovery
+  │
+  ▼
+Typed GBA IR
+  │
+  ▼
+Rust code generation
+  │
+  ▼
+Native Rust / LLVM
+  │
+  ▼
+GBA runtime
+```
+
+> Inspired by the engineering direction of [`arcanite24/gb-recompiled`](https://github.com/arcanite24/gb-recompiled), but implemented as an independent Rust-first GBA architecture.
+
+## Current status
+
+The project has moved beyond the initial architecture/prototype stage and now has a working **static-analysis → CFG → IR → Rust-codegen pipeline** for the currently supported instruction subset.
+
+Implemented today:
+
+- ARM and Thumb instruction decoding infrastructure;
+- reachable-code discovery from a ROM entry point;
+- ARM/Thumb-aware basic-block and control-flow graph recovery;
+- conditional and unconditional branch handling;
+- block partitioning that preserves sequential instruction tails;
+- typed IR lowering for the currently decoded operations;
+- deterministic Rust source generation from the recovered CFG;
+- a native Rust runtime boundary used by generated code;
+- GBA cartridge/save modeling for SRAM, Flash and EEPROM variants;
+- dirty tracking and atomic-ish save-file replacement with `.sav.bak` backup;
+- CLI support for ROM analysis and generated-source emission;
+- workspace tests and GitHub Actions validation.
+
+The generated program is **not yet a complete playable GBA game**. Runtime dispatch, hardware emulation and instruction coverage are still being expanded.
 
 ## Architecture
 
 ```text
-                  GBA ROM (.gba)
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │  Static Recompiler  │
-              │                     │
-              │ ARM / Thumb decode  │
-              │ CFG recovery        │
-              │ Function discovery  │
-              │ IR / optimization   │
-              │ Rust code generation│
-              └──────────┬──────────┘
-                         │
-                         ▼
-                  Generated Rust
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │     GBA Runtime     │
-              │                     │
-              │ CPU / ARM7TDMI      │
-              │ Memory / Bus        │
-              │ PPU                 │
-              │ APU                 │
-              │ DMA / Timers / IRQ  │
-              │ Cartridge / Mappers │
-              │ Save memory         │
-              └──────────┬──────────┘
-                         │
-                         ▼
-                    egui / eframe
+                         GBA ROM (.gba)
+                              │
+                              ▼
+                 ┌────────────────────────┐
+                 │     gba-recompiler     │
+                 │                        │
+                 │ ARM / Thumb decoder    │
+                 │ Reachable discovery    │
+                 │ CFG / basic blocks     │
+                 │ GBA IR                 │
+                 │ Rust code generation   │
+                 └────────────┬───────────┘
+                              │
+                              ▼
+                     Generated Rust
+                              │
+                              ▼
+                 ┌────────────────────────┐
+                 │      gba-runtime       │
+                 │                        │
+                 │ CPU state              │
+                 │ Memory / cartridge     │
+                 │ PPU / APU foundations │
+                 │ Timing / runtime API   │
+                 │ Save devices           │
+                 └────────────┬───────────┘
+                              │
+                              ▼
+                         Native Rust
 ```
 
 The separation is intentional:
 
-- **Recompiler:** understands the ROM and produces Rust.
-- **Generated code:** contains the statically recovered game logic.
-- **Runtime:** implements the hardware services that generated code depends on.
-- **egui:** presents the runtime and emulator controls without owning emulation semantics.
+- **`gba-recompiler`** understands ROM code and produces generated Rust.
+- **Generated Rust** represents statically recovered game logic.
+- **`gba-runtime`** provides the hardware-facing services required by generated code.
+- **`gba-cli`** is the development harness for analyzing ROMs and producing generated source.
+
+A graphical frontend is planned, but **egui/eframe is not currently part of the workspace**.
 
 ## Workspace
 
 ```text
 crates/
 ├── gba-recompiler/
-│   └── Static ROM analysis and Rust code generation
+│   └── ARM/Thumb decoding, CFG recovery, IR and Rust code generation
 │
 ├── gba-runtime/
-│   └── Rust GBA hardware/runtime layer
+│   └── CPU, memory, cartridge/save and runtime services
 │
 └── gba-cli/
-    └── Development and recompilation harness
+    └── ROM analysis and generated-source development harness
 ```
 
-`ARCHITECTURE.md` contains the current architectural contract and roadmap.
+The workspace is defined in `Cargo.toml` and uses Rust 2021. The release profile is configured for thin LTO, a single codegen unit and `panic = "abort"`.
 
-## Recompiler
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the architectural contract and roadmap.
 
-The recompiler is the long-term execution path of the project.
+## Static recompiler
 
-Its responsibilities are:
+The recompiler is the central execution path of the project.
 
-1. Parse the GBA ROM and cartridge metadata.
-2. Decode ARM and Thumb code.
-3. Discover executable regions, functions and basic blocks.
-4. Recover a control-flow graph.
-5. Translate instructions into a typed intermediate representation.
-6. Apply safe static optimizations.
-7. Generate deterministic Rust source.
-8. Let the Rust compiler produce optimized native code.
+### 1. Decode
 
-The canonical direction is therefore:
+The decoder currently understands a growing subset of ARM and Thumb instructions and represents each decoded instruction with its address, size, mode and operation.
+
+### 2. Discover reachable code
+
+Analysis starts from an explicit ROM entry address and instruction mode. The analyzer follows statically known successors while keeping ARM and Thumb modes in the CFG key.
 
 ```text
-GBA machine code
-    → static analysis
-    → GBA IR
-    → optimized IR
-    → generated Rust
-    → native machine code
+entry
+  │
+  ├── sequential successor
+  ├── conditional branch target
+  └── unconditional branch target
 ```
 
-An instruction interpreter may exist as a development/reference mechanism, but it is **not the architectural center of gba-rust**.
+Unknown instructions and dynamic branch-exchange targets terminate static discovery rather than inventing an unsafe successor.
+
+### 3. Recover basic blocks
+
+Leaders are identified from the entry point and branch successors. Sequential instructions remain in the same block until a control-flow boundary is reached.
+
+Each block contains:
+
+- a stable `BlockId`;
+- its starting address and ARM/Thumb mode;
+- decoded instructions;
+- one corresponding IR instruction per decoded instruction;
+- statically known successor blocks.
+
+The CFG validation pass checks instruction ownership, address continuity, block identity and successor references.
+
+### 4. Lower to IR
+
+The current IR includes operations such as:
+
+- `Mov`
+- `Add`
+- `Sub`
+- `Cmp`
+- `Load`
+- `Store`
+- `Branch`
+- `BranchExchange`
+- `Nop`
+- `Unknown`
+
+The IR is intentionally explicit about values, addresses and control-flow operations so later optimization passes can operate without depending directly on decoder representations.
+
+### 5. Generate Rust
+
+`gba-recompiler` emits deterministic Rust source containing one generated function per recovered basic block. Generated operations access the runtime through APIs such as register state, memory reads/writes, condition evaluation and dispatch.
+
+The generated source is currently an intermediate development artifact rather than a complete standalone executable game binary.
 
 ## Runtime
 
-The runtime is the hardware boundary consumed by generated code.
+`gba-runtime` is the hardware boundary consumed by generated code.
 
-Targeted subsystems include:
+Current foundations include:
 
-- ARM7TDMI CPU state and execution support
-- memory bus and GBA memory map
-- PPU and 240×160 framebuffer
-- APU/audio generation
-- DMA
-- timers
-- interrupts and scheduler
-- keypad/input
-- cartridge hardware
-- SRAM, Flash and EEPROM save devices
-- mapper/protocol-specific cartridge behavior
+- ARM7TDMI register state (`r[0..15]`), CPSR and Thumb state;
+- 240×160 framebuffer storage and frame counter;
+- APU state foundation;
+- cartridge ROM storage;
+- memory reads/writes through a runtime bus abstraction;
+- little-endian 32-bit memory access;
+- basic condition-code evaluation;
+- cycle/tick accounting;
+- runtime hooks for generated-code dispatch and unsupported instructions.
 
-The runtime is kept independent from the source ROM and from egui so individual subsystems can be optimized or replaced without changing the frontend architecture.
+The runtime is intentionally independent of the source ROM and the future frontend.
+
+### Hardware roadmap
+
+The runtime still needs substantial implementation before broad game compatibility:
+
+- complete GBA memory map and I/O registers;
+- full ARM7TDMI semantics;
+- PPU modes 0–5, sprites and windows;
+- APU channels and audio output;
+- DMA;
+- timers;
+- interrupt controller and scheduler;
+- keypad/input;
+- complete cartridge protocols and timing behavior.
 
 ## Cartridge saves
 
-gba-rust deliberately **does not use savestates as the game's save mechanism**.
+Battery-backed cartridge storage is modeled as part of the cartridge rather than as an emulator savestate.
 
-The save system models the real persistent cartridge storage used by GBA games:
+Supported save models currently include:
 
 ```text
-Game code
-   │
-   ▼
-Cartridge save device
-   │
-   ├── SRAM
-   ├── Flash 64 KiB
-   ├── Flash 128 KiB
-   └── EEPROM
-          │
-          ▼
-      Save Manager
-          │
-          ├── <game>.sav
-          └── <game>.sav.bak
+SRAM 32 KiB
+Flash 64 KiB
+Flash 128 KiB
+EEPROM 512 B
+EEPROM 8 KiB
 ```
 
-The intended behavior is:
+The intended persistence model is:
 
-- cartridge writes mark save memory dirty;
-- dirty data is flushed to disk;
-- writes are performed atomically through a temporary file;
-- the previous `.sav` is retained as `.sav.bak` when possible;
-- the save is flushed again during shutdown;
-- no CPU/PPU/RAM snapshot is required for normal game saving.
+```text
+Generated game code
+       │
+       ▼
+ Cartridge save device
+       │
+       ▼
+    SaveRam
+       │
+       ├── <game>.sav
+       └── <game>.sav.bak
+```
 
-Save files live outside the ROM directory so the ROM remains immutable.
+Save behavior includes:
 
-## Test ROMs
+- ROM-based save-type detection using known cartridge signatures;
+- dirty tracking on writes;
+- loading existing save data when its size matches the detected device;
+- temporary-file replacement when flushing;
+- preservation of the previous `.sav` as `.sav.bak` when possible;
+- final flush on `SaveRam` drop.
 
-The repository contains development ROMs under `roms/`, including:
+Save files are kept outside the ROM itself so the source ROM remains immutable.
 
-- `1636 - Pokemon Fire Red (U)(Squirrels).gba`
-- `1986 - Pokemon Emerald (U)(TrashMan).gba`
+## CLI
 
-The CLI defaults to the FireRed ROM when no path is supplied.
+The development CLI accepts an optional ROM path. If none is supplied, it uses the development FireRed ROM path:
 
 ```bash
 cargo run -p gba-cli --release
 ```
 
-Or provide an explicit ROM:
+With an explicit ROM:
 
 ```bash
 cargo run -p gba-cli --release -- \
   "roms/1636 - Pokemon Fire Red (U)(Squirrels).gba"
 ```
+
+The CLI currently:
+
+1. reads the ROM;
+2. starts static analysis at `0x0800_0000` in ARM mode;
+3. reports the recovered entry, block and instruction counts;
+4. writes generated Rust to `target/gba_generated.rs`;
+5. initializes a runtime and loads the cartridge/save model.
+
+It does **not yet launch a complete generated game execution loop**.
+
+## Test ROMs
+
+Development ROMs currently present under `roms/` include:
+
+- `1636 - Pokemon Fire Red (U)(Squirrels).gba`
+- `1986 - Pokemon Emerald (U)(TrashMan).gba`
+
+These ROMs are development/test inputs. Ensure that your use of any ROM complies with applicable copyright and ownership rules.
 
 ## Development
 
@@ -175,7 +282,7 @@ Prerequisites:
 - Rust stable toolchain
 - Cargo
 
-Format, test and check the workspace with:
+Run the workspace validation locally with:
 
 ```bash
 cargo fmt
@@ -183,30 +290,63 @@ cargo test --workspace
 cargo check --workspace --all-targets
 ```
 
-CI runs the same core validation through GitHub Actions.
+GitHub Actions runs the same core checks on pushes and pull requests:
+
+```text
+cargo fmt
+cargo test --workspace
+cargo check --workspace --all-targets
+```
 
 ## Optimization strategy
 
-Performance work is deliberately staged so correctness remains measurable:
+Optimization is deliberately staged behind correctness and deterministic analysis:
 
-1. Correct static ARM/Thumb decoding.
-2. Deterministic CFG and function discovery.
-3. Typed IR with explicit side effects.
-4. Constant propagation and dead-code elimination.
-5. Memory-access specialization where provably safe.
-6. Basic-block linking and branch-target specialization.
-7. Rust/LLVM optimization of generated code.
-8. Runtime fast paths for hot hardware operations.
-9. Deterministic regression and benchmark suites.
+1. Expand correct ARM/Thumb decoding.
+2. Make CFG and function discovery robust across real GBA control flow.
+3. Strengthen the typed IR and side-effect model.
+4. Add constant propagation and dead-code elimination.
+5. Specialize safe memory accesses.
+6. Add basic-block linking and branch-target specialization.
+7. Let Rust/LLVM optimize generated code.
+8. Add runtime fast paths for hot hardware operations.
+9. Build deterministic regression and benchmark suites.
 
-The project favors **compile-time work over runtime interpretation** whenever the information is statically recoverable from the ROM.
+The guiding principle is to perform as much work as possible at **compile time**, whenever the ROM makes that information statically recoverable.
 
-## Current status
+## Roadmap
 
-The repository is in the foundation phase. The workspace already separates the static recompiler from the Rust runtime and includes the persistent cartridge-save model. The next major milestone is completing the ARM/Thumb static analysis pipeline and replacing the initial decoder with a real CFG/IR/code-generation pipeline.
+The near-term roadmap is:
 
-This repository should therefore be understood as an actively developed **static GBA recompilation system**, not as a finished general-purpose GBA emulator.
+- [x] Establish Rust workspace and layer separation.
+- [x] ARM/Thumb decoder foundation.
+- [x] Reachable CFG recovery.
+- [x] ARM/Thumb-aware block partitioning.
+- [x] Initial typed IR.
+- [x] Initial Rust code generator.
+- [x] Cartridge save-device model.
+- [ ] Expand ARM/Thumb instruction coverage toward real game code.
+- [ ] Recover functions and call/return relationships robustly.
+- [ ] Add IR optimization passes.
+- [ ] Replace generated dispatch placeholders with linked block execution.
+- [ ] Implement the complete GBA memory/hardware contract.
+- [ ] Add deterministic ROM regression tests.
+- [ ] Add frontend/runtime integration.
+- [ ] Benchmark generated native code against the reference/runtime path.
+
+## Project philosophy
+
+`gba-rust` favors:
+
+- **static analysis over runtime interpretation**;
+- **explicit boundaries between generated code and hardware services**;
+- **deterministic transformations**;
+- **correctness before aggressive optimization**;
+- **small, testable Rust components**;
+- **native-code execution as the eventual performance target**.
+
+The project should therefore be understood as an actively developed **static GBA recompilation system**, not as a finished general-purpose GBA emulator.
 
 ## License
 
-See the repository license for the current project terms.
+The workspace is currently licensed under **MIT**. See the repository license for the authoritative terms.
