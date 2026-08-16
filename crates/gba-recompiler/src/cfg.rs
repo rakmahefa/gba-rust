@@ -63,18 +63,6 @@ fn in_rom(rom: &[u8], address: u32) -> bool {
     address >= ROM_BASE && address - ROM_BASE < rom.len() as u32
 }
 
-fn is_control_transfer(instruction: Instruction) -> bool {
-    matches!(
-        instruction.kind,
-        InstructionKind::Arm(ArmOp::Branch { .. })
-            | InstructionKind::Arm(ArmOp::BranchExchange { .. })
-            | InstructionKind::Thumb(ThumbOp::Branch { .. })
-            | InstructionKind::Thumb(ThumbOp::BranchExchange { .. })
-            | InstructionKind::Arm(ArmOp::Unknown)
-            | InstructionKind::Thumb(ThumbOp::Unknown)
-    )
-}
-
 fn instruction_successors(instruction: Instruction) -> Vec<BlockKey> {
     let next = next_key(instruction);
     match instruction.kind {
@@ -157,6 +145,10 @@ fn discover_reachable(
     Ok((order, discovered))
 }
 
+fn is_fallthrough(node: &DiscoveredInstruction) -> bool {
+    node.successors.len() == 1 && node.successors[0] == next_key(node.instruction)
+}
+
 fn collect_leaders(
     order: &[BlockKey],
     discovered: &HashMap<BlockKey, DiscoveredInstruction>,
@@ -169,7 +161,7 @@ fn collect_leaders(
         let Some(node) = discovered.get(key) else {
             continue;
         };
-        if !is_control_transfer(node.instruction) {
+        if is_fallthrough(node) {
             continue;
         }
         for successor in &node.successors {
@@ -207,9 +199,7 @@ fn partition_blocks(
             };
             instructions.push(node.instruction);
 
-            let can_fall_through = node.successors.len() == 1
-                && node.successors[0] == next_key(node.instruction);
-            if !can_fall_through {
+            if !is_fallthrough(node) {
                 break;
             }
 
@@ -377,12 +367,7 @@ mod tests {
 
     #[test]
     fn conditional_backward_branch_does_not_overlap_blocks() {
-        let bytes = vec![
-            0x00, 0xD0,
-            0xC0, 0x46,
-            0xFC, 0xD0,
-            0xC0, 0x46,
-        ];
+        let bytes = vec![0x00, 0xD0, 0xC0, 0x46, 0xFC, 0xD0, 0xC0, 0x46];
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
 
         let mut keys = HashSet::new();
