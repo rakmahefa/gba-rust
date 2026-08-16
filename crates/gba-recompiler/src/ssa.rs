@@ -234,11 +234,7 @@ fn lower_function(function: &SemanticFunction, allocator: &mut ValueAllocator) -
     let mut blocks = Vec::with_capacity(function.blocks.len());
     for block in &function.blocks {
         let mut state = if block.id == function.entry {
-            let mut entry = [None; 16];
-            for register in 0..16u8 {
-                entry[register as usize] = Some(allocator.fresh(ValueDef::Entry { register }));
-            }
-            entry
+            initial_state(allocator)
         } else {
             merge_state(block, preds.get(&block.id).map(Vec::as_slice).unwrap_or(&[]), &out_states, &mut phis, allocator)
         };
@@ -316,13 +312,21 @@ mod tests {
 
     #[test]
     fn branch_join_gets_a_phi_for_divergent_register_state() {
-        // CMP r0,#0; BEQ join; MOV r0,#1; B join; ADD r0,r0,#2
+        // CMP r0,#0
+        // BEQ right
+        // MOV r0,#1
+        // B join
+        // right: MOV r0,#2
+        // join: ADD r0,r0,#1
+        // The two predecessor blocks define different r0 values, so the join
+        // must materialize a phi for r0.
         let program = analyze(&arm_rom(&[
             0xE350_0000,
             0x0A00_0002,
             0xE3A0_0001,
-            0xEA00_0000,
-            0xE280_0002,
+            0xEA00_0001,
+            0xE3A0_0002,
+            0xE280_0001,
         ]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
