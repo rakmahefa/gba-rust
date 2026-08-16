@@ -73,6 +73,53 @@ impl Runtime {
     pub fn step_recompiled(&mut self, cycles: u32) { self.cycles = self.cycles.wrapping_add(cycles as u64); }
     pub fn trace_recompiled(&mut self, _address: u32, _raw: u32) { self.step_recompiled(1); }
     pub fn frame(&mut self) { self.ppu.frame = self.ppu.frame.wrapping_add(1); }
+
+    pub fn tick(&mut self, cycles: u32) { self.step_recompiled(cycles); }
+    pub fn read8(&self, address: u32) -> u8 {
+        if (0x0800_0000..0x0E00_0000).contains(&address) {
+            self.cartridge.as_ref().and_then(|c| c.rom.get((address - 0x0800_0000) as usize)).copied().unwrap_or(0xff)
+        } else { *self.io.get(&address).unwrap_or(&0) }
+    }
+    pub fn write8(&mut self, address: u32, value: u8) {
+        if (0x0E00_0000..=0x0E00_FFFF).contains(&address) {
+            if let Some(cartridge) = self.cartridge.as_mut() { cartridge.save.write((address - 0x0E00_0000) as usize, value); }
+        } else { self.io.insert(address, value); }
+    }
+    pub fn read32(&self, address: u32) -> u32 {
+        let b0 = self.read8(address) as u32;
+        let b1 = self.read8(address.wrapping_add(1)) as u32;
+        let b2 = self.read8(address.wrapping_add(2)) as u32;
+        let b3 = self.read8(address.wrapping_add(3)) as u32;
+        b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    }
+    pub fn write32(&mut self, address: u32, value: u32) {
+        for (i, byte) in value.to_le_bytes().into_iter().enumerate() { self.write8(address.wrapping_add(i as u32), byte); }
+    }
+    pub fn compare(&mut self, lhs: u32, rhs: u32) {
+        let result = lhs.wrapping_sub(rhs);
+        self.cpu.cpsr = (self.cpu.cpsr & 0x0FFF_FFFF)
+            | if result == 0 { 1 << 30 } else { 0 }
+            | if result & 0x8000_0000 != 0 { 1 << 31 } else { 0 };
+    }
+    pub fn condition(&self, code: u8) -> bool {
+        let n = self.cpu.cpsr & (1 << 31) != 0;
+        let z = self.cpu.cpsr & (1 << 30) != 0;
+        match code {
+            0 => z, 1 => !z, 2 => self.cpu.cpsr & (1 << 29) != 0, 3 => self.cpu.cpsr & (1 << 29) == 0,
+            4 => n, 5 => !n, 6 => false, 7 => false, 8 => !z, 9 => z,
+            10 => n == (self.cpu.cpsr & (1 << 28) != 0), 11 => n != (self.cpu.cpsr & (1 << 28) != 0),
+            12 => !z && n == (self.cpu.cpsr & (1 << 28) != 0), 13 => z || n != (self.cpu.cpsr & (1 << 28) != 0),
+            _ => true,
+        }
+    }
+    pub fn dispatch(&mut self, address: u32) -> ! {
+        self.cpu.r[15] = address;
+        panic!("generated dispatch target {address:#010x} is not linked yet")
+    }
+    pub fn halt(&mut self) -> ! { panic!("recompiled program halted") }
+    pub fn unimplemented(&mut self, address: u32, raw: u32, mode: &str) -> ! {
+        panic!("unimplemented {mode} instruction {raw:#010x} at {address:#010x}")
+    }
 }
 
 #[cfg(test)]
@@ -80,4 +127,10 @@ mod tests {
     use super::*;
     #[test] fn save_roundtrip_memory() { let mut s = SaveRam::new(SaveType::Sram32K, None); s.write(7, 42); assert_eq!(s.read(7), 42); }
     #[test] fn save_sizes() { assert_eq!(SaveRam::new(SaveType::Flash128K, None).data.len(), 0x20000); }
+    #[test] fn generated_memory_reads_little_endian() {
+        let mut runtime = Runtime::new();
+        runtime.io.insert(0x0400_0000, 0x78);
+        runtime.io.insert(0x0400_0001, 0x56);
+        assert_eq!(runtime.read32(0x0400_0000), 0x5678);
+    }
 }
