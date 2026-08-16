@@ -100,8 +100,8 @@ fn instruction_successors(instruction: Instruction) -> Vec<BlockKey> {
 
 fn decode_at(rom: &[u8], key: BlockKey) -> Result<Instruction, DecodeError> {
     match key.mode {
-        Mode::Arm => decode_arm(key.address, read_arm(rom, key.address)?),
-        Mode::Thumb => decode_thumb(key.address, read_thumb(rom, key.address)?),
+        Mode::Arm => Ok(decode_arm(key.address, read_arm(rom, key.address)?)),
+        Mode::Thumb => Ok(decode_thumb(key.address, read_thumb(rom, key.address)?)),
     }
 }
 
