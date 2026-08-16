@@ -22,6 +22,6 @@ mod tests {
         assert_eq!(program.cfg.blocks[0].ir.len(), 2);
         let module = generate(&program, "entry");
         assert!(module.source.contains("rt.cpu.r[0]"));
-        assert!(module.source.contains("block_08000000"));
+        assert!(module.source.contains("block_0_arm_08000000"));
     }
 }
