@@ -111,7 +111,8 @@ fn discover_reachable(
 ) -> Result<(Vec<BlockKey>, HashMap<BlockKey, DiscoveredInstruction>), DecodeError> {
     let mut order = Vec::new();
     let mut discovered = HashMap::<BlockKey, DiscoveredInstruction>::new();
-    let mut queue = VecDeque::from([entry.clone()]);
+    let mut queued = HashSet::<BlockKey>::from([entry.clone()]);
+    let mut queue = VecDeque::from([entry]);
 
     while let Some(key) = queue.pop_front() {
         if discovered.contains_key(&key) {
@@ -125,7 +126,8 @@ fn discover_reachable(
             .collect::<Vec<_>>();
 
         for successor in &successors {
-            if !discovered.contains_key(successor) {
+            if !queued.contains(successor) {
+                queued.insert(successor.clone());
                 queue.push_back(successor.clone());
             }
         }
@@ -173,6 +175,7 @@ fn partition_blocks(
     leaders: &[BlockKey],
 ) -> (Vec<BasicBlock>, HashMap<BlockKey, BlockId>) {
     let leader_set = leaders.iter().cloned().collect::<HashSet<_>>();
+    let reachable_set = order.iter().cloned().collect::<HashSet<_>>();
     let mut blocks = Vec::new();
     let mut ids = HashMap::<BlockKey, BlockId>::new();
 
@@ -189,18 +192,20 @@ fn partition_blocks(
             };
             instructions.push(node.instruction);
 
-            let can_fall_through = node.successors.len() == 1 && node.successors[0] == next_key(node.instruction);
-            if !can_fall_through || leader_set.contains(&node.successors[0]) {
+            let can_fall_through = node.successors.len() == 1
+                && node.successors[0] == next_key(node.instruction);
+            if !can_fall_through {
                 break;
             }
 
-            cursor = node.successors[0].clone();
-            if !in_rom_from_order(order, &cursor) || leader_set.contains(&cursor) {
+            let next = node.successors[0].clone();
+            if leader_set.contains(&next) || !reachable_set.contains(&next) {
                 break;
             }
+            cursor = next;
         }
 
-        let ir = instructions.iter().copied().map(crate::ir::lower).collect();
+        let ir = instructions.iter().copied().map(lower).collect();
         blocks.push(BasicBlock {
             id,
             key: leader.clone(),
@@ -214,10 +219,11 @@ fn partition_blocks(
         let Some(last) = block.instructions.last().copied() else {
             continue;
         };
-        let Some(node) = discovered.get(&BlockKey {
+        let key = BlockKey {
             address: last.address,
             mode: last.mode,
-        }) else {
+        };
+        let Some(node) = discovered.get(&key) else {
             continue;
         };
         let mut successors = node
@@ -231,17 +237,6 @@ fn partition_blocks(
     }
 
     (blocks, ids)
-}
-
-fn in_rom_from_order(order: &[BlockKey], key: &BlockKey) -> bool {
-    order.binary_search_by(|candidate| {
-        candidate
-            .address
-            .cmp(&key.address)
-            .then_with(|| candidate.mode.cmp(&key.mode))
-    })
-    .is_ok()
-        || order.iter().any(|candidate| candidate == key)
 }
 
 fn validate_cfg(cfg: &ControlFlowGraph) {
@@ -261,7 +256,10 @@ fn validate_cfg(cfg: &ControlFlowGraph) {
                 address: instruction.address,
                 mode: instruction.mode,
             };
-            assert!(instruction_owners.insert(key, block.id).is_none(), "basic blocks must not overlap");
+            assert!(
+                instruction_owners.insert(key, block.id).is_none(),
+                "basic blocks must not overlap"
+            );
             if let Some(next) = block.instructions.get(index + 1) {
                 assert_eq!(
                     instruction.address + instruction.size as u32,
@@ -340,9 +338,9 @@ mod tests {
     #[test]
     fn conditional_backward_branch_does_not_overlap_blocks() {
         let bytes = vec![
-            0x00, 0xE0, // beq +0 -> 0x08000004
+            0x00, 0xD0, // beq +0 -> 0x08000004
             0xC0, 0x46, // nop
-            0xF9, 0xD0, // beq -14 -> 0x08000000
+            0xFC, 0xD0, // beq -8 -> 0x08000000
             0xC0, 0x46, // nop
         ];
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
