@@ -121,7 +121,7 @@ fn is_call_edge(block: &BasicBlock, successor: BlockId, cfg: &ControlFlowGraph) 
     target == successor
 }
 
-fn discover_function_blocks(cfg: &ControlFlowGraph, entry: BlockId) -> Vec<BlockId> {
+fn discover_function_blocks(cfg: &ControlFlowGraph, entry: BlockId, function_roots: &HashSet<BlockId>) -> Vec<BlockId> {
     let mut blocks = Vec::new();
     let mut seen = HashSet::new();
     let mut queue = VecDeque::from([entry]);
@@ -132,6 +132,7 @@ fn discover_function_blocks(cfg: &ControlFlowGraph, entry: BlockId) -> Vec<Block
         let block = &cfg.blocks[id.0];
         for &successor in &block.successors {
             if is_call_edge(block, successor, cfg) { continue; }
+            if successor != entry && function_roots.contains(&successor) { continue; }
             queue.push_back(successor);
         }
     }
@@ -145,7 +146,6 @@ fn analyze_function_edges(
     blocks: &[BlockId],
     block_to_function: &HashMap<BlockId, FunctionId>,
 ) -> (Vec<CallSite>, Vec<ReturnSite>, Vec<FunctionId>) {
-    let block_set = blocks.iter().copied().collect::<HashSet<_>>();
     let mut calls = Vec::new();
     let mut returns = Vec::new();
     let mut successors = HashSet::new();
@@ -185,12 +185,6 @@ fn analyze_function_edges(
         if is_return(instruction) {
             returns.push(ReturnSite { block: block_id, instruction_index, mode: instruction.mode });
         }
-
-        for &successor in &block.successors {
-            if block_set.contains(&successor) && !is_call_edge(block, successor, cfg) {
-                // Intra-function CFG edge; ownership is already represented by block_to_function.
-            }
-        }
     }
 
     let mut successors = successors.into_iter().collect::<Vec<_>>();
@@ -201,13 +195,14 @@ fn analyze_function_edges(
 pub fn discover_functions(program: &Program) -> FunctionControlFlowGraph {
     let cfg = &program.cfg;
     let roots = function_roots(program);
+    let root_blocks = roots.iter().map(|(_, block)| *block).collect::<HashSet<_>>();
 
     let mut block_to_function = HashMap::<BlockId, FunctionId>::new();
     let mut functions = Vec::<Function>::new();
 
     for (index, (key, entry)) in roots.iter().enumerate() {
         let id = FunctionId(index);
-        let blocks = discover_function_blocks(cfg, *entry);
+        let blocks = discover_function_blocks(cfg, *entry, &root_blocks);
         for &block in &blocks {
             block_to_function.entry(block).or_insert(id);
         }
@@ -222,8 +217,6 @@ pub fn discover_functions(program: &Program) -> FunctionControlFlowGraph {
         });
     }
 
-    // A block can be reached from multiple roots when the ROM contains shared/tail code.
-    // Recompute ownership deterministically from the first root and keep all roots visible.
     for function in &mut functions {
         let (calls, returns, successors) = analyze_function_edges(cfg, function.id, &function.blocks, &block_to_function);
         function.call_sites = calls;
@@ -268,6 +261,8 @@ mod tests {
         assert_eq!(functions.functions.len(), 2);
         assert_eq!(functions.functions[0].entry, program.cfg.entry);
         assert_eq!(functions.functions[1].key, FunctionKey { address: target, mode: Mode::Arm });
+        assert_eq!(functions.functions[0].blocks, vec![program.cfg.entry, BlockId(1)]);
+        assert_eq!(functions.functions[1].blocks, vec![BlockId(2)]);
     }
 
     #[test]
@@ -280,6 +275,7 @@ mod tests {
         let call = &functions.functions[0].call_sites[0];
         assert_eq!(call.target, CallTarget::Direct(BlockKey { address: target, mode: Mode::Arm }));
         assert!(call.return_block.is_some());
+        assert_eq!(functions.functions[0].successors, vec![FunctionId(1)]);
     }
 
     #[test]
