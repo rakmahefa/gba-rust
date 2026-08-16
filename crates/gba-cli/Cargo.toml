@@ -1,0 +1,8 @@
+[package]
+name = "gba-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gba-runtime = { path = "../gba-runtime" }
+gba-recompiler = { path = "../gba-recompiler" }

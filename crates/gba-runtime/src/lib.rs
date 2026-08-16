@@ -1,0 +1,136 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+pub const WIDTH: usize = 240;
+pub const HEIGHT: usize = 160;
+
+#[derive(Debug, Clone)]
+pub struct Cpu { pub r: [u32; 16], pub cpsr: u32, pub thumb: bool }
+impl Default for Cpu { fn default() -> Self { Self { r: [0; 16], cpsr: 0x0000_001f, thumb: false } } }
+
+#[derive(Debug, Clone)]
+pub struct Ppu { pub framebuffer: Vec<u32>, pub frame: u64 }
+impl Default for Ppu { fn default() -> Self { Self { framebuffer: vec![0; WIDTH * HEIGHT], frame: 0 } } }
+
+#[derive(Debug, Clone, Default)]
+pub struct Apu { pub samples_generated: u64 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveType { None, Sram32K, Flash64K, Flash128K, Eeprom512B, Eeprom8K }
+
+#[derive(Debug, Clone)]
+pub struct SaveRam { kind: SaveType, data: Vec<u8>, path: Option<PathBuf>, dirty: bool }
+impl SaveRam {
+    pub fn new(kind: SaveType, path: Option<PathBuf>) -> Self {
+        let len = match kind { SaveType::Sram32K => 0x8000, SaveType::Flash64K => 0x10000, SaveType::Flash128K => 0x20000, SaveType::Eeprom512B => 512, SaveType::Eeprom8K => 8192, SaveType::None => 0 };
+        let mut data = vec![0xff; len];
+        if let Some(p) = &path { if let Ok(existing) = fs::read(p) { if existing.len() == len { data = existing; } } }
+        Self { kind, data, path, dirty: false }
+    }
+    pub fn kind(&self) -> SaveType { self.kind }
+    pub fn read(&self, addr: usize) -> u8 { self.data.get(addr % self.data.len().max(1)).copied().unwrap_or(0xff) }
+    pub fn write(&mut self, addr: usize, value: u8) { if !self.data.is_empty() { let i = addr % self.data.len(); if self.data[i] != value { self.data[i] = value; self.dirty = true; } } }
+    pub fn flush(&mut self) -> std::io::Result<()> {
+        if !self.dirty { return Ok(()); }
+        let Some(path) = &self.path else { return Ok(()); };
+        let tmp = path.with_extension("sav.tmp");
+        fs::write(&tmp, &self.data)?;
+        if path.exists() { let backup = path.with_extension("sav.bak"); let _ = fs::copy(path, backup); }
+        fs::rename(tmp, path)?;
+        self.dirty = false;
+        Ok(())
+    }
+}
+impl Drop for SaveRam { fn drop(&mut self) { let _ = self.flush(); } }
+
+#[derive(Debug, Clone)]
+pub struct Cartridge { pub rom: Vec<u8>, pub save: SaveRam }
+impl Cartridge {
+    pub fn from_rom(rom: Vec<u8>, save_dir: impl AsRef<Path>) -> Self {
+        let title = rom.get(0xa0..0xac).unwrap_or_default();
+        let stem = String::from_utf8_lossy(title).trim_matches('\0').trim().to_string();
+        let kind = detect_save_type(&rom);
+        let path = if kind == SaveType::None { None } else { Some(save_dir.as_ref().join(format!("{}.sav", if stem.is_empty() { "game" } else { &stem }))) };
+        Self { rom, save: SaveRam::new(kind, path) }
+    }
+}
+
+pub fn detect_save_type(rom: &[u8]) -> SaveType {
+    let text = String::from_utf8_lossy(rom);
+    if text.contains("EEPROM_V") { if text.contains("8K") { SaveType::Eeprom8K } else { SaveType::Eeprom512B } }
+    else if text.contains("FLASH1M_V") { SaveType::Flash128K }
+    else if text.contains("FLASH_V") { SaveType::Flash64K }
+    else if text.contains("SRAM_V") { SaveType::Sram32K }
+    else { SaveType::None }
+}
+
+#[derive(Debug, Default)]
+pub struct Runtime { pub cpu: Cpu, pub ppu: Ppu, pub apu: Apu, pub cartridge: Option<Cartridge>, pub io: HashMap<u32, u8>, pub cycles: u64 }
+impl Runtime {
+    pub fn new() -> Self { Self::default() }
+    pub fn load_cartridge(&mut self, cartridge: Cartridge) { self.cartridge = Some(cartridge); self.cpu.r[15] = 0x0800_0000; }
+    pub fn step_recompiled(&mut self, cycles: u32) { self.cycles = self.cycles.wrapping_add(cycles as u64); }
+    pub fn trace_recompiled(&mut self, _address: u32, _raw: u32) { self.step_recompiled(1); }
+    pub fn frame(&mut self) { self.ppu.frame = self.ppu.frame.wrapping_add(1); }
+
+    pub fn tick(&mut self, cycles: u32) { self.step_recompiled(cycles); }
+    pub fn read8(&self, address: u32) -> u8 {
+        if (0x0800_0000..0x0E00_0000).contains(&address) {
+            self.cartridge.as_ref().and_then(|c| c.rom.get((address - 0x0800_0000) as usize)).copied().unwrap_or(0xff)
+        } else { *self.io.get(&address).unwrap_or(&0) }
+    }
+    pub fn write8(&mut self, address: u32, value: u8) {
+        if (0x0E00_0000..=0x0E00_FFFF).contains(&address) {
+            if let Some(cartridge) = self.cartridge.as_mut() { cartridge.save.write((address - 0x0E00_0000) as usize, value); }
+        } else { self.io.insert(address, value); }
+    }
+    pub fn read32(&self, address: u32) -> u32 {
+        let b0 = self.read8(address) as u32;
+        let b1 = self.read8(address.wrapping_add(1)) as u32;
+        let b2 = self.read8(address.wrapping_add(2)) as u32;
+        let b3 = self.read8(address.wrapping_add(3)) as u32;
+        b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    }
+    pub fn write32(&mut self, address: u32, value: u32) {
+        for (i, byte) in value.to_le_bytes().into_iter().enumerate() { self.write8(address.wrapping_add(i as u32), byte); }
+    }
+    pub fn compare(&mut self, lhs: u32, rhs: u32) {
+        let result = lhs.wrapping_sub(rhs);
+        self.cpu.cpsr = (self.cpu.cpsr & 0x0FFF_FFFF)
+            | if result == 0 { 1 << 30 } else { 0 }
+            | if result & 0x8000_0000 != 0 { 1 << 31 } else { 0 };
+    }
+    pub fn condition(&self, code: u8) -> bool {
+        let n = self.cpu.cpsr & (1 << 31) != 0;
+        let z = self.cpu.cpsr & (1 << 30) != 0;
+        match code {
+            0 => z, 1 => !z, 2 => self.cpu.cpsr & (1 << 29) != 0, 3 => self.cpu.cpsr & (1 << 29) == 0,
+            4 => n, 5 => !n, 6 => false, 7 => false, 8 => !z, 9 => z,
+            10 => n == (self.cpu.cpsr & (1 << 28) != 0), 11 => n != (self.cpu.cpsr & (1 << 28) != 0),
+            12 => !z && n == (self.cpu.cpsr & (1 << 28) != 0), 13 => z || n != (self.cpu.cpsr & (1 << 28) != 0),
+            _ => true,
+        }
+    }
+    pub fn dispatch(&mut self, address: u32) -> ! {
+        self.cpu.r[15] = address;
+        panic!("generated dispatch target {address:#010x} is not linked yet")
+    }
+    pub fn halt(&mut self) -> ! { panic!("recompiled program halted") }
+    pub fn unimplemented(&mut self, address: u32, raw: u32, mode: &str) -> ! {
+        panic!("unimplemented {mode} instruction {raw:#010x} at {address:#010x}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test] fn save_roundtrip_memory() { let mut s = SaveRam::new(SaveType::Sram32K, None); s.write(7, 42); assert_eq!(s.read(7), 42); }
+    #[test] fn save_sizes() { assert_eq!(SaveRam::new(SaveType::Flash128K, None).data.len(), 0x20000); }
+    #[test] fn generated_memory_reads_little_endian() {
+        let mut runtime = Runtime::new();
+        runtime.io.insert(0x0400_0000, 0x78);
+        runtime.io.insert(0x0400_0001, 0x56);
+        assert_eq!(runtime.read32(0x0400_0000), 0x5678);
+    }
+}
