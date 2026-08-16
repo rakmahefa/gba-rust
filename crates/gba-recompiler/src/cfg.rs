@@ -63,6 +63,18 @@ fn in_rom(rom: &[u8], address: u32) -> bool {
     address >= ROM_BASE && address - ROM_BASE < rom.len() as u32
 }
 
+fn is_control_transfer(instruction: Instruction) -> bool {
+    matches!(
+        instruction.kind,
+        InstructionKind::Arm(ArmOp::Branch { .. })
+            | InstructionKind::Arm(ArmOp::BranchExchange { .. })
+            | InstructionKind::Thumb(ThumbOp::Branch { .. })
+            | InstructionKind::Thumb(ThumbOp::BranchExchange { .. })
+            | InstructionKind::Arm(ArmOp::Unknown)
+            | InstructionKind::Thumb(ThumbOp::Unknown)
+    )
+}
+
 fn instruction_successors(instruction: Instruction) -> Vec<BlockKey> {
     let next = next_key(instruction);
     match instruction.kind {
@@ -157,6 +169,9 @@ fn collect_leaders(
         let Some(node) = discovered.get(key) else {
             continue;
         };
+        if !is_control_transfer(node.instruction) {
+            continue;
+        }
         for successor in &node.successors {
             leaders.insert(successor.clone());
         }
