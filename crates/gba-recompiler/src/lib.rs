@@ -3,12 +3,14 @@ pub mod codegen;
 pub mod decoder;
 pub mod function;
 pub mod ir;
+pub mod semantic_ir;
 
 pub use cfg::{analyze, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
 pub use codegen::{generate, RustModule};
 pub use decoder::{decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbOp, ROM_BASE};
 pub use function::{discover_functions, CallSite, CallTarget, Function, FunctionControlFlowGraph, FunctionId, FunctionKey, ReturnSite};
 pub use ir::{lower, IrInstruction, IrOp, Value};
+pub use semantic_ir::{build_semantic_program, validate_semantic_program, FlagEffect, MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram, SemanticTerminator};
 
 #[cfg(test)]
 mod tests {
@@ -22,6 +24,9 @@ mod tests {
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         assert_eq!(program.cfg.blocks.len(), 1);
         assert_eq!(program.cfg.blocks[0].ir.len(), 2);
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        assert_eq!(semantic.functions.len(), 1);
         let module = generate(&program, "entry");
         assert!(module.source.contains("rt.cpu.r[0]"));
         assert!(module.source.contains("block_0_arm_08000000"));
