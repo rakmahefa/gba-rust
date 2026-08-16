@@ -47,6 +47,7 @@ pub enum ThumbOp {
     LoadImm { rd: u8, rn: u8, word_offset: u8 },
     StoreImm { rd: u8, rn: u8, word_offset: u8 },
     Branch { target: u32, condition: Condition },
+    BranchLink { target: u32 },
     BranchExchange { rm: u8 },
     Unknown,
 }
@@ -165,6 +166,26 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
     Instruction { address, mode: Mode::Thumb, raw: raw as u32, size: 2, condition: Condition::Al, kind: InstructionKind::Thumb(op) }
 }
 
+pub fn decode_thumb_bl(address: u32, first: u16, second: u16) -> Instruction {
+    let s = ((first >> 10) & 1) as u32;
+    let imm10 = (first & 0x03FF) as u32;
+    let j1 = ((second >> 13) & 1) as u32;
+    let j2 = ((second >> 11) & 1) as u32;
+    let i1 = (!(j1 ^ s)) & 1;
+    let i2 = (!(j2 ^ s)) & 1;
+    let imm11 = (second & 0x07FF) as u32;
+    let immediate = (s << 24) | (i1 << 23) | (i2 << 22) | (imm10 << 12) | (imm11 << 1);
+    let target = address.wrapping_add(4).wrapping_add(sign_extend(immediate, 25) as u32);
+    Instruction {
+        address,
+        mode: Mode::Thumb,
+        raw: ((first as u32) << 16) | second as u32,
+        size: 4,
+        condition: Condition::Al,
+        kind: InstructionKind::Thumb(ThumbOp::BranchLink { target }),
+    }
+}
+
 pub fn read_arm(rom: &[u8], address: u32) -> Result<u32, DecodeError> {
     let offset = address.checked_sub(ROM_BASE).ok_or(DecodeError::OutOfRange(address))? as usize;
     let bytes = rom.get(offset..offset + 4).ok_or(DecodeError::Truncated(address))?;
@@ -175,4 +196,13 @@ pub fn read_thumb(rom: &[u8], address: u32) -> Result<u16, DecodeError> {
     let offset = address.checked_sub(ROM_BASE).ok_or(DecodeError::OutOfRange(address))? as usize;
     let bytes = rom.get(offset..offset + 2).ok_or(DecodeError::Truncated(address))?;
     Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+}
+
+pub fn read_thumb_bl(rom: &[u8], address: u32) -> Result<(u16, u16), DecodeError> {
+    let first = read_thumb(rom, address)?;
+    let second = read_thumb(rom, address + 2)?;
+    if (first & 0xF800) != 0xF000 || (second & 0xF800) != 0xF800 {
+        return Err(DecodeError::OutOfRange(address));
+    }
+    Ok((first, second))
 }
