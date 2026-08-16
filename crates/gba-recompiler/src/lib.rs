@@ -5,6 +5,7 @@ pub mod function;
 pub mod ir;
 pub mod optimization;
 pub mod semantic_ir;
+pub mod ssa;
 
 pub use cfg::{analyze, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
 pub use codegen::{generate, RustModule};
@@ -13,6 +14,7 @@ pub use function::{discover_functions, CallSite, CallTarget, Function, FunctionC
 pub use ir::{lower, IrInstruction, IrOp, Value};
 pub use optimization::{optimize_semantic_program, OptimizationChange, OptimizationKind, OptimizationReport};
 pub use semantic_ir::{build_semantic_program, validate_semantic_program, FlagEffect, MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram, SemanticTerminator};
+pub use ssa::{build_ssa_program, validate_ssa_program, SsaBlock, SsaFunction, SsaInstruction, SsaOp, SsaPhi, SsaProgram, SsaValue, ValueDef, ValueId};
 
 #[cfg(test)]
 mod tests {
@@ -32,6 +34,9 @@ mod tests {
         let (optimized, report) = optimize_semantic_program(&semantic);
         assert!(report.changed());
         assert_eq!(optimized.functions[0].blocks[0].instructions.len(), semantic.functions[0].blocks[0].instructions.len());
+        let ssa = build_ssa_program(&optimized);
+        validate_ssa_program(&ssa).unwrap();
+        assert!(!ssa.functions.is_empty());
         let module = generate(&program, "entry");
         assert!(module.source.contains("rt.cpu.r[0]"));
         assert!(module.source.contains("block_0_arm_08000000"));
