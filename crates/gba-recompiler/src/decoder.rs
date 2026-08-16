@@ -3,65 +3,26 @@ use thiserror::Error;
 pub const ROM_BASE: u32 = 0x0800_0000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Mode {
-    Arm,
-    Thumb,
-}
+pub enum Mode { Arm, Thumb }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Condition {
-    Al,
-    Eq,
-    Ne,
-    Cs,
-    Cc,
-    Mi,
-    Pl,
-    Vs,
-    Vc,
-    Hi,
-    Ls,
-    Ge,
-    Lt,
-    Gt,
-    Le,
-}
+pub enum Condition { Al, Eq, Ne, Cs, Cc, Mi, Pl, Vs, Vc, Hi, Ls, Ge, Lt, Gt, Le }
 
 impl Condition {
     pub fn suffix(self) -> &'static str {
         match self {
-            Self::Al => "",
-            Self::Eq => "_eq",
-            Self::Ne => "_ne",
-            Self::Cs => "_cs",
-            Self::Cc => "_cc",
-            Self::Mi => "_mi",
-            Self::Pl => "_pl",
-            Self::Vs => "_vs",
-            Self::Vc => "_vc",
-            Self::Hi => "_hi",
-            Self::Ls => "_ls",
-            Self::Ge => "_ge",
-            Self::Lt => "_lt",
-            Self::Gt => "_gt",
-            Self::Le => "_le",
+            Self::Al => "", Self::Eq => "_eq", Self::Ne => "_ne", Self::Cs => "_cs", Self::Cc => "_cc",
+            Self::Mi => "_mi", Self::Pl => "_pl", Self::Vs => "_vs", Self::Vc => "_vc", Self::Hi => "_hi",
+            Self::Ls => "_ls", Self::Ge => "_ge", Self::Lt => "_lt", Self::Gt => "_gt", Self::Le => "_le",
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BranchKind {
-    Branch,
-    Call,
-    Exchange,
-    Return,
-}
+pub enum BranchKind { Branch, Call, Exchange, Return }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Operand2 {
-    Imm(u32),
-    Reg { rm: u8, shift: u8 },
-}
+pub enum Operand2 { Imm(u32), Reg { rm: u8, shift: u8 } }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArmOp {
@@ -91,10 +52,7 @@ pub enum ThumbOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InstructionKind {
-    Arm(ArmOp),
-    Thumb(ThumbOp),
-}
+pub enum InstructionKind { Arm(ArmOp), Thumb(ThumbOp) }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Instruction {
@@ -108,10 +66,8 @@ pub struct Instruction {
 
 #[derive(Debug, Error)]
 pub enum DecodeError {
-    #[error("address {0:#x} is outside the cartridge ROM")]
-    OutOfRange(u32),
-    #[error("truncated instruction at {0:#x}")]
-    Truncated(u32),
+    #[error("address {0:#x} is outside the cartridge ROM")] OutOfRange(u32),
+    #[error("truncated instruction at {0:#x}")] Truncated(u32),
 }
 
 fn sign_extend(value: u32, bits: u8) -> i32 {
@@ -121,21 +77,10 @@ fn sign_extend(value: u32, bits: u8) -> i32 {
 
 fn arm_condition(raw: u32) -> Condition {
     match raw >> 28 {
-        0x0 => Condition::Eq,
-        0x1 => Condition::Ne,
-        0x2 => Condition::Cs,
-        0x3 => Condition::Cc,
-        0x4 => Condition::Mi,
-        0x5 => Condition::Pl,
-        0x6 => Condition::Vs,
-        0x7 => Condition::Vc,
-        0x8 => Condition::Hi,
-        0x9 => Condition::Ls,
-        0xA => Condition::Ge,
-        0xB => Condition::Lt,
-        0xC => Condition::Gt,
-        0xD => Condition::Le,
-        _ => Condition::Al,
+        0x0 => Condition::Eq, 0x1 => Condition::Ne, 0x2 => Condition::Cs, 0x3 => Condition::Cc,
+        0x4 => Condition::Mi, 0x5 => Condition::Pl, 0x6 => Condition::Vs, 0x7 => Condition::Vc,
+        0x8 => Condition::Hi, 0x9 => Condition::Ls, 0xA => Condition::Ge, 0xB => Condition::Lt,
+        0xC => Condition::Gt, 0xD => Condition::Le, _ => Condition::Al,
     }
 }
 
@@ -173,7 +118,7 @@ pub fn decode_arm(address: u32, raw: u32) -> Instruction {
             Operand2::Reg { rm: (raw & 0xF) as u8, shift: ((raw >> 7) & 0x1F) as u8 }
         };
         match opcode {
-            0xC => ArmOp::Mov { rd, op2 },
+            0xD => ArmOp::Mov { rd, op2 },
             0x4 => ArmOp::Add { rd, rn, op2 },
             0x2 => ArmOp::Sub { rd, rn, op2 },
             0xA => ArmOp::Cmp { rn, op2 },

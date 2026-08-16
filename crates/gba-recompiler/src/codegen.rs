@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::cfg::Program;
+use crate::cfg::{BlockId, Program};
 use crate::decoder::{Condition, Mode};
 use crate::ir::{IrOp, Value};
 
@@ -10,72 +10,193 @@ pub struct RustModule {
 }
 
 fn value(v: &Value) -> String {
-    match v { Value::Reg(r) => format!("rt.cpu.r[{r}]"), Value::Imm(v) => format!("{v:#x}") }
+    match v {
+        Value::Reg(r) => format!("rt.cpu.r[{r}]"),
+        Value::Imm(v) => format!("{v:#x}"),
+    }
 }
 
 fn condition_code(condition: Condition) -> u8 {
     condition as u8
 }
 
+fn mode_suffix(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Arm => "arm",
+        Mode::Thumb => "thumb",
+    }
+}
+
+fn block_name(block_id: BlockId, mode: Mode, address: u32) -> String {
+    format!("block_{}_{}_{address:08x}", block_id.0, mode_suffix(mode))
+}
+
 fn emit_op(out: &mut String, op: &IrOp) {
     match op {
-        IrOp::Nop => { let _ = writeln!(out, "    rt.tick(1);"); }
-        IrOp::Mov { dst, src } => { let _ = writeln!(out, "    rt.cpu.r[{dst}] = {};", value(src)); }
-        IrOp::Add { dst, lhs, rhs } => { let _ = writeln!(out, "    rt.cpu.r[{dst}] = rt.cpu.r[{lhs}].wrapping_add({});", value(rhs)); }
-        IrOp::Sub { dst, lhs, rhs } => { let _ = writeln!(out, "    rt.cpu.r[{dst}] = rt.cpu.r[{lhs}].wrapping_sub({});", value(rhs)); }
-        IrOp::Cmp { lhs, rhs } => { let _ = writeln!(out, "    rt.compare(rt.cpu.r[{lhs}], {});", value(rhs)); }
-        IrOp::Load { dst, base, offset, byte } => {
-            if *byte { let _ = writeln!(out, "    rt.cpu.r[{dst}] = rt.read8(rt.cpu.r[{base}].wrapping_add({offset}i32 as u32)) as u32;"); }
-            else { let _ = writeln!(out, "    rt.cpu.r[{dst}] = rt.read32(rt.cpu.r[{base}].wrapping_add({offset}i32 as u32));"); }
+        IrOp::Nop => {
+            let _ = writeln!(out, "    rt.tick(1);");
         }
-        IrOp::Store { src, base, offset, byte } => {
-            if *byte { let _ = writeln!(out, "    rt.write8(rt.cpu.r[{base}].wrapping_add({offset}i32 as u32), rt.cpu.r[{src}] as u8);"); }
-            else { let _ = writeln!(out, "    rt.write32(rt.cpu.r[{base}].wrapping_add({offset}i32 as u32), rt.cpu.r[{src}]);"); }
+        IrOp::Mov { dst, src } => {
+            let _ = writeln!(out, "    rt.cpu.r[{dst}] = {};", value(src));
         }
-        IrOp::Branch { target, condition, link } => {
-            if *link { let _ = writeln!(out, "    rt.cpu.r[14] = rt.cpu.r[15].wrapping_add(4);"); }
-            if *condition == Condition::Al { let _ = writeln!(out, "    return rt.dispatch({target:#010x});"); }
-            else { let _ = writeln!(out, "    if rt.condition({}) {{ return rt.dispatch({target:#010x}); }}", condition_code(*condition)); }
+        IrOp::Add { dst, lhs, rhs } => {
+            let _ = writeln!(
+                out,
+                "    rt.cpu.r[{dst}] = rt.cpu.r[{lhs}].wrapping_add({});",
+                value(rhs)
+            );
+        }
+        IrOp::Sub { dst, lhs, rhs } => {
+            let _ = writeln!(
+                out,
+                "    rt.cpu.r[{dst}] = rt.cpu.r[{lhs}].wrapping_sub({});",
+                value(rhs)
+            );
+        }
+        IrOp::Cmp { lhs, rhs } => {
+            let _ = writeln!(out, "    rt.compare(rt.cpu.r[{lhs}], {});", value(rhs));
+        }
+        IrOp::Load {
+            dst,
+            base,
+            offset,
+            byte,
+        } => {
+            if *byte {
+                let _ = writeln!(
+                    out,
+                    "    rt.cpu.r[{dst}] = rt.read8(rt.cpu.r[{base}].wrapping_add({offset}i32 as u32)) as u32;"
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "    rt.cpu.r[{dst}] = rt.read32(rt.cpu.r[{base}].wrapping_add({offset}i32 as u32));"
+                );
+            }
+        }
+        IrOp::Store {
+            src,
+            base,
+            offset,
+            byte,
+        } => {
+            if *byte {
+                let _ = writeln!(
+                    out,
+                    "    rt.write8(rt.cpu.r[{base}].wrapping_add({offset}i32 as u32), rt.cpu.r[{src}] as u8);"
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "    rt.write32(rt.cpu.r[{base}].wrapping_add({offset}i32 as u32), rt.cpu.r[{src}]);"
+                );
+            }
+        }
+        IrOp::Branch {
+            target,
+            condition,
+            link,
+        } => {
+            if *link {
+                let _ = writeln!(out, "    rt.cpu.r[14] = rt.cpu.r[15].wrapping_add(4);");
+            }
+            if *condition == Condition::Al {
+                let _ = writeln!(out, "    return rt.dispatch({target:#010x});");
+            } else {
+                let _ = writeln!(
+                    out,
+                    "    if rt.condition({}) {{ return rt.dispatch({target:#010x}); }}",
+                    condition_code(*condition)
+                );
+            }
         }
         IrOp::BranchExchange { register, link } => {
-            if *link { let _ = writeln!(out, "    rt.cpu.r[14] = rt.cpu.r[15].wrapping_add(4);"); }
+            if *link {
+                let _ = writeln!(out, "    rt.cpu.r[14] = rt.cpu.r[15].wrapping_add(4);");
+            }
             let _ = writeln!(out, "    return rt.dispatch(rt.cpu.r[{register}] & !1);");
         }
-        IrOp::Unknown { address, raw, mode } => {
-            let mode = match mode { Mode::Arm => "Arm", Mode::Thumb => "Thumb" };
-            let _ = writeln!(out, "    rt.unimplemented({address:#010x}, {raw:#010x}, \"{mode}\");");
+        IrOp::Unknown {
+            address,
+            raw,
+            mode,
+        } => {
+            let mode = match mode {
+                Mode::Arm => "Arm",
+                Mode::Thumb => "Thumb",
+            };
+            let _ = writeln!(
+                out,
+                "    rt.unimplemented({address:#010x}, {raw:#010x}, \"{mode}\");"
+            );
         }
     }
 }
 
 pub fn generate(program: &Program, module_name: &str) -> RustModule {
-    assert!(!program.cfg.blocks.is_empty(), "cannot generate an empty program");
+    assert!(
+        !program.cfg.blocks.is_empty(),
+        "cannot generate an empty program"
+    );
     let mut out = String::new();
     let _ = writeln!(out, "// @generated by gba-recompiler; do not edit.\n");
     let _ = writeln!(out, "use gba_runtime::Runtime;\n");
-    let entry = program.cfg.blocks[program.entry.0].key.address;
-    let _ = writeln!(out, "pub fn {module_name}(rt: &mut Runtime) -> ! {{ rt.dispatch({entry:#010x}) }}\n");
+    let entry = &program.cfg.blocks[program.entry.0];
+    let _ = writeln!(
+        out,
+        "pub fn {module_name}(rt: &mut Runtime) -> ! {{ rt.dispatch({:#010x}) }}\n",
+        entry.key.address
+    );
 
     for block in &program.cfg.blocks {
-        if block.instructions.is_empty() { continue; }
+        if block.instructions.is_empty() {
+            continue;
+        }
+        let name = block_name(block.id, block.key.mode, block.key.address);
         let _ = writeln!(out, "#[inline(always)]");
-        let _ = writeln!(out, "pub fn block_{:08x}(rt: &mut Runtime) -> ! {{", block.key.address);
-        for ins in &block.ir { for op in &ins.ops { emit_op(&mut out, op); } }
+        let _ = writeln!(out, "pub fn {name}(rt: &mut Runtime) -> ! {{");
+        for ins in &block.ir {
+            for op in &ins.ops {
+                emit_op(&mut out, op);
+            }
+        }
 
-        let has_dynamic_terminator = block.ir.iter().flat_map(|i| i.ops.iter()).any(|op| matches!(op, IrOp::BranchExchange { .. }));
+        let has_dynamic_terminator = block
+            .ir
+            .iter()
+            .flat_map(|i| i.ops.iter())
+            .any(|op| matches!(op, IrOp::BranchExchange { .. }));
         if has_dynamic_terminator {
             let _ = writeln!(out, "    unreachable!(\"dynamic branch terminator\");");
         } else if let Some(last) = block.ir.last().and_then(|i| i.ops.last()) {
             match last {
-                IrOp::Branch { condition, target, .. } if *condition != Condition::Al => {
-                    let fallthrough = block.successors.iter().copied().find(|id| program.cfg.blocks[id.0].key.address != *target);
-                    if let Some(next) = fallthrough { let _ = writeln!(out, "    return rt.dispatch({:#010x});", program.cfg.blocks[next.0].key.address); }
-                    else { let _ = writeln!(out, "    return rt.halt();"); }
+                IrOp::Branch {
+                    condition,
+                    target,
+                    ..
+                } if *condition != Condition::Al => {
+                    let fallthrough = block
+                        .successors
+                        .iter()
+                        .copied()
+                        .find(|id| program.cfg.blocks[id.0].key.address != *target);
+                    if let Some(next) = fallthrough {
+                        let next_block = &program.cfg.blocks[next.0];
+                        let name = block_name(next_block.id, next_block.key.mode, next_block.key.address);
+                        let _ = writeln!(out, "    return {name}(rt);");
+                    } else {
+                        let _ = writeln!(out, "    return rt.halt();");
+                    }
                 }
                 IrOp::Branch { .. } => {}
                 _ => {
-                    if let Some(next) = block.successors.first() { let _ = writeln!(out, "    return rt.dispatch({:#010x});", program.cfg.blocks[next.0].key.address); }
-                    else { let _ = writeln!(out, "    return rt.halt();"); }
+                    if let Some(next) = block.successors.first() {
+                        let next_block = &program.cfg.blocks[next.0];
+                        let name = block_name(next_block.id, next_block.key.mode, next_block.key.address);
+                        let _ = writeln!(out, "    return {name}(rt);");
+                    } else {
+                        let _ = writeln!(out, "    return rt.halt();");
+                    }
                 }
             }
         }
@@ -94,7 +215,7 @@ mod tests {
         let rom = 0xE1A0_0000u32.to_le_bytes().to_vec();
         let program = crate::analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let generated = generate(&program, "entry");
-        assert!(generated.source.contains("block_08000000"));
+        assert!(generated.source.contains("block_0_arm_08000000"));
         assert!(generated.source.contains("gba_runtime::Runtime"));
         assert!(generated.source.contains("rt.halt()"));
     }
