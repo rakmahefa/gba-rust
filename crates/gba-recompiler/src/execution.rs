@@ -20,11 +20,15 @@ pub use architecture::{Nzcv, NzcvMask, ShiftResult, ShiftType};
 pub use architecture::{add_with_carry, architectural_pc, exchange_target, link_address, rotate_unaligned_word, shift_immediate, shift_register, sub_with_borrow};
 
 pub fn add_flags(lhs: u32, rhs: u32, result: u32) -> Nzcv {
-    architecture::add_with_carry(lhs, rhs, false).1
+    let c = (lhs as u64 + rhs as u64) > u32::MAX as u64;
+    let v = (!(lhs ^ rhs) & (lhs ^ result) & 0x8000_0000) != 0;
+    Nzcv::new(result & 0x8000_0000 != 0, result == 0, c, v)
 }
 
 pub fn sub_flags(lhs: u32, rhs: u32, result: u32) -> Nzcv {
-    architecture::sub_with_borrow(lhs, rhs, false).1
+    let c = lhs >= rhs;
+    let v = ((lhs ^ rhs) & (lhs ^ result) & 0x8000_0000) != 0;
+    Nzcv::new(result & 0x8000_0000 != 0, result == 0, c, v)
 }
 
 pub fn condition_holds(cpsr: u32, condition: Condition) -> bool {
@@ -37,9 +41,7 @@ pub fn condition_holds(cpsr: u32, condition: Condition) -> bool {
     architecture::condition_holds(nzcv, condition)
 }
 
-pub fn branch_target(raw_target: u32, mode: Mode) -> u32 {
-    architecture::branch_target(raw_target, mode)
-}
+pub fn branch_target(raw_target: u32, mode: Mode) -> u32 { architecture::branch_target(raw_target, mode) }
 
 #[cfg(test)]
 mod tests {
@@ -47,7 +49,7 @@ mod tests {
 
     #[test]
     fn compatibility_add_flags_keeps_legacy_signature() {
-        let result = 0x7fff_ffffu32.wrapping_add(1);
+        let result = 0x8000_0000u32;
         let flags = add_flags(0x7fff_ffff, 1, result);
         assert!(flags.n && flags.v);
         assert!(!flags.c && !flags.z);
