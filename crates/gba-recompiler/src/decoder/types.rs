@@ -56,7 +56,13 @@ pub enum BranchKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operand2 {
     Imm(u32),
-    Reg { rm: u8, shift: u8 },
+    Reg {
+        rm: u8,
+        shift: u8,
+        shift_kind: u8,
+        by_register: bool,
+        shift_register: u8,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
