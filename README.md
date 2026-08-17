@@ -1,8 +1,8 @@
 # gba-rust
 
-**gba-rust** is a Rust-first **static Game Boy Advance recompilation project**. The project analyzes executable code from a GBA ROM, recovers reachable control flow and functions, lowers the result into typed intermediate representations, applies conservative IR optimizations, generates Rust source, and provides a separate runtime layer for GBA-facing services.
+**gba-rust** is a Rust-first **static Game Boy Advance recompilation project**. It analyzes executable code from a GBA ROM, recovers reachable control flow and functions, lowers instructions into typed and semantic intermediate representations, performs conservative optimizations, and generates Rust source intended to execute against a separate GBA runtime.
 
-The architecture is deliberately **recompiler-first**, rather than centered on instruction-by-instruction interpretation.
+The project is **recompiler-first** rather than interpreter-first: the long-term execution model is statically generated native Rust/LLVM code backed by explicit runtime services.
 
 ```text
 GBA ROM
@@ -39,28 +39,22 @@ GBA runtime services
 
 ## Current status
 
-The project has moved well beyond the initial decoder/CFG prototype. The main branch currently contains a working analysis pipeline that spans decoding, CFG recovery, function recovery, typed IR, semantic IR, conservative optimization, and deterministic Rust code generation.
+The project has moved beyond the initial decoder/CFG prototype. The main branch currently contains an end-to-end **static analysis → semantic IR → optimization → Rust code generation** pipeline, with the semantic layer being actively hardened around architectural side effects.
 
-Implemented foundations include:
+Recent work has specifically strengthened:
 
-- ARM and Thumb decoding infrastructure, including Thumb-1/Thumb-2-aware decoder organization;
-- reachable-code discovery from an explicit ROM entry point;
-- ARM/Thumb-aware basic-block and control-flow graph recovery;
-- leader-based block partitioning that preserves sequential instruction tails;
-- function discovery with call sites, return sites and function-level control flow;
-- typed IR with register, memory, control-flow and flag-effect information;
-- semantic IR with explicit terminators, register dependencies and memory/flag effects;
-- semantic-program validation to protect instruction identity, ownership and CFG invariants;
-- conservative optimization passes for identity moves, zero-add/sub normalization, constant propagation and local constant folding;
-- deterministic Rust source generation from recovered program structure;
-- a dedicated GBA runtime layer for CPU state, cartridge access, memory access, timing and display/audio foundations;
-- cartridge save modeling for SRAM, Flash and EEPROM variants;
-- dirty tracking and temporary-file save replacement with `.sav.bak` backup retention;
-- a CLI development harness for ROM analysis and generated-source emission;
-- an `egui`/`eframe` frontend crate prototype;
-- workspace tests and GitHub Actions validation.
+- ARM and GBA Thumb decoding coverage;
+- ARM/Thumb-aware reachable CFG recovery and block partitioning;
+- function discovery with call and return structure;
+- typed IR register, control-flow, memory and flag effects;
+- semantic IR preservation of instruction identity and architectural effects;
+- complete modeling of the currently represented memory-effect kinds, including extended and Thumb memory operations;
+- optimizer safeguards so transformations respect modeled IR effects;
+- code generation for the expanded IR operation set;
+- regression tests for semantic completeness and non-trivial instruction fixtures;
+- deterministic Rust source generation.
 
-The generated program is **not yet a complete playable GBA game**. Full ARM7TDMI semantics, hardware emulation, generated-block linking/dispatch and broad instruction coverage are still under active development.
+The generated program is **not yet a complete playable GBA game**. Full ARM7TDMI behavior, the GBA hardware contract, generated-block linking/dispatch, and broad instruction coverage remain under active development.
 
 ## Architecture
 
@@ -102,18 +96,18 @@ The separation is intentional:
 
 - **`gba-recompiler`** understands ROM code and produces analysis data, semantic IR and generated Rust.
 - **Generated Rust** represents statically recovered program logic.
-- **`gba-runtime`** provides the hardware-facing services consumed by generated code.
+- **`gba-runtime`** provides hardware-facing services consumed by generated code.
 - **`gba-cli`** is the development harness for ROM analysis and generated-source emission.
-- **`gba-core`** contains lower-level emulator/runtime foundations such as CPU, bus and cartridge models.
+- **`gba-core`** contains lower-level CPU, bus and cartridge foundations.
 - **`gba-egui`** contains an `egui`/`eframe` frontend prototype.
 
-The last two crates currently exist in the repository but are **not yet listed as workspace members** in the root `Cargo.toml`; they should therefore be treated as auxiliary/prototype layers until integrated into the workspace build.
+`gba-core` and `gba-egui` are present in the repository but are currently **not declared as root workspace members**. They should therefore be considered auxiliary/prototype layers until they are integrated into the workspace architecture.
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the higher-level architectural contract and roadmap.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the architectural contract and long-term roadmap.
 
 ## Workspace
 
-The root workspace currently declares these members:
+The root workspace currently declares:
 
 ```text
 crates/
@@ -127,7 +121,7 @@ crates/
     └── ROM analysis and generated-source development harness
 ```
 
-Additional crates currently present in the repository tree:
+Additional repository crates:
 
 ```text
 crates/
@@ -138,17 +132,19 @@ crates/
     └── egui/eframe frontend prototype
 ```
 
-The workspace uses **Rust 2021**. The release profile currently enables thin LTO, a single codegen unit and `panic = "abort"`.
+The workspace uses **Rust 2021**. The release profile enables thin LTO, a single codegen unit, and `panic = "abort"`.
 
 ## Static recompiler pipeline
 
 ### 1. Decode
 
-The decoder represents each decoded instruction with its address, size, execution mode and operation. Decoder logic is split into focused modules for common handling, classification, memory operations, semantic ARM/Thumb decoding and shared instruction types.
+The decoder represents each instruction with its address, size, execution mode and operation. The decoder is organized into focused modules covering ARM and GBA Thumb decoding, memory operations, classification and shared instruction semantics.
+
+GBA hardware uses **ARM state and the original ARMv4T Thumb instruction set**; this project should therefore not be described as a Thumb-2 implementation.
 
 ### 2. Discover reachable code
 
-Analysis starts from an explicit ROM entry address and instruction mode. The analyzer follows statically known successors while preserving the ARM/Thumb mode in the CFG key.
+Analysis starts from an explicit ROM entry address and execution mode. Statically known successors are followed while preserving the ARM/Thumb mode in the CFG key.
 
 ```text
 entry
@@ -159,7 +155,7 @@ entry
   └── statically known exchange/call target
 ```
 
-Unknown instructions and dynamic targets that cannot be recovered statically terminate or constrain discovery rather than inventing unsafe successors.
+Unknown instructions and dynamic targets that cannot be recovered statically constrain discovery instead of inventing unsafe successors.
 
 ### 3. Recover basic blocks
 
@@ -186,30 +182,28 @@ The function-analysis layer groups CFG blocks into functions and tracks:
 - return continuations;
 - indirect call/branch cases that cannot be fully resolved statically.
 
-This stage provides the structural information required by the semantic IR.
+This provides the structure consumed by the semantic IR.
 
 ### 5. Lower to typed IR
 
-The initial IR keeps operations explicit instead of exposing decoder-specific representations directly to later passes.
+The typed IR keeps architectural operations explicit rather than exposing decoder-specific representations directly to later passes.
 
 Representative operations include:
 
 - `Mov`
-- `Add`
-- `Sub`
+- arithmetic and logical operations
 - `Cmp`
 - `Load`
 - `Store`
-- `Branch`
-- `BranchExchange`
+- branches and exchange operations
 - `Nop`
 - `Unknown`
 
-The IR also derives architectural effects such as register reads/writes, memory access width/kind, flag dependencies and control-flow effects.
+IR instructions also expose architectural effects such as register reads/writes, memory access width and kind, flag effects, and control-flow effects.
 
 ### 6. Build semantic IR
 
-The semantic layer makes control flow and side effects explicit. Semantic blocks carry a terminator such as:
+The semantic layer makes control flow and side effects explicit. Semantic blocks carry terminators such as:
 
 - fallthrough;
 - conditional branch;
@@ -219,24 +213,76 @@ The semantic layer makes control flow and side effects explicit. Semantic blocks
 - indirect branch;
 - unknown.
 
-Semantic validation protects invariants such as block ownership, instruction identity, valid successors and call continuations.
+Semantic instructions preserve the effects needed by later optimization and code generation, including modeled register dependencies, flag effects and memory effects.
+
+Recent hardening work specifically corrected and completed memory-effect propagation for extended instructions and Thumb memory operations. This is important because optimization correctness depends on the semantic layer accurately describing what an instruction can read, write or affect.
+
+Semantic-program validation protects invariants such as:
+
+- block ownership;
+- instruction identity;
+- successor validity;
+- call continuations;
+- structural consistency between recovered functions and semantic blocks.
 
 ### 7. Optimize conservatively
 
-The optimizer currently focuses on transformations that can be justified by the modeled semantics, including:
+The optimizer currently prioritizes transformations that are justified by the modeled semantics, including:
 
 - identity-move elimination to timing-preserving `Nop`;
 - `Add 0` / `Sub 0` normalization;
 - local constant propagation;
 - local constant folding.
 
-Control-flow-sensitive and side-effect-sensitive operations such as PC writes, flag-changing comparisons and indirect branches are deliberately treated conservatively. More aggressive dead-code elimination and global optimization should wait until the IR models all required architectural effects explicitly.
+Optimization passes are deliberately effect-aware. Operations with modeled register, flag, memory or control-flow effects are not simplified merely because their value result looks redundant.
+
+More aggressive dead-code elimination and global optimization should wait until the remaining architectural effects are represented precisely enough to prove safety.
 
 ### 8. Generate Rust
 
-`gba-recompiler` emits deterministic Rust source representing recovered basic blocks. Generated code accesses runtime services for register state, memory, condition evaluation, timing and control-flow dispatch.
+`gba-recompiler` emits deterministic Rust representing recovered program structure and basic blocks. Generated code uses runtime services for register state, memory operations, condition evaluation, timing and control-flow dispatch.
 
-The generated source is currently a **development artifact and intermediate execution target**, not a packaged standalone game executable.
+The generator now handles the expanded IR operation set needed by the semantic hardening work. The generated source remains a **development artifact and intermediate execution target**, not a packaged standalone game executable.
+
+## Recompiler crate API
+
+The public `gba-recompiler` surface is organized around the major compilation stages:
+
+```rust
+pub mod cfg;
+pub mod codegen;
+pub mod decoder;
+pub mod function;
+pub mod ir;
+pub mod optimization;
+pub mod semantic_ir;
+```
+
+The crate exposes the main pipeline building blocks, including:
+
+```text
+decode_arm / decode_thumb
+        │
+        ▼
+analyze
+        │
+        ▼
+discover_functions
+        │
+        ▼
+build_semantic_program
+        │
+        ▼
+validate_semantic_program
+        │
+        ▼
+optimize_semantic_program
+        │
+        ▼
+generate
+```
+
+A full-pipeline regression test in the crate verifies that analysis reaches semantic IR, optimization and Rust code generation as a single flow.
 
 ## Runtime
 
@@ -333,7 +379,7 @@ The CLI currently:
 2. starts static analysis at `0x0800_0000` in ARM mode;
 3. reports the recovered entry, block count and instruction count;
 4. emits generated Rust to `target/gba_generated.rs`;
-5. initializes a runtime and loads the ROM into a `Cartridge` with the `saves/` directory as its persistence location.
+5. initializes the runtime and loads the ROM into a `Cartridge` with the `saves/` directory as its persistence location.
 
 It does **not yet execute a complete generated game loop**.
 
@@ -367,7 +413,7 @@ cargo test --workspace
 cargo check --workspace --all-targets
 ```
 
-The CI workflow validates formatting, workspace tests and workspace compilation checks.
+The repository uses GitHub Actions for automated validation. The latest merged work has focused on semantic IR correctness, memory-effect completeness, optimizer effect-awareness and expanded code-generation coverage.
 
 ## Optimization strategy
 
@@ -388,27 +434,42 @@ The guiding principle is to perform as much work as possible at **compile time**
 
 ## Roadmap
 
-Near-term priorities are:
+### Recompiler
 
-- [x] Establish Rust workspace and layer separation.
+- [x] Rust workspace and layer separation.
 - [x] ARM/Thumb decoder foundation.
 - [x] Reachable CFG recovery.
 - [x] ARM/Thumb-aware block partitioning.
 - [x] Initial typed IR.
 - [x] Function discovery foundation.
 - [x] Semantic IR and structural validation.
-- [x] Conservative IR optimization foundation.
-- [x] Initial Rust code generator.
-- [x] Cartridge save-device model.
-- [x] Initial `egui`/`eframe` frontend prototype.
+- [x] Semantic memory-effect hardening for represented instruction classes.
+- [x] Effect-aware conservative optimization foundation.
+- [x] Rust code generation for the expanded IR operation set.
 - [ ] Expand ARM/Thumb instruction coverage toward real game code.
 - [ ] Improve function/call/return recovery for real-world ROM control flow.
-- [ ] Strengthen IR semantics for flags, timing, memory and exceptions.
+- [ ] Strengthen timing, exception and remaining architectural side-effect modeling.
 - [ ] Add control-flow-aware/global optimization passes.
 - [ ] Replace generated dispatch placeholders with linked block execution.
-- [ ] Implement the complete GBA memory/hardware contract.
+
+### Runtime
+
+- [x] CPU/register state foundation.
+- [x] Cartridge and save-device foundations.
+- [x] Cycle/tick accounting foundation.
+- [ ] Complete GBA memory/I/O contract.
+- [ ] Complete PPU/video behavior.
+- [ ] Complete APU/audio behavior.
+- [ ] DMA, timers, IRQs and keypad.
+- [ ] Complete cartridge protocols and hardware timing.
+
+### Integration and validation
+
+- [x] CLI development harness.
+- [x] Initial `egui`/`eframe` frontend prototype.
 - [ ] Integrate `gba-core` and `gba-egui` into the workspace architecture.
 - [ ] Add deterministic FireRed/Emerald regression suites.
+- [ ] Add generated-code/runtime differential tests.
 - [ ] Benchmark generated native code and runtime hot paths.
 - [ ] Reach a genuinely playable end-to-end generated ROM.
 
@@ -419,7 +480,8 @@ Near-term priorities are:
 - **static analysis over runtime interpretation**;
 - **explicit boundaries between generated code and hardware services**;
 - **semantic information before aggressive optimization**;
-- **deterministic transformations**;
+- **effect-aware transformations**;
+- **deterministic compilation stages**;
 - **correctness before performance**;
 - **small, testable Rust components**;
 - **native-code execution as the eventual performance target**.
