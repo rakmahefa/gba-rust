@@ -1,15 +1,10 @@
-use super::arm;
 use super::classification::{classify_arm, classify_thumb, ArmClass, ThumbClass};
 use super::common::arm_condition;
-use super::thumb;
+use super::semantic_arm;
+use super::semantic_thumb;
 use super::types::{ArmOp, Condition, Instruction, InstructionKind, Mode, ThumbOp};
 
-/// Decode an ARM instruction after opcode-space classification.
-///
-/// Classification is deliberately kept independent from operand extraction and
-/// semantic construction. The existing ARM implementation remains the semantic
-/// backend during this migration; this boundary makes the separation explicit
-/// and gives us a stable place for per-family semantic decoders to move into.
+/// Decode an ARM instruction as `classify -> family semantic decode`.
 pub fn decode_arm(address: u32, raw: u32) -> Instruction {
     let class = classify_arm(raw);
     decode_arm_classified(address, raw, class)
@@ -20,7 +15,7 @@ fn decode_arm_classified(address: u32, raw: u32, class: ArmClass) -> Instruction
         return unknown_arm(address, raw);
     }
 
-    let instruction = arm::decode_arm(address, raw);
+    let instruction = semantic_arm::decode(address, raw, class);
     debug_assert!(
         !matches!(instruction.kind, InstructionKind::Arm(ArmOp::Unknown)),
         "classified ARM opcode {class:?} decoded as unknown: {raw:#010x}"
@@ -28,7 +23,7 @@ fn decode_arm_classified(address: u32, raw: u32, class: ArmClass) -> Instruction
     instruction
 }
 
-/// Decode a Thumb instruction after opcode-space classification.
+/// Decode a Thumb instruction as `classify -> family semantic decode`.
 pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
     let class = classify_thumb(raw);
     decode_thumb_classified(address, raw, class)
@@ -39,7 +34,7 @@ fn decode_thumb_classified(address: u32, raw: u16, class: ThumbClass) -> Instruc
         return unknown_thumb(address, raw);
     }
 
-    let instruction = thumb::decode_thumb(address, raw);
+    let instruction = semantic_thumb::decode(address, raw, class);
     debug_assert!(
         !matches!(instruction.kind, InstructionKind::Thumb(ThumbOp::Unknown)),
         "classified Thumb opcode {class:?} decoded as unknown: {raw:#06x}"
@@ -48,7 +43,7 @@ fn decode_thumb_classified(address: u32, raw: u16, class: ThumbClass) -> Instruc
 }
 
 pub fn decode_thumb_bl(address: u32, first: u16, second: u16) -> Instruction {
-    thumb::decode_thumb_bl(address, first, second)
+    semantic_thumb::decode_bl(address, first, second)
 }
 
 fn unknown_arm(address: u32, raw: u32) -> Instruction {
