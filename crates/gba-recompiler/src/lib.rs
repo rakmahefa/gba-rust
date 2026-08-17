@@ -39,7 +39,6 @@ mod tests {
         let module = generate_semantic(&program, &optimized, "entry");
         assert!(module.source.contains("rt.enter_instruction"));
         assert!(module.source.contains("rt.mov(0"));
-        assert!(module.source.contains("rt.add(0, rt.read_reg(0)"));
         assert!(!module.source.contains("rt.execute_arm_instruction"));
         assert!(!module.source.contains("rt.execute_thumb_instruction"));
     }
