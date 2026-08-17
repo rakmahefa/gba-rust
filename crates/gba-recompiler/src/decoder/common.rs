@@ -41,11 +41,12 @@ pub(super) fn arm_operand2(raw: u32) -> Operand2 {
         let rotate = ((raw >> 8) & 0xF) * 2;
         Operand2::Imm(imm8.rotate_right(rotate))
     } else {
+        let by_register = raw & (1 << 4) != 0;
         Operand2::Reg {
             rm: (raw & 0xF) as u8,
-            shift: ((raw >> 7) & 0x1F) as u8,
+            shift: if by_register { 0 } else { ((raw >> 7) & 0x1F) as u8 },
             shift_kind: ((raw >> 5) & 0x3) as u8,
-            by_register: raw & (1 << 4) != 0,
+            by_register,
             shift_register: ((raw >> 8) & 0xF) as u8,
         }
     }
