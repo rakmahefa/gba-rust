@@ -1,0 +1,44 @@
+name: Repair ARM/Thumb decoder patch
+on:
+  push:
+    branches:
+      - agent/arm-thumb-complete
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore valid decoder and apply focused fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout 2819a9c5403de91ca04c75c91a02ad9d31ae4f86 -- crates/gba-recompiler/src/decoder.rs crates/gba-recompiler/src/ir.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/gba-recompiler/src/decoder.rs')
+          s = p.read_text()
+          s = s.replace(
+              '    else if (raw & 0x0C00_0010) == 0x0000_0010 {',
+              '    else if (raw & 0x0F00_0010) == 0x0E00_0010 {',
+          )
+          s = s.replace(
+              '    else if top == 0b11100 {',
+              '    else if (raw & 0xF800) == 0xE000 {',
+          )
+          s = s.replace(
+              'assert_eq!(decode_thumb(ROM_BASE, 0x4700).kind, InstructionKind::Thumb(ThumbOp::BranchExchange { rm: 8 }));',
+              'assert_eq!(decode_thumb(ROM_BASE, 0x4700).kind, InstructionKind::Thumb(ThumbOp::BranchExchange { rm: 0 }));',
+          )
+          p.write_text(s)
+          PY
+          rm -f .github/workflows/repair-arm-thumb.yml
+          cargo fmt --all
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/gba-recompiler/src/decoder.rs crates/gba-recompiler/src/ir.rs .github/workflows/repair-arm-thumb.yml
+          git commit -m 'Repair ARM/Thumb decoder patch'
+          git push
