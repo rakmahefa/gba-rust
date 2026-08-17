@@ -9,49 +9,57 @@ use gba_runtime::{CPSR_C, CPSR_N, CPSR_V, CPSR_Z};
 fn arm_rom(words: &[u32]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
 fn thumb_rom(words: &[u16]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
 
-fn runtime_rlib() -> PathBuf {
-    let dir = std::env::current_exe().expect("test executable").parent().expect("test directory").to_path_buf();
-    fs::read_dir(&dir)
-        .expect("target dependency directory")
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("libgba_runtime-") && name.ends_with(".rlib")))
-        .unwrap_or_else(|| panic!("missing gba_runtime rlib in {}", dir.display()))
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("workspace root")
 }
 
 fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
     let id = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
     let root = std::env::temp_dir().join(format!("gba-specialized-{id}"));
-    fs::create_dir_all(&root).expect("temporary directory");
-    let generated = root.join("generated.rs");
-    let wrapper = root.join("main.rs");
-    let binary = root.join("generated-test");
+    fs::create_dir_all(root.join("src")).expect("temporary project");
+    let generated = root.join("src/generated.rs");
+    let main_rs = root.join("src/main.rs");
+    let cargo_toml = root.join("Cargo.toml");
+    let binary = root.join("target/debug/gba-specialized");
     fs::write(&generated, source).expect("generated source");
+    let runtime_path = workspace_root().join("crates/gba-runtime");
     fs::write(
-        &wrapper,
+        &cargo_toml,
+        format!(
+            "[package]\nname = \"gba_generated_specialized_test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\ngba-runtime = {{ package = \"gba-runtime\", path = \"{}\" }}\n",
+            runtime_path.display()
+        ),
+    )
+    .expect("Cargo manifest");
+    fs::write(
+        &main_rs,
         format!(
             "mod generated {{ include!(r#\"{}\"#); }}\nfn main() {{ let mut rt = gba_runtime::Runtime::new(); {} let result = generated::entry(&mut rt).expect(\"generated execution\"); println!(\"{{}} {{}} {{}} {{}} {{}}\", result.state.registers[0], result.state.registers[1], result.state.registers[2], result.state.cpsr, result.steps); }}\n",
             generated.display(), setup
         ),
     )
     .expect("wrapper source");
-    let rlib = runtime_rlib();
-    let dependency_dir = rlib.parent().expect("runtime rlib directory");
-    let compile = Command::new("rustc")
-        .args(["--edition=2021"])
-        .arg("-L")
-        .arg(format!("dependency={}", dependency_dir.display()))
-        .arg("--extern")
-        .arg(format!("gba_runtime={}", rlib.display()))
-        .arg("-o")
-        .arg(&binary)
-        .arg(&wrapper)
-        .output()
-        .expect("rustc");
-    assert!(compile.status.success(), "generated Rust did not compile:\n{}", String::from_utf8_lossy(&compile.stderr));
+
+    let compile = Command::new("cargo")
+        .arg("build")
+        .arg("--offline")
+        .arg("--quiet")
+        .arg("--manifest-path")
+        .arg(&cargo_toml)
+        .status()
+        .expect("cargo build");
+    assert!(compile.success(), "generated Rust did not compile");
+
     let output = Command::new(&binary).output().expect("generated binary");
     assert!(output.status.success(), "generated Rust failed:\n{}", String::from_utf8_lossy(&output.stderr));
-    let values = String::from_utf8(output.stdout).expect("UTF-8 output").split_whitespace().map(|value| value.parse::<u64>().expect("integer output")).collect::<Vec<_>>();
+    let values = String::from_utf8(output.stdout)
+        .expect("UTF-8 output")
+        .split_whitespace()
+        .map(|value| value.parse::<u64>().expect("integer output"))
+        .collect::<Vec<_>>();
     assert_eq!(values.len(), 5, "unexpected generated output: {values:?}");
     let result = values.try_into().expect("five generated values");
     let _ = fs::remove_dir_all(&root);
@@ -88,17 +96,16 @@ fn specialized_arm_arithmetic_matches_reference() {
     assert_eq!([actual[0], actual[1], actual[2]], [1, 3, 2]);
     assert_eq!(actual[3] as u32 & (CPSR_N | CPSR_Z | CPSR_C | CPSR_V), CPSR_C);
     assert_eq!(actual[4], 4);
-    assert_eq!(3u32.wrapping_sub(2), 1);
 }
 
 #[test]
 fn specialized_arm_memory_and_multiply_match_reference() {
-    let source = generate_arm(&[0xE3A0_0004, 0xE3A0_102A, 0xE580_1000, 0xE590_2000, 0xE000_0291]);
-    let actual = execute_generated(&source, "");
+    let source = generate_arm(&[0xE3A0_102A, 0xE580_1000, 0xE590_2000, 0xE000_0291]);
+    let actual = execute_generated(&source, "rt.write_reg(0, 0x0400_0004);");
     assert_eq!(actual[0], 42 * 42);
     assert_eq!(actual[1], 42);
     assert_eq!(actual[2], 42);
-    assert_eq!(actual[4], 5);
+    assert_eq!(actual[4], 4);
 }
 
 #[test]
