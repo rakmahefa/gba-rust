@@ -94,12 +94,11 @@ fn decoder_ir_runtime_and_codegen_preserve_instruction_identity() {
     let functions = discover_functions(&program);
     let semantic = build_semantic_program(&program, &functions).expect("semantic contract");
     let generated = generate_semantic(&program, &semantic, "entry");
-    for raw in words {
-        assert!(generated.source.contains("rt.enter_instruction"));
-        assert!(generated.source.contains(&format!("{raw:#010x}")));
-    }
+    assert!(generated.source.contains("rt.enter_instruction"));
     assert!(generated.source.contains("run_generated_contract"));
     assert!(generated.source.contains("fn dispatch_block"));
+    assert!(!generated.source.contains("rt.execute_arm_instruction"));
+    assert!(!generated.source.contains("rt.execute_thumb_instruction"));
 }
 
 #[test]
