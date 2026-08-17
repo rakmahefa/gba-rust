@@ -81,5 +81,29 @@ pub fn rotate_unaligned_word(value: u32, address: u32) -> u32 { value.rotate_rig
 mod tests {
     use super::*;
     #[test]
-    fn constructor_round_trips_bits() { let flags = Nzcv::new(true, false, true, false); assert_eq!(Nzcv::from_cpsr(flags.bits()), flags); }
+    fn arithmetic_flags_are_architectural() {
+        let (result, f) = add_with_carry(0x7fff_ffff, 0, true);
+        assert_eq!(result, 0x8000_0000);
+        assert!(f.n && f.v && !f.c && !f.z);
+        let (_, f) = sub_with_borrow(1, 3, false);
+        assert!(!f.c && f.n);
+    }
+    #[test]
+    fn shift_special_cases_are_explicit() {
+        assert_eq!(shift_immediate(1, ShiftKind::Lsr, 0, true), ShiftResult { value: 0, carry: false });
+        assert_eq!(shift_immediate(1, ShiftKind::Ror, 0, true), ShiftResult { value: 0x8000_0000, carry: true });
+        assert_eq!(shift_register(1, ShiftKind::Ror, 0, true), ShiftResult { value: 1, carry: true });
+    }
+    #[test]
+    fn pc_link_bx_and_unaligned_word_rules_are_distinct() {
+        assert_eq!(architectural_pc(0x0800_0100, false), 0x0800_0108);
+        assert_eq!(link_address(0x0800_0100, 4, true), 0x0800_0105);
+        assert_eq!(exchange_target(0x0800_0101), (0x0800_0100, true));
+        assert_eq!(rotate_unaligned_word(0x4433_2211, 2), 0x2211_4433);
+    }
+    #[test]
+    fn constructor_round_trips_bits() {
+        let flags = Nzcv::new(true, false, true, false);
+        assert_eq!(Nzcv::from_cpsr(flags.bits()), flags);
+    }
 }
