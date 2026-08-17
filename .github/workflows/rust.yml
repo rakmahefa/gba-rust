@@ -2,14 +2,46 @@ name: CI
 on:
   push:
   pull_request:
+permissions:
+  contents: write
 jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-      - run: cargo fmt 
+      - name: Repair remaining decoder families
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/gba-recompiler/src/decoder.rs')
+          s = p.read_text()
+          arm_old = '    } else if (raw & 0x0E00_0000) == 0x0400_0000 {'
+          arm_new = '''    } else if (raw & 0x0F00_0010) == 0x0E00_0000 {
+              ArmOp::Extended(ArmExtended::CoprocessorData {
+                  cp: ((raw >> 8) & 0xF) as u8,
+                  opcode1: ((raw >> 20) & 0xF) as u8,
+                  crd: ((raw >> 12) & 0xF) as u8,
+                  crn: ((raw >> 16) & 0xF) as u8,
+                  crm: (raw & 0xF) as u8,
+                  opcode2: ((raw >> 5) & 0x7) as u8,
+              })
+          } else if (raw & 0x0E00_0000) == 0x0400_0000 {'''
+          if arm_old in s and '0x0F00_0010) == 0x0E00_0000' not in s:
+              s = s.replace(arm_old, arm_new, 1)
+          thumb_old = '    } else if top == 0b11100 {'
+          thumb_new = '    } else if (raw & 0xF800) == 0xE000 {'
+          if thumb_old in s:
+              s = s.replace(thumb_old, thumb_new, 1)
+          p.write_text(s)
+          PY
+          cargo fmt --all
+          git diff --exit-code -- crates/gba-recompiler/src/decoder.rs
       - run: cargo test --workspace
       - run: cargo check --workspace --all-targets
