@@ -39,6 +39,7 @@ pub enum SemanticTerminator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticInstruction {
     pub address: u32,
+    pub raw: u32,
     pub size: u8,
     pub ops: Vec<IrOp>,
     pub reads: Vec<u8>,
@@ -91,6 +92,7 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
     let flags = ir.flags();
     SemanticInstruction {
         address: ir.address,
+        raw: ir.source_raw,
         size: ir.size,
         ops: ir.ops.clone(),
         reads: ir.reads(),
@@ -182,6 +184,7 @@ mod tests {
         assert_eq!(block.instructions[0].writes, vec![0]);
         assert_eq!(block.instructions[1].reads, vec![0]);
         assert_eq!(block.instructions[1].writes, vec![0]);
+        assert_eq!(block.instructions[0].raw, 0xE3A0_0001);
     }
 
     #[test]
