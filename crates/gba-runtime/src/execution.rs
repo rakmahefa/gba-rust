@@ -44,7 +44,6 @@ fn arm_data_processing(rt: &mut Runtime, raw: u32) -> Option<(u32, bool)> {
     let rd = ((raw >> 12) & 0xf) as usize;
     let lhs = rt.read_reg(rn);
     let (rhs, sh_carry) = arm_operand2(rt, raw);
-
     match opcode {
         0 => { let v = lhs & rhs; if rd == REG_PC { rt.write_reg(rd, v & !3); return Some((v & !3, false)); } rt.write_reg(rd, v); if set_flags { set_logic_flags(rt, v, sh_carry); } }
         1 => { let v = lhs ^ rhs; if rd == REG_PC { rt.write_reg(rd, v & !3); return Some((v & !3, false)); } rt.write_reg(rd, v); if set_flags { set_logic_flags(rt, v, sh_carry); } }
@@ -165,8 +164,9 @@ impl Runtime {
         if raw & 0x0c00_0000 == 0x0400_0000 { return arm_single_transfer(self, raw); }
         if raw & 0x0e00_0090 == 0x0000_0090 { return arm_halfword_transfer(self, raw); }
         if raw & 0x0fbf_0fff == 0x010f_0000 { let rd = ((raw >> 12) & 0xf) as usize; self.write_reg(rd, self.cpu.cpsr); return None; }
-        if raw & 0x0dbf_f000 == 0x0129_f000 || raw & 0x0dbf_f000 == 0x0329_f000 {
-            let spsr = raw & (1 << 22) != 0; let field_mask = ((raw >> 16) & 0xf) as u8;
+        if raw & 0x0db0_f000 == 0x0120_f000 {
+            let spsr = raw & (1 << 22) != 0;
+            let field_mask = ((raw >> 16) & 0xf) as u8;
             let value = if raw & (1 << 25) != 0 { let imm = raw & 0xff; let rotate = ((raw >> 8) & 0xf) * 2; imm.rotate_right(rotate) } else { self.read_reg((raw & 0xf) as usize) };
             if !spsr { let mut cpsr = self.cpu.cpsr; if field_mask & 1 != 0 { cpsr = (cpsr & !0xff) | (value & 0xff); } if field_mask & 2 != 0 { cpsr = (cpsr & !0xff00) | (value & 0xff00); } if field_mask & 4 != 0 { cpsr = (cpsr & !0xff0000) | (value & 0xff0000); } if field_mask & 8 != 0 { cpsr = (cpsr & !0xff00_0000) | (value & 0xff00_0000); } self.cpu.cpsr = cpsr; self.cpu.thumb = cpsr & (1 << 5) != 0; }
             return None;
