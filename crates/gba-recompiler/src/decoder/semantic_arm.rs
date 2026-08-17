@@ -40,65 +40,19 @@ pub fn decode(address: u32, raw: u32, class: ArmClass) -> Instruction {
 fn decode_control_special(raw: u32, address: u32, class: ArmClass) -> ArmOp {
     match class {
         ArmClass::Nop => ArmOp::Nop,
-        ArmClass::BranchExchange => ArmOp::BranchExchange {
-            rm: (raw & 0xF) as u8,
-            link: arm_matches(raw, BX_LINK_MASK, BX_LINK_PATTERN),
-        },
-        ArmClass::Swap => ArmOp::Extended(ArmExtended::Swap {
-            rd: ((raw >> 12) & 0xF) as u8,
-            rn: ((raw >> 16) & 0xF) as u8,
-            rm: (raw & 0xF) as u8,
-            byte: raw & (1 << 22) != 0,
-        }),
+        ArmClass::BranchExchange => ArmOp::BranchExchange { rm: (raw & 0xF) as u8, link: arm_matches(raw, BX_LINK_MASK, BX_LINK_PATTERN) },
+        ArmClass::Swap => ArmOp::Extended(ArmExtended::Swap { rd: ((raw >> 12) & 0xF) as u8, rn: ((raw >> 16) & 0xF) as u8, rm: (raw & 0xF) as u8, byte: raw & (1 << 22) != 0 }),
         ArmClass::Branch => {
             let imm24 = raw & 0x00FF_FFFF;
-            let target = address
-                .wrapping_add(8)
-                .wrapping_add(sign_extend(imm24 << 2, 26) as u32);
-            ArmOp::Branch {
-                target,
-                condition: arm_condition(raw),
-                link: raw & (1 << 24) != 0,
-            }
+            let target = address.wrapping_add(8).wrapping_add(sign_extend(imm24 << 2, 26) as u32);
+            ArmOp::Branch { target, condition: arm_condition(raw), link: raw & (1 << 24) != 0 }
         }
-        ArmClass::SoftwareInterrupt => ArmOp::Extended(ArmExtended::SoftwareInterrupt {
-            comment: raw & 0x00FF_FFFF,
-        }),
-        ArmClass::Mrs => ArmOp::Extended(ArmExtended::Mrs {
-            rd: ((raw >> 12) & 0xF) as u8,
-            spsr: raw & (1 << 22) != 0,
-        }),
-        ArmClass::Msr => ArmOp::Extended(ArmExtended::Msr {
-            spsr: raw & (1 << 22) != 0,
-            field_mask: ((raw >> 16) & 0xF) as u8,
-            source: arm_operand2(raw),
-        }),
-        ArmClass::Multiply => ArmOp::Extended(ArmExtended::Multiply {
-            rd: ((raw >> 16) & 0xF) as u8,
-            rn: ((raw >> 12) & 0xF) as u8,
-            rs: ((raw >> 8) & 0xF) as u8,
-            rm: (raw & 0xF) as u8,
-            accumulate: raw & (1 << 21) != 0,
-            set_flags: raw & (1 << 20) != 0,
-        }),
-        ArmClass::MultiplyLong => ArmOp::Extended(ArmExtended::MultiplyLong {
-            rd_hi: ((raw >> 16) & 0xF) as u8,
-            rd_lo: ((raw >> 12) & 0xF) as u8,
-            rs: ((raw >> 8) & 0xF) as u8,
-            rm: (raw & 0xF) as u8,
-            signed: raw & (1 << 22) != 0,
-            accumulate: raw & (1 << 21) != 0,
-            set_flags: raw & (1 << 20) != 0,
-        }),
-        ArmClass::BlockTransfer => ArmOp::Extended(ArmExtended::BlockTransfer {
-            load: raw & (1 << 20) != 0,
-            rn: ((raw >> 16) & 0xF) as u8,
-            register_list: (raw & 0xFFFF) as u16,
-            pre_index: raw & (1 << 24) != 0,
-            up: raw & (1 << 23) != 0,
-            write_back: raw & (1 << 21) != 0,
-            user_mode: raw & (1 << 22) != 0,
-        }),
+        ArmClass::SoftwareInterrupt => ArmOp::Extended(ArmExtended::SoftwareInterrupt { comment: raw & 0x00FF_FFFF }),
+        ArmClass::Mrs => ArmOp::Extended(ArmExtended::Mrs { rd: ((raw >> 12) & 0xF) as u8, spsr: raw & (1 << 22) != 0 }),
+        ArmClass::Msr => ArmOp::Extended(ArmExtended::Msr { spsr: raw & (1 << 22) != 0, field_mask: ((raw >> 16) & 0xF) as u8, source: arm_operand2(raw) }),
+        ArmClass::Multiply => ArmOp::Extended(ArmExtended::Multiply { rd: ((raw >> 16) & 0xF) as u8, rn: ((raw >> 12) & 0xF) as u8, rs: ((raw >> 8) & 0xF) as u8, rm: (raw & 0xF) as u8, accumulate: raw & (1 << 21) != 0, set_flags: raw & (1 << 20) != 0 }),
+        ArmClass::MultiplyLong => ArmOp::Extended(ArmExtended::MultiplyLong { rd_hi: ((raw >> 16) & 0xF) as u8, rd_lo: ((raw >> 12) & 0xF) as u8, rs: ((raw >> 8) & 0xF) as u8, rm: (raw & 0xF) as u8, signed: raw & (1 << 22) != 0, accumulate: raw & (1 << 21) != 0, set_flags: raw & (1 << 20) != 0 }),
+        ArmClass::BlockTransfer => ArmOp::Extended(ArmExtended::BlockTransfer { load: raw & (1 << 20) != 0, rn: ((raw >> 16) & 0xF) as u8, register_list: (raw & 0xFFFF) as u16, pre_index: raw & (1 << 24) != 0, up: raw & (1 << 23) != 0, write_back: raw & (1 << 21) != 0, user_mode: raw & (1 << 22) != 0 }),
         _ => ArmOp::Unknown,
     }
 }
@@ -122,23 +76,26 @@ fn decode_single_transfer(raw: u32) -> ArmOp {
     let offset = if raw & (1 << 25) == 0 {
         Operand2::Imm(raw & 0x0FFF)
     } else {
-        arm_operand2(raw)
+        // Single-data-transfer I=1 is *not* the data-processing Operand2
+        // immediate selector. It encodes a register offset with an immediate
+        // shift: Rm plus shift_imm/shift_type, with bit 4 fixed to zero.
+        Operand2::Reg {
+            rm: (raw & 0xF) as u8,
+            shift: ((raw >> 7) & 0x1F) as u8,
+            shift_kind: ((raw >> 5) & 0x3) as u8,
+            by_register: false,
+            shift_register: 0,
+        }
     };
 
     if !pre_index && !write_back {
         if let Operand2::Imm(value) = offset {
             let magnitude = if up { value as i32 } else { -(value as i32) };
-            return if load {
-                ArmOp::Load { rd, rn, offset: magnitude, byte }
-            } else {
-                ArmOp::Store { rd, rn, offset: magnitude, byte }
-            };
+            return if load { ArmOp::Load { rd, rn, offset: magnitude, byte } } else { ArmOp::Store { rd, rn, offset: magnitude, byte } };
         }
     }
 
-    ArmOp::Extended(ArmExtended::SingleDataTransfer {
-        load, byte, rd, rn, offset, pre_index, up, write_back,
-    })
+    ArmOp::Extended(ArmExtended::SingleDataTransfer { load, byte, rd, rn, offset, pre_index, up, write_back })
 }
 
 fn decode_halfword_transfer(raw: u32) -> ArmOp {
@@ -151,10 +108,7 @@ fn decode_halfword_transfer(raw: u32) -> ArmOp {
     let halfword = !signed;
     let offset = if immediate { ((raw >> 4) & 0xF0) | (raw & 0xF) } else { raw & 0xF };
     let magnitude = if up { offset as i32 } else { -(offset as i32) };
-    ArmOp::Extended(ArmExtended::HalfwordTransfer {
-        load, signed, halfword, rd: ((raw >> 12) & 0xF) as u8, rn: ((raw >> 16) & 0xF) as u8,
-        offset: magnitude, pre_index, up, write_back,
-    })
+    ArmOp::Extended(ArmExtended::HalfwordTransfer { load, signed, halfword, rd: ((raw >> 12) & 0xF) as u8, rn: ((raw >> 16) & 0xF) as u8, offset: magnitude, pre_index, up, write_back })
 }
 
 fn decode_data_processing(raw: u32) -> ArmOp {
@@ -172,12 +126,7 @@ fn decode_data_processing(raw: u32) -> ArmOp {
 }
 
 fn arm_data_op(opcode: u8) -> ArmDataOp {
-    match opcode {
-        0 => ArmDataOp::And, 1 => ArmDataOp::Eor, 2 => ArmDataOp::Sub, 3 => ArmDataOp::Rsb,
-        4 => ArmDataOp::Add, 5 => ArmDataOp::Adc, 6 => ArmDataOp::Sbc, 7 => ArmDataOp::Rsc,
-        8 => ArmDataOp::Tst, 9 => ArmDataOp::Teq, 10 => ArmDataOp::Cmp, 11 => ArmDataOp::Cmn,
-        12 => ArmDataOp::Orr, 13 => ArmDataOp::Mov, 14 => ArmDataOp::Bic, _ => ArmDataOp::Mvn,
-    }
+    match opcode { 0 => ArmDataOp::And, 1 => ArmDataOp::Eor, 2 => ArmDataOp::Sub, 3 => ArmDataOp::Rsb, 4 => ArmDataOp::Add, 5 => ArmDataOp::Adc, 6 => ArmDataOp::Sbc, 7 => ArmDataOp::Rsc, 8 => ArmDataOp::Tst, 9 => ArmDataOp::Teq, 10 => ArmDataOp::Cmp, 11 => ArmDataOp::Cmn, 12 => ArmDataOp::Orr, 13 => ArmDataOp::Mov, 14 => ArmDataOp::Bic, _ => ArmDataOp::Mvn }
 }
 
 fn decode_coprocessor(raw: u32, class: ArmClass) -> ArmOp {
@@ -196,7 +145,7 @@ mod tests {
 
     #[test]
     fn family_decoders_preserve_representative_arm_semantics() {
-        for raw in [0xE1A0_0000,0xE281_2004,0xE401_2004,0xE1D1_20B0,0xEA00_0001,0xE12F_FF11,0xEF00_0001,0xE800_0000,0xEE00_0010] {
+        for raw in [0xE1A0_0000, 0xE281_2004, 0xE401_2004, 0xE1D1_20B0, 0xEA00_0001, 0xE12F_FF11, 0xEF00_0001, 0xE800_0000, 0xEE00_0010] {
             let class = classify_arm(raw);
             let instruction = decode(0x0800_0000, raw, class);
             assert!(!matches!(instruction.kind, InstructionKind::Arm(ArmOp::Unknown)), "{raw:#010x}");
@@ -216,13 +165,11 @@ mod tests {
 
     #[test]
     fn single_data_transfer_register_offset_keeps_barrel_shifter_semantics() {
-        let raw = 0xE7C0_1014; // STRB r1, [r0, r4, LSL #0] with I=1 and bit4 set
+        let raw = 0xE7C0_1004;
         let class = classify_arm(raw);
         let instruction = decode(0x0800_0000, raw, class);
         match instruction.kind {
-            InstructionKind::Arm(ArmOp::Extended(ArmExtended::SingleDataTransfer { offset, .. })) => {
-                assert!(matches!(offset, Operand2::Reg { rm: 4, .. }));
-            }
+            InstructionKind::Arm(ArmOp::Extended(ArmExtended::SingleDataTransfer { offset, .. })) => assert!(matches!(offset, Operand2::Reg { rm: 4, shift: 0, shift_kind: 0, by_register: false, .. })),
             other => panic!("unexpected decode: {other:?}"),
         }
     }
