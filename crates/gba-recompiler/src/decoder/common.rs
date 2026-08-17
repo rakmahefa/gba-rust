@@ -5,6 +5,16 @@ pub(super) fn sign_extend(value: u32, bits: u8) -> i32 {
     ((value << shift) as i32) >> shift
 }
 
+pub(super) fn arm_matches(raw: u32, mask: u32, pattern: u32) -> bool {
+    debug_assert_eq!(pattern & !mask, 0, "pattern {pattern:#010x} escapes mask {mask:#010x}");
+    raw & mask == pattern
+}
+
+pub(super) fn thumb_matches(raw: u16, mask: u16, pattern: u16) -> bool {
+    debug_assert_eq!(pattern & !mask, 0, "pattern {pattern:#06x} escapes mask {mask:#06x}");
+    raw & mask == pattern
+}
+
 pub(super) fn arm_condition(raw: u32) -> Condition {
     match raw >> 28 {
         0x0 => Condition::Eq,
@@ -55,5 +65,16 @@ pub(super) fn thumb_condition(raw: u16) -> Condition {
         12 => Condition::Gt,
         13 => Condition::Le,
         _ => Condition::Al,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_patterns_that_escape_the_mask() {
+        assert!(arm_matches(0x1234_5678, 0xFFFF_FFFF, 0x1234_5678));
+        assert!(thumb_matches(0xB400, 0xFE00, 0xB400));
     }
 }
