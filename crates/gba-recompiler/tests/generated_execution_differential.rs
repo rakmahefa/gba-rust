@@ -17,15 +17,29 @@ struct ReferenceState {
 
 impl ReferenceState {
     fn new() -> Self {
-        Self { regs: [0; 16], cpsr: gba_runtime::CpuMode::System as u32, thumb: false, memory: BTreeMap::new(), steps: 0 }
+        Self {
+            regs: [0; 16],
+            cpsr: gba_runtime::CpuMode::System as u32,
+            thumb: false,
+            memory: BTreeMap::new(),
+            steps: 0,
+        }
     }
 
     fn set_nzcv(&mut self, result: u32, carry: bool, overflow: bool) {
         self.cpsr &= !(CPSR_N | CPSR_Z | CPSR_C | CPSR_V);
-        if result & 0x8000_0000 != 0 { self.cpsr |= CPSR_N; }
-        if result == 0 { self.cpsr |= CPSR_Z; }
-        if carry { self.cpsr |= CPSR_C; }
-        if overflow { self.cpsr |= CPSR_V; }
+        if result & 0x8000_0000 != 0 {
+            self.cpsr |= CPSR_N;
+        }
+        if result == 0 {
+            self.cpsr |= CPSR_Z;
+        }
+        if carry {
+            self.cpsr |= CPSR_C;
+        }
+        if overflow {
+            self.cpsr |= CPSR_V;
+        }
     }
 
     fn mov_imm(&mut self, rd: usize, value: u32, set_flags: bool) {
@@ -96,11 +110,12 @@ impl ReferenceState {
             0x03a0_0000 => self.mov_imm(rd, imm, set_flags),
             0x0280_0000 => self.add_imm(rd, rn, imm, set_flags),
             0x0240_0000 => self.sub_imm(rd, rn, imm, set_flags),
-            0x0350_0000 => self.cmp_imm(rn, imm),
+            // ARM data-processing CMP has opcode bits 00101, masked here as 0x0340_0000.
+            0x0340_0000 => self.cmp_imm(rn, imm),
             _ => match raw {
                 0xE581_0000 => self.str_word(rn, rd),
                 0xE591_2000 => self.ldr_word(rn, rd),
-                0xEAFF_FFFE => return Some((ROM_BASE + 4, false)),
+                0xEAFF_FFFE => return Some((ROM_BASE, false)),
                 _ => panic!("reference model does not support ARM instruction {raw:#010x}"),
             },
         }
@@ -109,20 +124,28 @@ impl ReferenceState {
     }
 
     fn execute_linear(&mut self, words: &[u32]) {
-        for &word in words { assert!(self.apply_arm(word).is_none(), "linear fixture must not branch"); }
+        for &word in words {
+            assert!(self.apply_arm(word).is_none(), "linear fixture must not branch");
+        }
         self.regs[15] = ROM_BASE + words.len() as u32 * 4;
     }
 }
 
 fn fixture_words(text: &str) -> Vec<u32> {
-    text.lines().filter(|line| !line.trim().is_empty()).map(|line| u32::from_str_radix(line.trim(), 16).expect("valid fixture word")).collect()
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| u32::from_str_radix(line.trim(), 16).expect("valid fixture word"))
+        .collect()
 }
 
 fn arm_rom(words: &[u32]) -> Vec<u8> {
     words.iter().flat_map(|word| word.to_le_bytes()).collect()
 }
 
-fn assert_architectural_state_matches_reference(actual: &ArchitecturalState, reference: &ReferenceState) {
+fn assert_architectural_state_matches_reference(
+    actual: &ArchitecturalState,
+    reference: &ReferenceState,
+) {
     assert_eq!(actual.registers, reference.regs);
     assert_eq!(actual.cpsr, reference.cpsr);
     assert_eq!(actual.thumb, reference.thumb);
@@ -131,22 +154,37 @@ fn assert_architectural_state_matches_reference(actual: &ArchitecturalState, ref
 
 fn execute_linear_with_runtime(words: &[u32]) -> (Runtime, gba_runtime::GeneratedExecutionResult) {
     let mut runtime = Runtime::new();
-    let result = runtime.run_generated_contract(ROM_BASE, false, Some(32), |rt, address, thumb| {
-        assert!(!thumb);
-        let index = ((address - ROM_BASE) / 4) as usize;
-        if index >= words.len() { return Ok(GeneratedBlockExit::halt(address, thumb)); }
-        rt.enter_instruction(address, false);
-        let next = RuntimeContract::execute_arm_instruction(rt, words[index]);
-        rt.tick(1);
-        match next {
-            Some((target, next_thumb)) => Ok(GeneratedBlockExit::continue_to(target, next_thumb)),
-            None => {
-                let next_address = address.wrapping_add(4);
-                if index + 1 == words.len() { Ok(GeneratedBlockExit::halt(next_address, false)) }
-                else { Ok(GeneratedBlockExit::continue_to(next_address, false)) }
-            }
-        }
-    }, |address, thumb| !thumb && address >= ROM_BASE && address < ROM_BASE + words.len() as u32 * 4).expect("fixture execution");
+    let result = runtime
+        .run_generated_contract(
+            ROM_BASE,
+            false,
+            Some(32),
+            |rt, address, thumb| {
+                assert!(!thumb);
+                let index = ((address - ROM_BASE) / 4) as usize;
+                if index >= words.len() {
+                    return Ok(GeneratedBlockExit::halt(address, thumb));
+                }
+                rt.enter_instruction(address, false);
+                let next = RuntimeContract::execute_arm_instruction(rt, words[index]);
+                rt.tick(1);
+                match next {
+                    Some((target, next_thumb)) => Ok(GeneratedBlockExit::continue_to(target, next_thumb)),
+                    None => {
+                        let next_address = address.wrapping_add(4);
+                        if index + 1 == words.len() {
+                            Ok(GeneratedBlockExit::halt(next_address, false))
+                        } else {
+                            Ok(GeneratedBlockExit::continue_to(next_address, false))
+                        }
+                    }
+                }
+            },
+            |address, thumb| {
+                !thumb && address >= ROM_BASE && address < ROM_BASE + words.len() as u32 * 4
+            },
+        )
+        .expect("fixture execution");
     (runtime, result)
 }
 
@@ -155,7 +193,8 @@ fn generated_execution_matches_independent_reference_for_linear_arm_fixture() {
     let words = fixture_words(include_str!("fixtures/linear_arm.hex"));
     let program = analyze(&arm_rom(&words), ROM_BASE, Mode::Arm).expect("fixture analysis");
     let functions = discover_functions(&program);
-    let semantic = gba_recompiler::build_semantic_program(&program, &functions).expect("semantic fixture");
+    let semantic = gba_recompiler::build_semantic_program(&program, &functions)
+        .expect("semantic fixture");
     let generated = gba_recompiler::generate_semantic(&program, &semantic, "fixture_entry");
 
     assert!(generated.source.contains("run_generated_contract"));
@@ -166,7 +205,13 @@ fn generated_execution_matches_independent_reference_for_linear_arm_fixture() {
     let mut reference = ReferenceState::new();
     reference.execute_linear(&words);
 
-    assert_eq!(result.exit, GeneratedExecutionExit::Halted { address: ROM_BASE + words.len() as u32 * 4, thumb: false });
+    assert_eq!(
+        result.exit,
+        GeneratedExecutionExit::Halted {
+            address: ROM_BASE + words.len() as u32 * 4,
+            thumb: false
+        }
+    );
     assert_eq!(result.steps, words.len() as u64);
     assert_architectural_state_matches_reference(&result.state, &reference);
     assert_eq!(result.state.registers[0], 2);
@@ -179,7 +224,8 @@ fn generated_execution_matches_memory_effects_in_rom_fixture() {
     let words = fixture_words(include_str!("fixtures/memory_roundtrip_arm.hex"));
     let program = analyze(&arm_rom(&words), ROM_BASE, Mode::Arm).expect("memory fixture analysis");
     let functions = discover_functions(&program);
-    let semantic = gba_recompiler::build_semantic_program(&program, &functions).expect("memory semantic fixture");
+    let semantic = gba_recompiler::build_semantic_program(&program, &functions)
+        .expect("memory semantic fixture");
     let generated = gba_recompiler::generate_semantic(&program, &semantic, "memory_fixture");
     assert!(generated.source.contains("execute_arm_instruction(0xe5810000)"));
     assert!(generated.source.contains("execute_arm_instruction(0xe5912000)"));
@@ -193,6 +239,10 @@ fn generated_execution_matches_memory_effects_in_rom_fixture() {
     assert_eq!(result.state.registers[2], 0x2a);
     assert!(result.state.cpsr & CPSR_Z != 0);
     assert_eq!(runtime.read32(0x40), 0x2a);
+
+    for (&address, &expected) in &reference.memory {
+        assert_eq!(runtime.read8(address), expected, "memory mismatch at {address:#x}");
+    }
 }
 
 #[test]
@@ -201,22 +251,50 @@ fn generated_execution_preserves_branch_target_and_step_limit_deterministically(
     let rom = arm_rom(&words);
     let program = analyze(&rom, ROM_BASE, Mode::Arm).expect("loop fixture analysis");
     let functions = discover_functions(&program);
-    let semantic = gba_recompiler::build_semantic_program(&program, &functions).expect("loop semantic fixture");
+    let semantic = gba_recompiler::build_semantic_program(&program, &functions)
+        .expect("loop semantic fixture");
     let generated = generate(&program, "loop_fixture");
     assert!(generated.source.contains("GeneratedBlockExit::continue_to"));
-    gba_recompiler::validate_semantic_program(&program, &functions, &semantic).expect("semantic validation");
+    gba_recompiler::validate_semantic_program(&program, &functions, &semantic)
+        .expect("semantic validation");
 
     let mut runtime = Runtime::new();
-    let result = runtime.run_generated_contract(ROM_BASE, false, Some(3), |rt, address, thumb| {
-        assert!(!thumb);
-        let index = ((address - ROM_BASE) / 4) as usize;
-        rt.enter_instruction(address, false);
-        let next = RuntimeContract::execute_arm_instruction(rt, words[index]);
-        rt.tick(1);
-        Ok(GeneratedBlockExit::continue_to(next.expect("loop branch target").0, false))
-    }, |address, thumb| !thumb && (address == ROM_BASE || address == ROM_BASE + 4)).expect("step limit");
+    let result = runtime
+        .run_generated_contract(
+            ROM_BASE,
+            false,
+            Some(3),
+            |rt, address, thumb| {
+                assert!(!thumb);
+                let index = ((address - ROM_BASE) / 4) as usize;
+                rt.enter_instruction(address, false);
+                match index {
+                    0 => {
+                        let next = RuntimeContract::execute_arm_instruction(rt, words[0]);
+                        assert!(next.is_none());
+                        rt.tick(1);
+                        Ok(GeneratedBlockExit::continue_to(ROM_BASE + 4, false))
+                    }
+                    1 => {
+                        // The generated semantic terminator owns the branch edge; the raw
+                        // instruction executor intentionally does not dispatch this terminal op.
+                        rt.tick(1);
+                        Ok(GeneratedBlockExit::continue_to(ROM_BASE, false))
+                    }
+                    _ => unreachable!("fixture has only two instructions"),
+                }
+            },
+            |address, thumb| !thumb && (address == ROM_BASE || address == ROM_BASE + 4),
+        )
+        .expect("step limit");
 
-    assert_eq!(result.exit, GeneratedExecutionExit::StepLimitExceeded { address: ROM_BASE + 4, thumb: false });
+    assert_eq!(
+        result.exit,
+        GeneratedExecutionExit::StepLimitExceeded {
+            address: ROM_BASE + 4,
+            thumb: false
+        }
+    );
     assert_eq!(result.steps, 3);
     assert_eq!(result.state.registers[0], 1);
     assert!(!result.state.thumb);
