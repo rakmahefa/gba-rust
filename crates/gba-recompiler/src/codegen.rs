@@ -27,9 +27,21 @@ fn direct_target(program: &Program, target: u32, mode: Mode) -> Option<BlockId> 
     program.cfg.blocks.iter().find(|block| block.key.address == target && block.key.mode == mode).map(|block| block.id)
 }
 
-fn emit_direct_branch(out: &mut String, program: &Program, target: u32, mode: Mode, condition: Condition, link: bool) {
+fn emit_direct_branch(out: &mut String, program: &Program, target: u32, mode: Mode, condition: Condition, link: bool, ins_address: u32, ins_size: u8) {
+    let dispatch = |out: &mut String| {
+        if link { let _ = writeln!(out, "        rt.link_from_instruction({ins_address:#010x}, {ins_size}, {});", mode_bool(mode)); }
+        let _ = writeln!(out, "        return rt.dispatch_mode({target:#010x}, {});", mode_bool(mode));
+    };
     if link {
-        let _ = writeln!(out, "    return rt.dispatch_mode({target:#010x}, {});", mode_bool(mode));
+        if condition == Condition::Al {
+            if mode == Mode::Thumb && ins_size != 4 { let _ = writeln!(out, "        rt.link_from_instruction({ins_address:#010x}, {ins_size}, true);"); }
+            else { let _ = writeln!(out, "        rt.link_from_instruction({ins_address:#010x}, {ins_size}, {});", mode_bool(mode)); }
+            let _ = writeln!(out, "        return rt.dispatch_mode({target:#010x}, {});", mode_bool(mode));
+        } else {
+            let _ = writeln!(out, "    if rt.condition_code({}) {{", condition_code(condition));
+            dispatch(out);
+            let _ = writeln!(out, "    }}");
+        }
         return;
     }
     let Some(block_id) = direct_target(program, target, mode) else {
@@ -61,12 +73,13 @@ fn emit_op(out: &mut String, program: &Program, ins_address: u32, ins_size: u8, 
             else { let _ = writeln!(out, "    rt.write32({address}, rt.read_reg({src}));"); }
         }
         IrOp::Branch { target, condition, link } => {
-            if *link { let _ = writeln!(out, "    rt.link_from_instruction({ins_address:#010x}, {ins_size}, {});", mode_bool(mode)); }
-            emit_direct_branch(out, program, *target, mode, *condition, *link);
+            emit_direct_branch(out, program, *target, mode, *condition, *link, ins_address, ins_size);
+            return;
         }
         IrOp::BranchExchange { register, link } => {
             if *link { let _ = writeln!(out, "    rt.link_from_instruction({ins_address:#010x}, {ins_size}, {});", mode_bool(mode)); }
             let _ = writeln!(out, "    return rt.dispatch_exchange(rt.read_reg({register}));");
+            return;
         }
         IrOp::ArmExtended { .. } => emit_unimplemented(out, ins_address, 0, "ArmExtended"),
         IrOp::ThumbExtended { .. } => emit_unimplemented(out, ins_address, 0, "ThumbExtended"),
@@ -152,6 +165,18 @@ mod tests {
         let semantic = crate::build_semantic_program(&program, &functions).unwrap();
         let generated = generate_semantic(&program, &semantic, "entry");
         assert!(generated.source.contains("rt.condition_code(1)"));
+    }
+
+    #[test]
+    fn conditional_call_does_not_write_link_when_not_taken() {
+        let rom = [0x0B00_0000u32, 0xE1A0_0000u32].into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
+        let program = crate::analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
+        let functions = crate::discover_functions(&program);
+        let semantic = crate::build_semantic_program(&program, &functions).unwrap();
+        let generated = generate_semantic(&program, &semantic, "entry");
+        let condition_start = generated.source.find("if rt.condition_code(1)").expect("conditional BL must be guarded");
+        let continuation = &generated.source[condition_start..];
+        assert!(continuation.contains("rt.link_from_instruction"));
     }
 
     #[test]
