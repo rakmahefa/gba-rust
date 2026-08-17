@@ -67,11 +67,11 @@ fn emit_direct_terminator(
     }
 }
 
-fn emit_op(out: &mut String, _program: &Program, ins_address: u32, ins_raw: u32, ins_size: u8, mode: Mode, op: &IrOp) {
+fn emit_op(out: &mut String, ins_address: u32, ins_raw: u32, ins_size: u8, mode: Mode, op: &IrOp) {
     let _ = writeln!(out, "    rt.enter_instruction({ins_address:#010x}, {});", mode_bool(mode));
     match op {
-        IrOp::Nop => {}
-        IrOp::Mov { .. }
+        IrOp::Nop
+        | IrOp::Mov { .. }
         | IrOp::Add { .. }
         | IrOp::Sub { .. }
         | IrOp::Cmp { .. }
@@ -85,16 +85,13 @@ fn emit_op(out: &mut String, _program: &Program, ins_address: u32, ins_raw: u32,
                 let _ = writeln!(out, "    if let Some((target, thumb)) = rt.execute_thumb_instruction({ins_raw:#06x}) {{ return Ok((target, thumb)); }}");
             }
         }
-        IrOp::Branch { .. } => unreachable!("branch IR ops are emitted by the block terminator")
-        IrOp::BranchExchange { register, link } => {
-            if *link {
-                let _ = writeln!(out, "    rt.link_from_instruction({ins_address:#010x}, {ins_size}, {});", mode_bool(mode));
-            }
-            let _ = writeln!(out, "    return Ok(rt.exchange_target_for_dispatch(rt.read_reg({register}))); ");
+        IrOp::Branch { .. } | IrOp::BranchExchange { .. } => {
+            unreachable!("terminal control ops must be emitted by the semantic terminator")
         }
         IrOp::Unknown { address, raw, mode } => emit_unimplemented(out, *address, *raw, match mode { Mode::Arm => "Arm", Mode::Thumb => "Thumb" }),
     }
     let _ = writeln!(out, "    rt.tick(1);");
+    let _ = ins_size;
 }
 
 fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Program) {
@@ -141,11 +138,15 @@ fn emit_block(out: &mut String, program: &Program, semantic: &SemanticProgram, b
     let name = block_name(semantic_block.id, semantic_block.mode, semantic_block.address);
     let _ = writeln!(out, "#[inline(always)]");
     let _ = writeln!(out, "fn {name}(rt: &mut Runtime) -> Result<(u32, bool), &'static str> {{");
-    for (instruction, source_ir) in semantic_block.instructions.iter().zip(&source_block.ir) {
+    for (index, (instruction, source_ir)) in semantic_block.instructions.iter().zip(&source_block.ir).enumerate() {
         debug_assert_eq!(instruction.address, source_ir.address);
         debug_assert_eq!(instruction.size, source_ir.size);
+        let is_terminal = index + 1 == semantic_block.instructions.len();
         for op in &instruction.ops {
-            emit_op(out, program, instruction.address, source_ir.source_raw, instruction.size, semantic_block.mode, op);
+            if is_terminal && matches!(op, IrOp::Branch { .. } | IrOp::BranchExchange { .. }) {
+                continue;
+            }
+            emit_op(out, instruction.address, source_ir.source_raw, instruction.size, semantic_block.mode, op);
         }
     }
     emit_terminator(out, semantic_block, program);
