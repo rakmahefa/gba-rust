@@ -55,7 +55,7 @@ impl IrFlags {
         }
     }
 
-    pub const fn arithmetic_write(set_flags: bool) -> Self {
+    pub fn arithmetic_write(set_flags: bool) -> Self {
         if set_flags {
             Self { write_n: true, write_z: true, write_c: true, write_v: true, ..Self::default() }
         } else {
@@ -63,7 +63,7 @@ impl IrFlags {
         }
     }
 
-    pub const fn compare_write() -> Self {
+    pub fn compare_write() -> Self {
         Self { write_n: true, write_z: true, write_c: true, write_v: true, ..Self::default() }
     }
 
