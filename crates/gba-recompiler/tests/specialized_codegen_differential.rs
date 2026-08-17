@@ -128,5 +128,5 @@ fn semantic_contract_rejects_control_tampering() {
     let mut semantic = build_semantic_program(&program, &functions).expect("semantic");
     semantic.functions[0].blocks[0].instructions[0].ops.push(gba_recompiler::IrOp::Branch { target: ROM_BASE, condition: gba_recompiler::Condition::Al, link: false });
     let error = gba_recompiler::validate_semantic_program(&program, &functions, &semantic).expect_err("tampering must fail");
-    assert!(error.contains("control-effect instruction before its terminator"));
+    assert!(error.contains("instruction control effect changed"));
 }
