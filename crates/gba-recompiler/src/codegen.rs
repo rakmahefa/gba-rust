@@ -32,7 +32,12 @@ fn value_expr(value: &Value) -> String {
 
 fn emit_flags_from_logic(out: &mut String, value: &str, carry: &str) {
     let _ = writeln!(out, "    let old = rt.nzcv();");
-    let _ = writeln!(out, "    rt.set_flags(gba_runtime::Nzcv::new({value} & 0x8000_0000 != 0, {value} == 0, {carry}.unwrap_or(old.c), old.v));");
+    let carry_expr = if carry == "None" {
+        "old.c".to_string()
+    } else {
+        format!("{carry}.unwrap_or(old.c)")
+    };
+    let _ = writeln!(out, "    rt.set_flags(gba_runtime::Nzcv::new({value} & 0x8000_0000 != 0, {value} == 0, {carry_expr}, old.v));");
 }
 
 fn emit_cmp_add(out: &mut String, lhs: &str, rhs: &str) {
