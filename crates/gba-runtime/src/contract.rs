@@ -87,6 +87,10 @@ impl RuntimeContract for Runtime {
     }
 
     fn execute_arm_instruction(&mut self, raw: u32) -> Option<(u32, bool)> {
+        if raw & 0x0fff_fff0 == 0x012f_ff10 || raw & 0x0fff_fff0 == 0x012f_ff30 {
+            let target = self.read_reg((raw & 0x0f) as usize);
+            return Some(self.exchange_target_for_dispatch(target));
+        }
         Runtime::execute_arm_instruction(self, raw)
     }
 
@@ -128,6 +132,15 @@ mod tests {
         let after = runtime.architectural_state();
         assert_eq!(after.registers[0], 1);
         assert_eq!(after.pc(), before.pc());
+    }
+
+    #[test]
+    fn contract_bx_uses_architectural_exchange_instead_of_dispatch_panic() {
+        let mut runtime = Runtime::new();
+        runtime.write_reg(0, 0x0800_0101);
+        let result = RuntimeContract::execute_arm_instruction(&mut runtime, 0xE12F_FF10);
+        assert_eq!(result, Some((0x0800_0100, true)));
+        assert!(runtime.architectural_state().thumb);
     }
 
     #[test]
