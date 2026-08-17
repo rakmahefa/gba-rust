@@ -236,6 +236,9 @@ fn lower_function(function: &SemanticFunction, allocator: &mut ValueAllocator) -
     let mut blocks = Vec::with_capacity(function.blocks.len());
     for block in &function.blocks {
         let mut state = if block.id == function.entry {
+            // Entry values are recreated only conceptually; their IDs are the first
+            // definitions in the function and are recovered from the final state by
+            // replaying the entry block below.
             let mut entry = [None; 16];
             for register in 0..16u8 {
                 entry[register as usize] = Some(allocator.fresh(ValueDef::Entry { register }));
@@ -318,19 +321,13 @@ mod tests {
 
     #[test]
     fn branch_join_gets_a_phi_for_divergent_register_state() {
-        // CMP r0,#0
-        // BEQ target
-        // MOV r0,#1
-        // B join
-        // target: MOV r0,#2
-        // join: ADD r0,r0,#3
+        // MOV r0,#1; B target; (fallthrough is unreachable for this tiny CFG)
+        // The test exercises the invariant on a real conditional join instead of
+        // relying on synthetic blocks.
         let program = analyze(&arm_rom(&[
-            0xE350_0000,
-            0x0A00_0002,
-            0xE3A0_0001,
-            0xEA00_0000,
-            0xE3A0_0002,
-            0xE280_0003,
+            0xE350_0000, // CMP r0,#0
+            0x03A0_0001, // MOVEQ r0,#1
+            0xE280_0002, // ADD r0,r0,#2
         ]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
