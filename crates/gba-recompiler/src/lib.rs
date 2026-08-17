@@ -1,14 +1,16 @@
 pub mod cfg;
 pub mod codegen;
 pub mod decoder;
+pub mod execution;
 pub mod function;
 pub mod ir;
 pub mod optimization;
 pub mod semantic_ir;
 
 pub use cfg::{analyze, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
-pub use codegen::{generate, RustModule};
+pub use codegen::{generate, generate_semantic, RustModule};
 pub use decoder::{decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbOp, ROM_BASE};
+pub use execution::{add_flags, branch_target, condition_holds, sub_flags, Nzcv, CPSR_C, CPSR_N, CPSR_T, CPSR_V, CPSR_Z, REG_COUNT, REG_LR, REG_PC, REG_SP};
 pub use function::{discover_functions, CallSite, CallTarget, Function, FunctionControlFlowGraph, FunctionId, FunctionKey, ReturnSite};
 pub use ir::{lower, IrControlEffect, IrFlags, IrInstruction, IrMemoryEffect, IrMemoryKind, IrMemoryWidth, IrOp, Value};
 pub use optimization::{optimize_semantic_program, OptimizationChange, OptimizationKind, OptimizationReport};
@@ -19,7 +21,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn full_pipeline_reaches_codegen() {
+    fn full_pipeline_reaches_contract_codegen() {
         let mut rom = Vec::new();
         rom.extend_from_slice(&0xE3A0_0001u32.to_le_bytes());
         rom.extend_from_slice(&0xE280_0001u32.to_le_bytes());
@@ -32,8 +34,9 @@ mod tests {
         let (optimized, report) = optimize_semantic_program(&semantic);
         assert!(report.changed());
         assert_eq!(optimized.functions[0].blocks[0].instructions.len(), semantic.functions[0].blocks[0].instructions.len());
-        let module = generate(&program, "entry");
-        assert!(module.source.contains("rt.cpu.r[0]"));
-        assert!(module.source.contains("block_0_arm_08000000"));
+        let module = generate_semantic(&program, &optimized, "entry");
+        assert!(module.source.contains("rt.enter_instruction"));
+        assert!(module.source.contains("rt.mov(0, 0x1, false)"));
+        assert!(module.source.contains("rt.add(0, rt.read_reg(0), 0x1, false)"));
     }
 }
