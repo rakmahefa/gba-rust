@@ -96,13 +96,18 @@ fn specialized_thumb_shifted_and_alu_operations_execute() {
 #[test]
 fn specialized_thumb_arithmetic_and_compare_flags_execute() {
     let source = generate_thumb(&[0x2001, 0x3001, 0x3801, 0x4248, 0x42C8, 0x4148, 0x4188, 0x4248, 0x4348]);
-    compile_and_run_generated(&source, "entry", "rt.write_reg(1, 2);", "assert_eq!(result.state.registers[0], 0xFFFF_FFFCu32); assert_eq!(result.steps, 9);");
+    compile_and_run_generated(&source, "entry", "rt.write_reg(1, 2);", "assert_eq!(result.state.registers[0], 0xFFFF_FFFCu32); assert_eq!(result.steps, 1); assert_eq!(result.state.cycles, 9);");
 }
 
 #[test]
 fn specialized_memory_codegen_executes_load_store_roundtrip() {
-    let source = generate_arm(&[0xE3A0_102A, 0xE580_1000, 0xE590_2000, 0xE5C0_1000, 0xE5D0_3000]);
-    compile_and_run_generated(&source, "entry", "rt.write_reg(0, 0x0200_0004);", "assert_eq!(result.state.registers[2], 0x2a); assert_eq!(result.state.registers[3], 0x2a); assert_eq!(rt.read32(0x0200_0004), 0x2a);");
+    let source = generate_arm(&[
+        0xE590_2000, // ldr r2, [r0]
+        0xE3A0_102A, // mov r1, #42
+        0xE5C0_1000, // strb r1, [r0]
+        0xE5D0_3000, // ldrb r3, [r0]
+    ]);
+    compile_and_run_generated(&source, "entry", "rt.write_reg(0, 0x0400_0004); rt.write32(0x0400_0004, 0x2a);", "assert_eq!(result.state.registers[2], 0x2a); assert_eq!(result.state.registers[3], 0x2a); assert_eq!(rt.read32(0x0400_0004), 0x2a);");
 }
 
 #[test]
