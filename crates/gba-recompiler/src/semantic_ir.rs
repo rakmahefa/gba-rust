@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::cfg::{BlockId, Program};
 use crate::decoder::{Condition, Mode};
 use crate::function::{CallSite, FunctionControlFlowGraph, FunctionId, ReturnSite};
-use crate::ir::{IrControlEffect, IrFlags, IrInstruction, IrMemoryKind, IrMemoryWidth, IrOp};
+use crate::ir::{IrControlEffect, IrFlags, IrInstruction, IrMemoryEffect, IrMemoryKind, IrMemoryWidth, IrOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryWidth { Byte, Halfword, Word }
@@ -38,7 +38,12 @@ pub struct SemanticInstruction {
     pub writes: Vec<u8>,
     pub memory: Option<MemoryEffect>,
     pub flags: FlagEffect,
-    pub control: IrControlEffect,
+}
+
+impl SemanticInstruction {
+    pub fn control_effect(&self) -> IrControlEffect {
+        self.ops.iter().rev().map(IrOp::control).find(|effect| !matches!(effect, IrControlEffect::None)).unwrap_or(IrControlEffect::None)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,13 +96,12 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
         writes: ir.writes(),
         memory,
         flags: FlagEffect { read: flags.reads_any(), write: flags.writes_any() },
-        control: ir.control(),
     }
 }
 
 fn terminator(block: &SemanticBlock) -> SemanticTerminator {
     let Some(instruction) = block.instructions.last() else { return SemanticTerminator::Unknown; };
-    match instruction.control {
+    match instruction.control_effect() {
         IrControlEffect::Branch { target, condition, link: true } => SemanticTerminator::Call { target, condition },
         IrControlEffect::Branch { target, condition, link: false } => SemanticTerminator::Branch { target, condition },
         IrControlEffect::BranchExchange { register: 14, link: false } => SemanticTerminator::Return,
@@ -142,17 +146,15 @@ fn same_memory(a: Option<IrMemoryEffect>, b: Option<MemoryEffect>) -> bool {
 }
 
 fn validate_instruction(source: &IrInstruction, semantic: &SemanticInstruction, block_id: BlockId, is_last: bool) -> Result<(), String> {
-    if source.address != semantic.address || source.size != semantic.size {
-        return Err(format!("block {} instruction identity changed", block_id.0));
-    }
+    if source.address != semantic.address || source.size != semantic.size { return Err(format!("block {} instruction identity changed", block_id.0)); }
     if semantic.ops.is_empty() { return Err(format!("block {} contains an empty semantic instruction", block_id.0)); }
     if source.reads() != semantic.reads { return Err(format!("block {} instruction reads changed", block_id.0)); }
     if source.writes() != semantic.writes { return Err(format!("block {} instruction writes changed", block_id.0)); }
     let flags: IrFlags = source.flags();
     if (flags.reads_any(), flags.writes_any()) != (semantic.flags.read, semantic.flags.write) { return Err(format!("block {} instruction flag effects changed", block_id.0)); }
     if !same_memory(source.memory(), semantic.memory) { return Err(format!("block {} instruction memory effects changed", block_id.0)); }
-    if source.control() != semantic.control { return Err(format!("block {} instruction control effect changed", block_id.0)); }
-    if !is_last && !matches!(semantic.control, IrControlEffect::None) { return Err(format!("block {} has a control-effect instruction before its terminator", block_id.0)); }
+    if source.control() != semantic.control_effect() { return Err(format!("block {} instruction control effect changed", block_id.0)); }
+    if !is_last && !matches!(semantic.control_effect(), IrControlEffect::None) { return Err(format!("block {} has a control-effect instruction before its terminator", block_id.0)); }
     Ok(())
 }
 
@@ -173,9 +175,7 @@ pub fn validate_semantic_program(program: &Program, functions: &FunctionControlF
             if owned.insert(block.id, function.id).is_some() { return Err(format!("block {} belongs to multiple functions", block.id.0)); }
             let source = &program.cfg.blocks[block.id.0];
             if source.instructions.len() != block.instructions.len() { return Err(format!("block {} instruction count changed during semantic lowering", block.id.0)); }
-            for (index, (source_ir, semantic_instruction)) in source.ir.iter().zip(&block.instructions).enumerate() {
-                validate_instruction(source_ir, semantic_instruction, block.id, index + 1 == source.ir.len())?;
-            }
+            for (index, (source_ir, semantic_instruction)) in source.ir.iter().zip(&block.instructions).enumerate() { validate_instruction(source_ir, semantic_instruction, block.id, index + 1 == source.ir.len())?; }
             for successor in &block.successors { if successor.0 >= program.cfg.blocks.len() { return Err(format!("block {} has invalid successor {}", block.id.0, successor.0)); } }
             match &block.terminator {
                 SemanticTerminator::Branch { target, .. } => {
@@ -189,10 +189,10 @@ pub fn validate_semantic_program(program: &Program, functions: &FunctionControlF
                     if !block.successors.is_empty() { return Err(format!("terminating block {} has successors", block.id.0)); }
                 }
                 SemanticTerminator::Fallthrough => {
-                    if block.instructions.last().is_some_and(|instruction| !matches!(instruction.control, IrControlEffect::None)) { return Err(format!("fallthrough block {} still contains a control effect", block.id.0)); }
+                    if block.instructions.last().is_some_and(|instruction| !matches!(instruction.control_effect(), IrControlEffect::None)) { return Err(format!("fallthrough block {} still contains a control effect", block.id.0)); }
                 }
                 SemanticTerminator::Unknown => {
-                    if !block.instructions.last().is_some_and(|instruction| matches!(instruction.control, IrControlEffect::Unknown)) { return Err(format!("unknown semantic terminator in block {} is not backed by an unknown control effect", block.id.0)); }
+                    if !block.instructions.last().is_some_and(|instruction| matches!(instruction.control_effect(), IrControlEffect::Unknown)) { return Err(format!("unknown semantic terminator in block {} is not backed by an unknown control effect", block.id.0)); }
                 }
             }
         }
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(block.instructions[0].writes, vec![0]);
         assert_eq!(block.instructions[1].reads, vec![0]);
         assert_eq!(block.instructions[1].writes, vec![0]);
-        assert_eq!(block.instructions[0].control, IrControlEffect::None);
+        assert_eq!(block.instructions[0].control_effect(), IrControlEffect::None);
     }
 
     #[test]
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(instruction.reads, vec![1, 2]);
         assert_eq!(instruction.writes, vec![0]);
         assert!(!instruction.flags.write);
-        assert_eq!(instruction.control, IrControlEffect::None);
+        assert_eq!(instruction.control_effect(), IrControlEffect::None);
     }
 
     #[test]
@@ -282,7 +282,7 @@ mod tests {
         let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let mut semantic = build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].instructions[0].control = IrControlEffect::Branch { target: ROM_BASE, condition: Condition::Al, link: false };
+        semantic.functions[0].blocks[0].instructions[0].ops.push(IrOp::Branch { target: ROM_BASE, condition: Condition::Al, link: false });
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
         assert!(error.contains("control-effect instruction before its terminator"));
     }
