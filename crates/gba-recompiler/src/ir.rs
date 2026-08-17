@@ -60,7 +60,7 @@ pub enum IrOp {
 }
 
 fn add_unique(v: &mut Vec<u8>, r: u8) { if !v.contains(&r) { v.push(r); } }
-fn operand_reads(v: &mut Vec<u8>, op: Operand2) { if let Operand2::Reg { rm, .. } = op { add_unique(v, rm); } }
+fn operand_reads(v: &mut Vec<u8>, op: Operand2) { if let Operand2::Reg { rm, by_register, shift_register, .. } = op { add_unique(v, rm); if by_register { add_unique(v, shift_register); } } }
 fn reg_list(v: &mut Vec<u8>, list: u16) { for r in 0..16 { if list & (1 << r) != 0 { add_unique(v, r as u8); } } }
 fn reg_list8(v: &mut Vec<u8>, list: u8) { for r in 0..8 { if list & (1 << r) != 0 { add_unique(v, r as u8); } } }
 
@@ -266,9 +266,10 @@ impl IrOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IrInstruction { pub address: u32, pub size: u8, pub ops: Vec<IrOp> }
+pub struct IrInstruction { pub address: u32, pub source_raw: u32, pub size: u8, pub ops: Vec<IrOp> }
 impl IrInstruction {
-    pub fn new(address: u32, size: u8, ops: Vec<IrOp>) -> Self { Self { address, size, ops } }
+    pub fn new(address: u32, size: u8, ops: Vec<IrOp>) -> Self { Self { address, source_raw: 0, size, ops } }
+    pub fn with_source_raw(mut self, raw: u32) -> Self { self.source_raw = raw; self }
     pub fn reads(&self) -> Vec<u8> { let mut v = Vec::new(); for r in self.ops.iter().flat_map(IrOp::reads) { add_unique(&mut v, r); } v.sort_unstable(); v }
     pub fn writes(&self) -> Vec<u8> { let mut v = Vec::new(); for r in self.ops.iter().flat_map(IrOp::writes) { add_unique(&mut v, r); } v.sort_unstable(); v }
     pub fn flags(&self) -> IrFlags { self.ops.iter().fold(IrFlags::default(), |mut a, op| { let b = op.flags(); a.read_n |= b.read_n; a.read_z |= b.read_z; a.read_c |= b.read_c; a.read_v |= b.read_v; a.write_n |= b.write_n; a.write_z |= b.write_z; a.write_c |= b.write_c; a.write_v |= b.write_v; a }) }
@@ -303,7 +304,7 @@ pub fn lower(ins: Instruction) -> IrInstruction {
         InstructionKind::Thumb(ThumbOp::Extended(op)) => IrOp::ThumbExtended { op },
         InstructionKind::Thumb(ThumbOp::Unknown) => IrOp::Unknown { address: ins.address, raw: ins.raw, mode: ins.mode },
     };
-    IrInstruction::new(ins.address, ins.size, vec![op])
+    IrInstruction::new(ins.address, ins.size, vec![op]).with_source_raw(ins.raw)
 }
 
 #[cfg(test)]
@@ -315,6 +316,7 @@ mod tests {
         assert!(matches!(&instruction.ops[0], IrOp::ArmExtended { .. }));
         assert_eq!(instruction.reads(), vec![1, 2]);
         assert_eq!(instruction.writes(), vec![0]);
+        assert_eq!(instruction.source_raw, 0xE000_0090);
     }
     #[test]
     fn set_flags_are_preserved_for_arm_arithmetic() {
