@@ -23,7 +23,7 @@ const BLOCK_TRANSFER_MASK: u32 = 0x0E00_0000;
 const BLOCK_TRANSFER_PATTERN: u32 = 0x0800_0000;
 const SINGLE_TRANSFER_MASK: u32 = 0x0E00_0000;
 const SINGLE_TRANSFER_PATTERN: u32 = 0x0400_0000;
-const HALFWORD_MASK: u32 = 0x0E40_0090;
+const HALFWORD_MASK: u32 = 0x0E00_0090;
 const HALFWORD_PATTERN: u32 = 0x0000_0090;
 const DATA_PROCESSING_MASK: u32 = 0x0C00_0000;
 const DATA_PROCESSING_PATTERN: u32 = 0x0000_0000;
@@ -89,7 +89,7 @@ fn decode_special(raw: u32, address: u32) -> Option<ArmOp> {
             .wrapping_add(sign_extend(imm24 << 2, 26) as u32);
         return Some(ArmOp::Branch {
             target,
-            condition: super::common::arm_condition(raw),
+            condition: arm_condition(raw),
             link: raw & (1 << 24) != 0,
         });
     }
@@ -377,6 +377,12 @@ mod tests {
         let instruction = decode_arm(0, 0xE1D0_00B0);
         assert!(matches!(
             instruction.kind,
+            InstructionKind::Arm(ArmOp::Extended(ArmExtended::HalfwordTransfer { .. }))
+        ));
+
+        let register_offset = decode_arm(0, 0xE1D0_00B1);
+        assert!(matches!(
+            register_offset.kind,
             InstructionKind::Arm(ArmOp::Extended(ArmExtended::HalfwordTransfer { .. }))
         ));
     }
