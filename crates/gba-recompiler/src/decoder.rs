@@ -158,18 +158,11 @@ pub fn decode_arm(address: u32, raw: u32) -> Instruction {
     } else if (raw & 0x0FBF_0FFF) == 0x010F_0000 {
         ArmOp::Extended(ArmExtended::Mrs { rd, spsr: raw & (1 << 22) != 0 })
     } else if (raw & 0x0DB0_F000) == 0x0120_F000 {
-        let field_mask = ((raw >> 16) & 0xF) as u8;
-        let source = arm_operand2(raw);
-        ArmOp::Extended(ArmExtended::Msr { spsr: raw & (1 << 22) != 0, field_mask, source })
+        ArmOp::Extended(ArmExtended::Msr { spsr: raw & (1 << 22) != 0, field_mask: ((raw >> 16) & 0xF) as u8, source: arm_operand2(raw) })
     } else if (raw & 0x0FC0_00F0) == 0x0000_0090 {
-        let accumulate = raw & (1 << 21) != 0;
-        let set_flags = raw & (1 << 20) != 0;
-        ArmOp::Extended(ArmExtended::Multiply { rd, rn, rs: ((raw >> 8) & 0xF) as u8, rm: (raw & 0xF) as u8, accumulate, set_flags })
+        ArmOp::Extended(ArmExtended::Multiply { rd, rn, rs: ((raw >> 8) & 0xF) as u8, rm: (raw & 0xF) as u8, accumulate: raw & (1 << 21) != 0, set_flags: raw & (1 << 20) != 0 })
     } else if (raw & 0x0F80_00F0) == 0x0080_0090 {
-        let signed = raw & (1 << 22) != 0;
-        let accumulate = raw & (1 << 21) != 0;
-        let set_flags = raw & (1 << 20) != 0;
-        ArmOp::Extended(ArmExtended::MultiplyLong { rd_hi: ((raw >> 16) & 0xF) as u8, rd_lo: rd, rs: ((raw >> 8) & 0xF) as u8, rm: (raw & 0xF) as u8, signed, accumulate, set_flags })
+        ArmOp::Extended(ArmExtended::MultiplyLong { rd_hi: ((raw >> 16) & 0xF) as u8, rd_lo: rd, rs: ((raw >> 8) & 0xF) as u8, rm: (raw & 0xF) as u8, signed: raw & (1 << 22) != 0, accumulate: raw & (1 << 21) != 0, set_flags: raw & (1 << 20) != 0 })
     } else if (raw & 0x0E00_0000) == 0x0800_0000 {
         ArmOp::Extended(ArmExtended::BlockTransfer { load: raw & (1 << 20) != 0, rn, register_list: (raw & 0xFFFF) as u16, pre_index: raw & (1 << 24) != 0, up: raw & (1 << 23) != 0, write_back: raw & (1 << 21) != 0, user_mode: raw & (1 << 22) != 0 })
     } else if (raw & 0x0E00_0000) == 0x0400_0000 {
@@ -178,7 +171,7 @@ pub fn decode_arm(address: u32, raw: u32) -> Instruction {
         let pre_index = raw & (1 << 24) != 0;
         let up = raw & (1 << 23) != 0;
         let write_back = raw & (1 << 21) != 0;
-        let offset = arm_operand2(raw & !(0xF << 16));
+        let offset = arm_operand2(raw);
         if !pre_index && !write_back && matches!(offset, Operand2::Imm(_)) {
             let magnitude = match offset { Operand2::Imm(v) => v as i32, Operand2::Reg { .. } => 0 };
             let magnitude = if up { magnitude } else { -magnitude };
@@ -200,7 +193,6 @@ pub fn decode_arm(address: u32, raw: u32) -> Instruction {
     } else if (raw & 0x0C00_0000) == 0 {
         let op2 = arm_operand2(raw);
         match opcode {
-            0xD if condition == Condition::Al && rd == 0 && matches!(op2, Operand2::Reg { rm: 0, shift: 0 }) && rn == 0 && raw & 0xFF000000 == 0xE1000000 => ArmOp::Nop,
             0xD => ArmOp::Mov { rd, op2 },
             0x4 => ArmOp::Add { rd, rn, op2 },
             0x2 => ArmOp::Sub { rd, rn, op2 },
@@ -237,35 +229,25 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
     } else if (raw & 0xF800) == 0x1800 {
         let sub = raw & (1 << 9) != 0;
         let immediate = raw & (1 << 10) != 0;
-        if immediate {
-            ThumbOp::Extended(ThumbExtended::AddSubImmediate { sub, rd, rs, imm: ((raw >> 6) & 7) as u8 })
-        } else {
-            ThumbOp::Extended(ThumbExtended::AddSubRegister { sub, rd, rs, rn: ((raw >> 6) & 7) as u8 })
-        }
+        if immediate { ThumbOp::Extended(ThumbExtended::AddSubImmediate { sub, rd, rs, imm: ((raw >> 6) & 7) as u8 }) }
+        else { ThumbOp::Extended(ThumbExtended::AddSubRegister { sub, rd, rs, rn: ((raw >> 6) & 7) as u8 }) }
     } else if (raw & 0xF800) == 0x2000 { ThumbOp::MovImm { rd: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 } }
     else if (raw & 0xF800) == 0x3000 { ThumbOp::AddImm { rd: ((raw >> 8) & 7) as u8, rn: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 } }
     else if (raw & 0xF800) == 0x3800 { ThumbOp::SubImm { rd: ((raw >> 8) & 7) as u8, rn: ((raw >> 8) & 7) as u8, imm: (raw & 0xFF) as u8 } }
     else if (raw & 0xFC00) == 0x4000 {
         let opcode = ((raw >> 6) & 0xF) as u8;
         ThumbOp::Extended(ThumbExtended::Alu { op: match opcode { 0 => ThumbAluOp::And, 1 => ThumbAluOp::Eor, 2 => ThumbAluOp::Lsl, 3 => ThumbAluOp::Lsr, 4 => ThumbAluOp::Asr, 5 => ThumbAluOp::Adc, 6 => ThumbAluOp::Sbc, 7 => ThumbAluOp::Ror, 8 => ThumbAluOp::Tst, 9 => ThumbAluOp::Neg, 10 => ThumbAluOp::Cmp, 11 => ThumbAluOp::Cmn, 12 => ThumbAluOp::Orr, 13 => ThumbAluOp::Mul, 14 => ThumbAluOp::Bic, _ => ThumbAluOp::Mvn }, rd, rs })
+    } else if (raw & 0xFF87) == 0x4700 {
+        ThumbOp::BranchExchange { rm: ((raw >> 3) & 0xF) as u8 }
     } else if (raw & 0xFC00) == 0x4400 {
         ThumbOp::Extended(ThumbExtended::HighRegister { op: ((raw >> 8) & 3) as u8, rd: (((raw >> 7) & 1) << 3 | (raw & 7)) as u8, rs: (((raw >> 6) & 1) << 3 | ((raw >> 3) & 7)) as u8 })
-    } else if (raw & 0xF800) == 0x4800 {
-        ThumbOp::LoadImm { rd: ((raw >> 8) & 7) as u8, rn: 15, word_offset: (raw & 0xFF) as u8 }
-    } else if (raw & 0xF000) == 0x5000 {
+    } else if (raw & 0xF800) == 0x4800 { ThumbOp::LoadImm { rd: ((raw >> 8) & 7) as u8, rn: 15, word_offset: (raw & 0xFF) as u8 } }
+    else if (raw & 0xF000) == 0x5000 {
         let opcode = ((raw >> 9) & 7) as u8;
-        if opcode < 4 {
-            ThumbOp::Extended(ThumbExtended::LoadStoreRegister { load: opcode & 1 != 0, byte: opcode & 2 != 0, rd, rb: rs, ro: ((raw >> 6) & 7) as u8 })
-        } else {
-            ThumbOp::Extended(ThumbExtended::LoadStoreSignHalf { kind: opcode - 4, rd, rb: rs, ro: ((raw >> 6) & 7) as u8 })
-        }
+        if opcode < 4 { ThumbOp::Extended(ThumbExtended::LoadStoreRegister { load: matches!(opcode, 3), byte: matches!(opcode, 2), rd, rb: rs, ro: ((raw >> 6) & 7) as u8 }) }
+        else { ThumbOp::Extended(ThumbExtended::LoadStoreSignHalf { kind: opcode - 4, rd, rb: rs, ro: ((raw >> 6) & 7) as u8 }) }
     } else if (raw & 0xE000) == 0x6000 {
-        let load = raw & (1 << 11) != 0;
-        let byte = raw & (1 << 12) != 0;
-        let offset = ((raw >> 6) & 0x1F) as u8;
-        if load && !byte && offset <= 0x1F { ThumbOp::Extended(ThumbExtended::LoadStoreImmediate { load, byte, rd, rb: rs, offset }) }
-        else if !load && !byte && offset <= 0x1F { ThumbOp::Extended(ThumbExtended::LoadStoreImmediate { load, byte, rd, rb: rs, offset }) }
-        else { ThumbOp::Extended(ThumbExtended::LoadStoreImmediate { load, byte, rd, rb: rs, offset }) }
+        ThumbOp::Extended(ThumbExtended::LoadStoreImmediate { load: raw & (1 << 11) != 0, byte: raw & (1 << 12) != 0, rd, rb: rs, offset: ((raw >> 6) & 0x1F) as u8 })
     } else if (raw & 0xF000) == 0x8000 {
         ThumbOp::Extended(ThumbExtended::LoadStoreHalfword { load: raw & (1 << 11) != 0, rd, rb: rs, offset: ((raw >> 6) & 0x1F) as u8 })
     } else if (raw & 0xF000) == 0x9000 {
@@ -344,9 +326,14 @@ mod tests {
 
     #[test]
     fn decodes_thumb_major_families() {
-        for raw in [0x0000,0x1800,0x2000,0x3000,0x4000,0x4400,0x4800,0x5000,0x6000,0x8000,0x9000,0xA000,0xB000,0xB400,0xC000,0xD000,0xDF00,0xE000] {
+        for raw in [0x0000,0x1800,0x2000,0x3000,0x4000,0x4400,0x4700,0x4800,0x5000,0x6000,0x8000,0x9000,0xA000,0xB000,0xB400,0xC000,0xD000,0xDF00,0xE000] {
             assert!(!matches!(decode_thumb(ROM_BASE, raw).kind, InstructionKind::Thumb(ThumbOp::Unknown)), "raw={raw:#06x}");
         }
+    }
+
+    #[test]
+    fn decodes_thumb_bx_as_control_flow() {
+        assert_eq!(decode_thumb(ROM_BASE, 0x4700).kind, InstructionKind::Thumb(ThumbOp::BranchExchange { rm: 8 }));
     }
 
     #[test]
