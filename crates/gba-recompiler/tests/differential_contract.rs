@@ -5,6 +5,10 @@ fn arm_rom(words: &[u32]) -> Vec<u8> {
     words.iter().flat_map(|word| word.to_le_bytes()).collect()
 }
 
+fn thumb_rom(halfwords: &[u16]) -> Vec<u8> {
+    halfwords.iter().flat_map(|word| word.to_le_bytes()).collect()
+}
+
 fn reference_add(lhs: u32, rhs: u32, carry: bool) -> (u32, [bool; 4]) {
     let wide = lhs as u64 + rhs as u64 + carry as u64;
     let result = wide as u32;
@@ -68,10 +72,10 @@ fn arm_add_and_sub_match_independent_reference_model() {
 #[test]
 fn decoder_ir_runtime_and_codegen_preserve_instruction_identity() {
     let words = [
-        0xE3A0_0001u32, // MOV r0, #1
-        0xE280_0001u32, // ADD r0, r0, #1
-        0xE240_0001u32, // SUB r0, r0, #1
-        0xE350_0001u32, // CMP r0, #1
+        0xE3A0_0001u32,
+        0xE280_0001u32,
+        0xE240_0001u32,
+        0xE350_0001u32,
     ];
     let program = analyze(&arm_rom(&words), ROM_BASE, Mode::Arm).expect("analysis");
     let block = &program.cfg.blocks[0];
@@ -96,6 +100,35 @@ fn decoder_ir_runtime_and_codegen_preserve_instruction_identity() {
     }
     assert!(generated.source.contains("rt.run_generated"));
     assert!(generated.source.contains("fn dispatch_block"));
+}
+
+#[test]
+fn thumb_decoder_ir_and_runtime_agree_on_arithmetic_state() {
+    let halfwords = [0x2001u16, 0x3001u16, 0x3801u16, 0x2801u16];
+    let program = analyze(&thumb_rom(&halfwords), ROM_BASE, Mode::Thumb).expect("thumb analysis");
+    let block = &program.cfg.blocks[0];
+    assert_eq!(block.ir.len(), halfwords.len());
+    assert!(matches!(block.ir[0].ops[0], IrOp::Mov { dst: 0, .. }));
+    assert!(matches!(block.ir[1].ops[0], IrOp::Add { dst: 0, lhs: 0, .. }));
+    assert!(matches!(block.ir[2].ops[0], IrOp::Sub { dst: 0, lhs: 0, .. }));
+    assert!(matches!(block.ir[3].ops[0], IrOp::Cmp { lhs: 0, .. }));
+
+    let mut runtime = Runtime::new();
+    runtime.enter_instruction(ROM_BASE, true);
+    assert_eq!(RuntimeContract::execute_thumb_instruction(&mut runtime, halfwords[0]), None);
+    assert_eq!(runtime.read_reg(0), 1);
+    assert_eq!(runtime.cpu.cpsr & CPSR_Z, 0);
+
+    assert_eq!(RuntimeContract::execute_thumb_instruction(&mut runtime, halfwords[1]), None);
+    assert_eq!(runtime.read_reg(0), 2);
+    assert_eq!(runtime.cpu.cpsr & CPSR_Z, 0);
+
+    assert_eq!(RuntimeContract::execute_thumb_instruction(&mut runtime, halfwords[2]), None);
+    assert_eq!(runtime.read_reg(0), 1);
+    assert_eq!(runtime.cpu.cpsr & CPSR_N, 0);
+
+    assert_eq!(RuntimeContract::execute_thumb_instruction(&mut runtime, halfwords[3]), None);
+    assert_eq!(runtime.cpu.cpsr & CPSR_Z, 1 << 30);
 }
 
 #[test]
