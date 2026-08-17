@@ -26,26 +26,22 @@ fn block_name(block_id: BlockId, mode: Mode, address: u32) -> String {
 fn value_expr(value: &Value) -> String {
     match value {
         Value::Reg(reg) => format!("rt.read_reg({reg})"),
-        Value::Imm(value) => format!("{value:#010x}"),
+        Value::Imm(value) => format!("{value:#010x}u32"),
     }
 }
 
 fn emit_flags_from_logic(out: &mut String, value: &str, carry: &str) {
     let _ = writeln!(out, "    let old = rt.nzcv();");
-    let carry_expr = if carry == "None" {
-        "old.c".to_string()
-    } else {
-        format!("{carry}.unwrap_or(old.c)")
-    };
-    let _ = writeln!(out, "    rt.set_flags(gba_runtime::Nzcv::new({value} & 0x8000_0000 != 0, {value} == 0, {carry_expr}, old.v));");
+    let carry_expr = if carry == "None" { "old.c".to_string() } else { format!("{carry}.unwrap_or(old.c)") };
+    let _ = writeln!(out, "    rt.set_flags(gba_runtime::Nzcv::new(({value}) & 0x8000_0000u32 != 0, ({value}) == 0u32, {carry_expr}, old.v));");
 }
 
 fn emit_cmp_add(out: &mut String, lhs: &str, rhs: &str) {
-    let _ = writeln!(out, "    let lhs_value = {lhs}; let rhs_value = {rhs}; let result = lhs_value.wrapping_add(rhs_value); let carry = result < lhs_value; let overflow = ((lhs_value ^ result) & (rhs_value ^ result) & 0x8000_0000) != 0; rt.set_flags(gba_runtime::Nzcv::new(result & 0x8000_0000 != 0, result == 0, carry, overflow));");
+    let _ = writeln!(out, "    let lhs_value = {lhs}; let rhs_value = {rhs}; let result = lhs_value.wrapping_add(rhs_value); let carry = result < lhs_value; let overflow = ((lhs_value ^ result) & (rhs_value ^ result) & 0x8000_0000u32) != 0; rt.set_flags(gba_runtime::Nzcv::new(result & 0x8000_0000u32 != 0, result == 0u32, carry, overflow));");
 }
 
 fn emit_cmp_sub(out: &mut String, lhs: &str, rhs: &str) {
-    let _ = writeln!(out, "    let lhs_value = {lhs}; let rhs_value = {rhs}; let result = lhs_value.wrapping_sub(rhs_value); let carry = lhs_value >= rhs_value; let overflow = ((lhs_value ^ rhs_value) & (lhs_value ^ result) & 0x8000_0000) != 0; rt.set_flags(gba_runtime::Nzcv::new(result & 0x8000_0000 != 0, result == 0, carry, overflow));");
+    let _ = writeln!(out, "    let lhs_value = {lhs}; let rhs_value = {rhs}; let result = lhs_value.wrapping_sub(rhs_value); let carry = lhs_value >= rhs_value; let overflow = ((lhs_value ^ rhs_value) & (lhs_value ^ result) & 0x8000_0000u32) != 0; rt.set_flags(gba_runtime::Nzcv::new(result & 0x8000_0000u32 != 0, result == 0u32, carry, overflow));");
 }
 
 fn arm_operand2(out: &mut String, raw: u32) -> (String, String) {
@@ -53,23 +49,17 @@ fn arm_operand2(out: &mut String, raw: u32) -> (String, String) {
         let imm = raw & 0xff;
         let rotate = ((raw >> 8) & 0xf) * 2;
         if rotate == 0 {
-            (format!("{imm:#010x}"), "None".into())
+            (format!("{imm:#010x}u32"), "None".into())
         } else {
-            let value = format!("({imm:#010x}).rotate_right({rotate})");
-            let carry = format!("Some((({value}) & 0x8000_0000) != 0)");
+            let value = format!("({imm:#010x}u32).rotate_right({rotate})");
+            let carry = format!("Some((({value}) & 0x8000_0000u32) != 0)");
             (value, carry)
         }
     } else {
         let rm = raw & 0xf;
         let by_register = raw & 0x10 != 0;
-        let kind = match (raw >> 5) & 3 {
-            0 => "ShiftKind::Lsl", 1 => "ShiftKind::Lsr", 2 => "ShiftKind::Asr", _ => "ShiftKind::Ror",
-        };
-        let amount = if by_register {
-            format!("(rt.read_reg({}) & 0xff) as u8", (raw >> 8) & 0xf)
-        } else {
-            format!("{}", (raw >> 7) & 0x1f)
-        };
+        let kind = match (raw >> 5) & 3 { 0 => "ShiftKind::Lsl", 1 => "ShiftKind::Lsr", 2 => "ShiftKind::Asr", _ => "ShiftKind::Ror" };
+        let amount = if by_register { format!("(rt.read_reg({}) & 0xff) as u8", (raw >> 8) & 0xf) } else { format!("{}", (raw >> 7) & 0x1f) };
         let _ = writeln!(out, "    let shifted = rt.shift(rt.read_reg({rm}), {kind}, {amount}, {by_register});");
         ("shifted.value".into(), "Some(shifted.carry)".into())
     }
@@ -77,11 +67,9 @@ fn arm_operand2(out: &mut String, raw: u32) -> (String, String) {
 
 fn structured_operand2(out: &mut String, operand: Operand2) -> (String, String) {
     match operand {
-        Operand2::Imm(value) => (format!("{value:#010x}"), "None".into()),
+        Operand2::Imm(value) => (format!("{value:#010x}u32"), "None".into()),
         Operand2::Reg { rm, shift, shift_kind, by_register, shift_register } => {
-            let kind = match shift_kind {
-                0 => "ShiftKind::Lsl", 1 => "ShiftKind::Lsr", 2 => "ShiftKind::Asr", _ => "ShiftKind::Ror",
-            };
+            let kind = match shift_kind { 0 => "ShiftKind::Lsl", 1 => "ShiftKind::Lsr", 2 => "ShiftKind::Asr", _ => "ShiftKind::Ror" };
             let amount = if by_register { format!("(rt.read_reg({shift_register}) & 0xff) as u8") } else { format!("{shift}") };
             let _ = writeln!(out, "    let shifted = rt.shift(rt.read_reg({rm}), {kind}, {amount}, {by_register});");
             ("shifted.value".into(), "Some(shifted.carry)".into())
@@ -119,38 +107,23 @@ fn emit_arm_extended(out: &mut String, op: ArmExtended) {
             if set_flags { emit_flags_from_logic(out, "result", "None"); }
         }
         ArmExtended::MultiplyLong { rd_hi, rd_lo, rs, rm, signed, accumulate, set_flags } => {
-            let expr = if signed {
-                format!("(rt.read_reg({rm}) as i32 as i64).wrapping_mul(rt.read_reg({rs}) as i32 as i64) as u64")
-            } else {
-                format!("(rt.read_reg({rm}) as u64).wrapping_mul(rt.read_reg({rs}) as u64)")
-            };
+            let expr = if signed { format!("(rt.read_reg({rm}) as i32 as i64).wrapping_mul(rt.read_reg({rs}) as i32 as i64) as u64") } else { format!("(rt.read_reg({rm}) as u64).wrapping_mul(rt.read_reg({rs}) as u64)") };
             let _ = writeln!(out, "    let mut result = {expr};");
-            if accumulate {
-                let _ = writeln!(out, "    result = result.wrapping_add((u64::from(rt.read_reg({rd_hi})) << 32) | u64::from(rt.read_reg({rd_lo}))); ");
-            }
+            if accumulate { let _ = writeln!(out, "    result = result.wrapping_add((u64::from(rt.read_reg({rd_hi})) << 32) | u64::from(rt.read_reg({rd_lo}))); "); }
             let _ = writeln!(out, "    rt.write_reg({rd_lo}, result as u32); rt.write_reg({rd_hi}, (result >> 32) as u32);");
             if set_flags { emit_flags_from_logic(out, "result as u32", "None"); }
         }
         ArmExtended::Swap { rd, rn, rm, byte } => {
             let _ = writeln!(out, "    let address = rt.read_reg({rn});");
-            if byte {
-                let _ = writeln!(out, "    let old = rt.read8(address); rt.write8(address, rt.read_reg({rm}) as u8); rt.write_reg({rd}, old as u32);");
-            } else {
-                let _ = writeln!(out, "    let old = rt.read32(address); rt.write32(address & !3, rt.read_reg({rm})); rt.write_reg({rd}, old);");
-            }
+            if byte { let _ = writeln!(out, "    let old = rt.read8(address); rt.write8(address, rt.read_reg({rm}) as u8); rt.write_reg({rd}, old as u32);"); }
+            else { let _ = writeln!(out, "    let old = rt.read32(address); rt.write32(address & !3, rt.read_reg({rm})); rt.write_reg({rd}, old);"); }
         }
         ArmExtended::HalfwordTransfer { load, signed, halfword, rd, rn, offset, pre_index, up, write_back } => {
             let off = offset.unsigned_abs();
             let _ = writeln!(out, "    let base = rt.read_reg({rn}); let offset = {off}u32; let address = if {pre_index} {{ if {up} {{ base.wrapping_add(offset) }} else {{ base.wrapping_sub(offset) }} }} else {{ base }};");
-            if load {
-                let _ = writeln!(out, "    let mut value = if {halfword} {{ rt.read16(address) as u32 }} else {{ rt.read8(address) as u32 }};");
-                if signed { let _ = writeln!(out, "    if {halfword} && value & 0x8000 != 0 {{ value |= 0xffff_0000; }} if !{halfword} && value & 0x80 != 0 {{ value |= 0xffff_ff00; }}"); }
-                let _ = writeln!(out, "    rt.write_reg({rd}, value);");
-            } else if halfword {
-                let _ = writeln!(out, "    rt.write16(address, rt.read_reg({rd}) as u16);");
-            } else {
-                let _ = writeln!(out, "    rt.write8(address, rt.read_reg({rd}) as u8);");
-            }
+            if load { let _ = writeln!(out, "    let mut value = if {halfword} {{ rt.read16(address) as u32 }} else {{ rt.read8(address) as u32 }};"); if signed { let _ = writeln!(out, "    if {halfword} && value & 0x8000 != 0 {{ value |= 0xffff_0000; }} if !{halfword} && value & 0x80 != 0 {{ value |= 0xffff_ff00; }}"); } let _ = writeln!(out, "    rt.write_reg({rd}, value);"); }
+            else if halfword { let _ = writeln!(out, "    rt.write16(address, rt.read_reg({rd}) as u16);"); }
+            else { let _ = writeln!(out, "    rt.write8(address, rt.read_reg({rd}) as u8);"); }
             if write_back || !pre_index { let _ = writeln!(out, "    rt.write_reg({rn}, if {up} {{ base.wrapping_add(offset) }} else {{ base.wrapping_sub(offset) }});"); }
         }
         ArmExtended::SingleDataTransfer { load, byte, rd, rn, offset, pre_index, up, write_back } => {
@@ -164,29 +137,19 @@ fn emit_arm_extended(out: &mut String, op: ArmExtended) {
         ArmExtended::BlockTransfer { load, rn, register_list, pre_index, up, write_back, .. } => {
             let _ = writeln!(out, "    let base = rt.read_reg({rn}); let count = ({register_list:#06x}u32).count_ones(); let mut address = if {up} {{ base.wrapping_add(if {pre_index} {{ 4 }} else {{ 0 }}) }} else {{ base.wrapping_sub(if {pre_index} {{ count * 4 }} else {{ count.saturating_sub(1) * 4 }}) }};");
             let _ = writeln!(out, "    let register_list = {register_list:#06x}u32; for register in 0..16usize {{ if register_list & (1u32 << register) == 0 {{ continue; }}");
-            if load { let _ = writeln!(out, "        rt.write_reg(register, rt.read32(address));"); }
-            else { let _ = writeln!(out, "        rt.write32(address & !3, rt.read_reg(register));"); }
+            if load { let _ = writeln!(out, "        rt.write_reg(register, rt.read32(address));"); } else { let _ = writeln!(out, "        rt.write32(address & !3, rt.read_reg(register));"); }
             let _ = writeln!(out, "        address = address.wrapping_add(4); }}");
             if write_back { let _ = writeln!(out, "    rt.write_reg({rn}, if {up} {{ base.wrapping_add(count * 4) }} else {{ base.wrapping_sub(count * 4) }});"); }
         }
-        ArmExtended::Mrs { rd, spsr } => {
-            let _ = writeln!(out, "    rt.write_reg({rd}, {});", if spsr { "rt.cpu.spsr().unwrap_or(rt.cpu.cpsr)" } else { "rt.cpu.cpsr" });
-        }
+        ArmExtended::Mrs { rd, spsr } => { let _ = writeln!(out, "    rt.write_reg({rd}, {});", if spsr { "rt.cpu.spsr().unwrap_or(rt.cpu.cpsr)" } else { "rt.cpu.cpsr" }); }
         ArmExtended::Msr { spsr, field_mask, source } => {
             let (value, _) = structured_operand2(out, source);
             let _ = writeln!(out, "    let value = {value};");
-            if spsr {
-                let _ = writeln!(out, "    let _ = rt.cpu.set_spsr(value);");
-            } else {
-                let _ = writeln!(out, "    if rt.mode().privileged() {{ let mask = {field_mask:#04x}u32; let mut cpsr = rt.cpu.cpsr; if mask & 1 != 0 {{ cpsr = (cpsr & !0x0000_00ff) | (value & 0x0000_00ff); }} if mask & 2 != 0 {{ cpsr = (cpsr & !0x0000_ff00) | (value & 0x0000_ff00); }} if mask & 4 != 0 {{ cpsr = (cpsr & !0x00ff_0000) | (value & 0x00ff_0000); }} if mask & 8 != 0 {{ cpsr = (cpsr & !0xff00_0000) | (value & 0xff00_0000); }} rt.cpu.cpsr = cpsr; rt.set_thumb(cpsr & (1 << 5) != 0); }}");
-            }
+            if spsr { let _ = writeln!(out, "    let _ = rt.cpu.set_spsr(value);"); }
+            else { let _ = writeln!(out, "    if rt.mode().privileged() {{ let mask = {field_mask:#04x}u32; let mut cpsr = rt.cpu.cpsr; if mask & 1 != 0 {{ cpsr = (cpsr & !0x0000_00ff) | (value & 0x0000_00ff); }} if mask & 2 != 0 {{ cpsr = (cpsr & !0x0000_ff00) | (value & 0x0000_ff00); }} if mask & 4 != 0 {{ cpsr = (cpsr & !0x00ff_0000) | (value & 0x00ff_0000); }} if mask & 8 != 0 {{ cpsr = (cpsr & !0xff00_0000) | (value & 0xff00_0000); }} rt.cpu.cpsr = cpsr; rt.set_thumb(cpsr & (1 << 5) != 0); }}"); }
         }
-        ArmExtended::SoftwareInterrupt { .. } => {
-            let _ = writeln!(out, "    let (target, thumb) = rt.raise_exception(gba_runtime::ExceptionKind::SoftwareInterrupt); return Ok(GeneratedBlockExit::continue_to(target, thumb));");
-        }
-        ArmExtended::CoprocessorTransfer { .. } | ArmExtended::CoprocessorData { .. } | ArmExtended::CoprocessorRegisterTransfer { .. } => {
-            let _ = writeln!(out, "    return Err(\"unsupported coprocessor instruction in specialized codegen\");");
-        }
+        ArmExtended::SoftwareInterrupt { .. } => { let _ = writeln!(out, "    let (target, thumb) = rt.raise_exception(gba_runtime::ExceptionKind::SoftwareInterrupt); return Ok(GeneratedBlockExit::continue_to(target, thumb));"); }
+        ArmExtended::CoprocessorTransfer { .. } | ArmExtended::CoprocessorData { .. } | ArmExtended::CoprocessorRegisterTransfer { .. } => { let _ = writeln!(out, "    return Err(\"unsupported coprocessor instruction in specialized codegen\");"); }
     }
 }
 
@@ -194,20 +157,12 @@ fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
     match op {
         ThumbExtended::MoveShifted { kind, rd, rs, offset } => {
             let shift_kind = match kind { 0 => "ShiftKind::Lsl", 1 => "ShiftKind::Lsr", _ => "ShiftKind::Asr" };
-            let _ = writeln!(out, "    let shifted = rt.shift(rt.read_reg({rs}), {shift_kind}, {offset}, false); rt.write_reg({rd}, shifted.value);");
-            emit_flags_from_logic(out, "shifted.value", "Some(shifted.carry)");
+            let _ = writeln!(out, "    let shifted = rt.shift(rt.read_reg({rs}), {shift_kind}, {offset}, false); rt.write_reg({rd}, shifted.value);"); emit_flags_from_logic(out, "shifted.value", "Some(shifted.carry)");
         }
-        ThumbExtended::AddSubRegister { sub, rd, rs, rn } => {
-            if sub { let _ = writeln!(out, "    rt.sub({rd}, rt.read_reg({rs}), rt.read_reg({rn}), true);"); }
-            else { let _ = writeln!(out, "    rt.add({rd}, rt.read_reg({rs}), rt.read_reg({rn}), true);"); }
-        }
-        ThumbExtended::AddSubImmediate { sub, rd, rs, imm } => {
-            if sub { let _ = writeln!(out, "    rt.sub({rd}, rt.read_reg({rs}), {imm}, true);"); }
-            else { let _ = writeln!(out, "    rt.add({rd}, rt.read_reg({rs}), {imm}, true);"); }
-        }
+        ThumbExtended::AddSubRegister { sub, rd, rs, rn } => { if sub { let _ = writeln!(out, "    rt.sub({rd}, rt.read_reg({rs}), rt.read_reg({rn}), true);"); } else { let _ = writeln!(out, "    rt.add({rd}, rt.read_reg({rs}), rt.read_reg({rn}), true);"); } }
+        ThumbExtended::AddSubImmediate { sub, rd, rs, imm } => { if sub { let _ = writeln!(out, "    rt.sub({rd}, rt.read_reg({rs}), {imm}u32, true);"); } else { let _ = writeln!(out, "    rt.add({rd}, rt.read_reg({rs}), {imm}u32, true);"); } }
         ThumbExtended::Alu { op, rd, rs } => {
-            let lhs = format!("rt.read_reg({rd})");
-            let rhs = format!("rt.read_reg({rs})");
+            let lhs = format!("rt.read_reg({rd})"); let rhs = format!("rt.read_reg({rs})");
             match op {
                 ThumbAluOp::And => { let _ = writeln!(out, "    let value = {lhs} & {rhs}; rt.write_reg({rd}, value);"); emit_flags_from_logic(out, "value", "None"); }
                 ThumbAluOp::Eor => { let _ = writeln!(out, "    let value = {lhs} ^ {rhs}; rt.write_reg({rd}, value);"); emit_flags_from_logic(out, "value", "None"); }
@@ -222,8 +177,7 @@ fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
                 ThumbAluOp::Tst => { let _ = writeln!(out, "    let value = {lhs} & {rhs};"); emit_flags_from_logic(out, "value", "None"); }
                 ThumbAluOp::Lsl | ThumbAluOp::Lsr | ThumbAluOp::Asr | ThumbAluOp::Ror => {
                     let kind = match op { ThumbAluOp::Lsl => "ShiftKind::Lsl", ThumbAluOp::Lsr => "ShiftKind::Lsr", ThumbAluOp::Asr => "ShiftKind::Asr", ThumbAluOp::Ror => "ShiftKind::Ror", _ => unreachable!() };
-                    let _ = writeln!(out, "    let shifted = rt.shift({lhs}, {kind}, ({rhs} & 0xff) as u8, true); rt.write_reg({rd}, shifted.value);");
-                    emit_flags_from_logic(out, "shifted.value", "Some(shifted.carry)");
+                    let _ = writeln!(out, "    let shifted = rt.shift({lhs}, {kind}, ({rhs} & 0xff) as u8, true); rt.write_reg({rd}, shifted.value);"); emit_flags_from_logic(out, "shifted.value", "Some(shifted.carry)");
                 }
                 ThumbAluOp::Mul => { let _ = writeln!(out, "    let value = {lhs}.wrapping_mul({rhs}); rt.write_reg({rd}, value);"); emit_flags_from_logic(out, "value", "None"); }
             }
@@ -260,29 +214,20 @@ fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
         }
         ThumbExtended::LoadStoreHalfword { load, rd, rb, offset } => {
             let _ = writeln!(out, "    let address = rt.read_reg({rb}).wrapping_add({}u32 * 2);", offset);
-            if load { let _ = writeln!(out, "    rt.write_reg({rd}, rt.read16(address) as u32);"); }
-            else { let _ = writeln!(out, "    rt.write16(address, rt.read_reg({rd}) as u16);"); }
+            if load { let _ = writeln!(out, "    rt.write_reg({rd}, rt.read16(address) as u32);"); } else { let _ = writeln!(out, "    rt.write16(address, rt.read_reg({rd}) as u16);"); }
         }
         ThumbExtended::SpRelativeLoadStore { load, rd, offset } => {
             let _ = writeln!(out, "    let address = rt.read_reg(13).wrapping_add({}u32 * 4);", offset);
-            if load { let _ = writeln!(out, "    rt.write_reg({rd}, rt.read32(address));"); }
-            else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({rd}));"); }
+            if load { let _ = writeln!(out, "    rt.write_reg({rd}, rt.read32(address));"); } else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({rd}));"); }
         }
         ThumbExtended::Address { rd, use_sp, word_offset } => { let _ = writeln!(out, "    rt.write_reg({rd}, (if {use_sp} {{ rt.read_reg(13) }} else {{ rt.read_reg(15) & !3 }}).wrapping_add({}u32 * 4));", word_offset); }
-        ThumbExtended::AddSp { negative, imm } => {
-            if negative { let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_sub({imm}));"); }
-            else { let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_add({imm}));"); }
-        }
+        ThumbExtended::AddSp { negative, imm } => { if negative { let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_sub({imm}u32));"); } else { let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_add({imm}u32));"); } }
         ThumbExtended::PushPop { load, registers, extra_lr_pc } => {
             let count = registers.count_ones() + u32::from(extra_lr_pc);
             if load {
                 let _ = writeln!(out, "    let mut address = rt.read_reg(13);");
                 for reg in 0..8u8 { if registers & (1 << reg) != 0 { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address)); address = address.wrapping_add(4);"); } }
-                if extra_lr_pc {
-                    let _ = writeln!(out, "    let target = rt.read32(address); rt.write_reg(13, rt.read_reg(13).wrapping_add({count} * 4)); return Ok(GeneratedBlockExit::continue_to(target & !1, true));");
-                } else {
-                    let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_add({count} * 4));");
-                }
+                if extra_lr_pc { let _ = writeln!(out, "    let target = rt.read32(address); rt.write_reg(13, rt.read_reg(13).wrapping_add({count} * 4)); return Ok(GeneratedBlockExit::continue_to(target & !1, true));"); } else { let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_add({count} * 4));"); }
             } else {
                 let _ = writeln!(out, "    let mut address = rt.read_reg(13).wrapping_sub({count} * 4);");
                 for reg in 0..8u8 { if registers & (1 << reg) != 0 { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg})); address = address.wrapping_add(4);"); } }
@@ -293,11 +238,7 @@ fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
         ThumbExtended::MultipleLoadStore { load, rb, register_list } => {
             let _ = writeln!(out, "    let mut address = rt.read_reg({rb});");
             for reg in 0..8u8 {
-                if register_list & (1 << reg) != 0 {
-                    if load { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address));"); }
-                    else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg}));"); }
-                    let _ = writeln!(out, "    address = address.wrapping_add(4);");
-                }
+                if register_list & (1 << reg) != 0 { if load { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address));"); } else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg}));"); } let _ = writeln!(out, "    address = address.wrapping_add(4);"); }
             }
             let _ = writeln!(out, "    rt.write_reg({rb}, address);");
         }
@@ -310,31 +251,13 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
         IrOp::Nop => {}
         IrOp::Mov { dst, src, set_flags } => {
             let (rhs, carry) = if mode == Mode::Arm { arm_operand2(out, ins_raw) } else { (value_expr(src), "None".into()) };
-            let _ = writeln!(out, "    rt.mov({dst}, {rhs}, false);");
-            if *set_flags { emit_flags_from_logic(out, &rhs, &carry); }
+            let _ = writeln!(out, "    rt.mov({dst}, {rhs}, false);"); if *set_flags { emit_flags_from_logic(out, &rhs, &carry); }
         }
-        IrOp::Add { dst, lhs, rhs, set_flags } => {
-            let rhs = if mode == Mode::Arm { arm_operand2(out, ins_raw).0 } else { value_expr(rhs) };
-            let _ = writeln!(out, "    rt.add({dst}, rt.read_reg({lhs}), {rhs}, {set_flags});");
-        }
-        IrOp::Sub { dst, lhs, rhs, set_flags } => {
-            let rhs = if mode == Mode::Arm { arm_operand2(out, ins_raw).0 } else { value_expr(rhs) };
-            let _ = writeln!(out, "    rt.sub({dst}, rt.read_reg({lhs}), {rhs}, {set_flags});");
-        }
-        IrOp::Cmp { lhs, rhs } => {
-            let rhs = if mode == Mode::Arm { arm_operand2(out, ins_raw).0 } else { value_expr(rhs) };
-            emit_cmp_sub(out, &format!("rt.read_reg({lhs})"), &rhs);
-        }
-        IrOp::Load { dst, base, offset, byte } => {
-            let _ = writeln!(out, "    let address = rt.read_reg({base}).wrapping_add({offset}i32 as u32);");
-            if *byte { let _ = writeln!(out, "    rt.write_reg({dst}, rt.read8(address) as u32);"); }
-            else { let _ = writeln!(out, "    rt.write_reg({dst}, rt.read32(address));"); }
-        }
-        IrOp::Store { src, base, offset, byte } => {
-            let _ = writeln!(out, "    let address = rt.read_reg({base}).wrapping_add({offset}i32 as u32);");
-            if *byte { let _ = writeln!(out, "    rt.write8(address, rt.read_reg({src}) as u8);"); }
-            else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({src}));"); }
-        }
+        IrOp::Add { dst, lhs, rhs, set_flags } => { let rhs = if mode == Mode::Arm { arm_operand2(out, ins_raw).0 } else { value_expr(rhs) }; let _ = writeln!(out, "    rt.add({dst}, rt.read_reg({lhs}), {rhs}, {set_flags});"); }
+        IrOp::Sub { dst, lhs, rhs, set_flags } => { let rhs = if mode == Mode::Arm { arm_operand2(out, ins_raw).0 } else { value_expr(rhs) }; let _ = writeln!(out, "    rt.sub({dst}, rt.read_reg({lhs}), {rhs}, {set_flags});"); }
+        IrOp::Cmp { lhs, rhs } => { let rhs = if mode == Mode::Arm { arm_operand2(out, ins_raw).0 } else { value_expr(rhs) }; emit_cmp_sub(out, &format!("rt.read_reg({lhs})"), &rhs); }
+        IrOp::Load { dst, base, offset, byte } => { let _ = writeln!(out, "    let address = rt.read_reg({base}).wrapping_add({offset}i32 as u32);"); if *byte { let _ = writeln!(out, "    rt.write_reg({dst}, rt.read8(address) as u32);"); } else { let _ = writeln!(out, "    rt.write_reg({dst}, rt.read32(address));"); } }
+        IrOp::Store { src, base, offset, byte } => { let _ = writeln!(out, "    let address = rt.read_reg({base}).wrapping_add({offset}i32 as u32);"); if *byte { let _ = writeln!(out, "    rt.write8(address, rt.read_reg({src}) as u8);"); } else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({src}));"); } }
         IrOp::Branch { .. } | IrOp::BranchExchange { .. } => {}
         IrOp::ArmExtended { op } => emit_arm_extended(out, *op),
         IrOp::ThumbExtended { op } => emit_thumb_extended(out, *op),
@@ -346,37 +269,21 @@ fn emit_op(out: &mut String, ins_address: u32, ins_raw: u32, mode: Mode, op: &Ir
     let _ = writeln!(out, "    rt.enter_instruction({ins_address:#010x}, {});", mode_bool(mode));
     if mode == Mode::Arm {
         let condition = (ins_raw >> 28) & 0xf;
-        if condition != 0xe {
-            let _ = writeln!(out, "    if rt.condition_code({condition}) {{");
-            emit_inner_op(out, ins_raw, mode, op);
-            let _ = writeln!(out, "    }}");
-        } else {
-            emit_inner_op(out, ins_raw, mode, op);
-        }
-    } else {
-        emit_inner_op(out, ins_raw, mode, op);
-    }
+        if condition != 0xe { let _ = writeln!(out, "    if rt.condition_code({condition}) {{"); emit_inner_op(out, ins_raw, mode, op); let _ = writeln!(out, "    }}"); }
+        else { emit_inner_op(out, ins_raw, mode, op); }
+    } else { emit_inner_op(out, ins_raw, mode, op); }
     let _ = writeln!(out, "    rt.tick(1);");
 }
 
-fn fallthrough_target(block: &SemanticBlock, program: &Program, target: u32) -> Option<(u32, Mode)> {
-    block.successors.iter().map(|id| &program.cfg.blocks[id.0]).find(|successor| successor.key.address != target).map(|successor| (successor.key.address, successor.key.mode))
-}
+fn fallthrough_target(block: &SemanticBlock, program: &Program, target: u32) -> Option<(u32, Mode)> { block.successors.iter().map(|id| &program.cfg.blocks[id.0]).find(|successor| successor.key.address != target).map(|successor| (successor.key.address, successor.key.mode)) }
 
 fn emit_direct_terminator(out: &mut String, block: &SemanticBlock, program: &Program, target: u32, mode: Mode, condition: Condition, link: bool, address: u32, size: u8) {
     let thumb = mode_bool(mode);
     if link { let _ = writeln!(out, "    rt.link_from_instruction({address:#010x}, {size}, {thumb});"); }
-    if condition == Condition::Al {
-        let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb}));");
-        return;
-    }
+    if condition == Condition::Al { let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb}));"); return; }
     let _ = writeln!(out, "    if rt.condition_code({}) {{ return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb})); }}", condition_code(condition));
-    if let Some((address, next_mode)) = fallthrough_target(block, program, target) {
-        let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({address:#010x}, {}));", mode_bool(next_mode));
-    } else {
-        let halt = address.wrapping_add(size as u32);
-        let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {thumb}));");
-    }
+    if let Some((address, next_mode)) = fallthrough_target(block, program, target) { let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({address:#010x}, {}));", mode_bool(next_mode)); }
+    else { let halt = address.wrapping_add(size as u32); let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {thumb}));"); }
 }
 
 fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Program) {
@@ -388,12 +295,8 @@ fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Program) {
         SemanticTerminator::Branch { condition, target } => emit_direct_terminator(out, block, program, target, block.mode, condition, false, address, size),
         SemanticTerminator::Call { condition, target } => emit_direct_terminator(out, block, program, target, block.mode, condition, true, address, size),
         SemanticTerminator::Fallthrough => {
-            if let Some(successor) = block.successors.first().and_then(|id| program.cfg.blocks.get(id.0)) {
-                let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({:#010x}, {}));", successor.key.address, mode_bool(successor.key.mode));
-            } else {
-                let halt = address.wrapping_add(size as u32);
-                let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {}));", mode_bool(block.mode));
-            }
+            if let Some(successor) = block.successors.first().and_then(|id| program.cfg.blocks.get(id.0)) { let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({:#010x}, {}));", successor.key.address, mode_bool(successor.key.mode)); }
+            else { let halt = address.wrapping_add(size as u32); let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {}));", mode_bool(block.mode)); }
         }
         SemanticTerminator::Unknown => { let _ = writeln!(out, "    return Err(\"generated program reached an unknown terminator\");"); }
     }
@@ -404,50 +307,31 @@ fn emit_block(out: &mut String, program: &Program, semantic: &SemanticProgram, b
     let source = &program.cfg.blocks[block_id.0];
     let name = block_name(block.id, block.mode, block.address);
     let _ = writeln!(out, "#[inline(always)]\nfn {name}(rt: &mut Runtime) -> Result<GeneratedBlockExit, &'static str> {{");
-    for (instruction, source_ir) in block.instructions.iter().zip(&source.ir) {
-        for op in &instruction.ops { emit_op(out, instruction.address, source_ir.source_raw, block.mode, op); }
-    }
+    for (instruction, source_ir) in block.instructions.iter().zip(&source.ir) { for op in &instruction.ops { emit_op(out, instruction.address, source_ir.source_raw, block.mode, op); } }
     emit_terminator(out, block, program);
     let _ = writeln!(out, "}}\n");
 }
 
 fn emit_dispatcher(out: &mut String, semantic: &SemanticProgram) {
-    let _ = writeln!(out, "fn dispatch_block(rt: &mut Runtime, address: u32, thumb: bool) -> Result<GeneratedBlockExit, &'static str> {{");
-    let _ = writeln!(out, "    match (address, thumb) {{");
+    let _ = writeln!(out, "fn dispatch_block(rt: &mut Runtime, address: u32, thumb: bool) -> Result<GeneratedBlockExit, &'static str> {{"); let _ = writeln!(out, "    match (address, thumb) {{");
     for function in &semantic.functions { for block in &function.blocks { let name = block_name(block.id, block.mode, block.address); let _ = writeln!(out, "        ({:#010x}, {}) => {name}(rt),", block.address, mode_bool(block.mode)); } }
     let _ = writeln!(out, "        _ => Err(gba_runtime::GENERATED_TARGET_OUTSIDE_CFG),\n    }}\n}}");
 }
 
 fn emit_linked_predicate(out: &mut String, semantic: &SemanticProgram) {
-    let _ = writeln!(out, "fn is_linked_block(address: u32, thumb: bool) -> bool {{");
-    let _ = writeln!(out, "    matches!((address, thumb),");
-    let mut first = true;
-    let mut line = String::from("        ");
-    for function in &semantic.functions {
-        for block in &function.blocks {
-            if !first { line.push_str(" | "); }
-            line.push_str(&format!("({:#010x}, {})", block.address, mode_bool(block.mode)));
-            first = false;
-            if line.len() > 100 { let _ = writeln!(out, "{}", line); line = String::from("        "); }
-        }
-    }
+    let _ = writeln!(out, "fn is_linked_block(address: u32, thumb: bool) -> bool {{"); let _ = writeln!(out, "    matches!((address, thumb),"); let mut first = true; let mut line = String::from("        ");
+    for function in &semantic.functions { for block in &function.blocks { if !first { line.push_str(" | "); } line.push_str(&format!("({:#010x}, {})", block.address, mode_bool(block.mode))); first = false; if line.len() > 100 { let _ = writeln!(out, "{}", line); line = String::from("        "); } } }
     if line.trim().is_empty() { line = String::from("        _"); }
     let _ = writeln!(out, "{}\n    )\n}}", line);
 }
 
 pub fn generate_semantic(program: &Program, semantic: &SemanticProgram, module_name: &str) -> RustModule {
-    assert!(!semantic.functions.is_empty(), "cannot generate an empty semantic program");
-    let mut out = String::new();
+    assert!(!semantic.functions.is_empty(), "cannot generate an empty semantic program"); let mut out = String::new();
     let _ = writeln!(out, "// @generated by gba-recompiler; do not edit.\nuse gba_runtime::{{GeneratedBlockExit, Runtime, ShiftKind}};\n");
-    let entry = &semantic.functions[semantic.entry.0];
-    let entry_block = program.cfg.blocks.get(entry.entry.0).expect("semantic entry block missing");
-    let entry_address = entry_block.key.address;
-    let entry_mode = mode_bool(entry_block.key.mode);
+    let entry = &semantic.functions[semantic.entry.0]; let entry_block = program.cfg.blocks.get(entry.entry.0).expect("semantic entry block missing"); let entry_address = entry_block.key.address; let entry_mode = mode_bool(entry_block.key.mode);
     let _ = writeln!(out, "pub fn {module_name}(rt: &mut Runtime) -> Result<gba_runtime::GeneratedExecutionResult, &'static str> {{\n    <Runtime as gba_runtime::RuntimeContract>::run_generated_contract(rt, {entry_address:#010x}, {entry_mode}, None, dispatch_block, is_linked_block)\n}}\n");
     let _ = writeln!(out, "pub fn {module_name}_with_limit(rt: &mut Runtime, max_steps: u64) -> Result<gba_runtime::GeneratedExecutionResult, &'static str> {{\n    <Runtime as gba_runtime::RuntimeContract>::run_generated_contract(rt, {entry_address:#010x}, {entry_mode}, Some(max_steps), dispatch_block, is_linked_block)\n}}\n");
-    emit_dispatcher(&mut out, semantic);
-    emit_linked_predicate(&mut out, semantic);
-    for function in &semantic.functions { for block in &function.blocks { emit_block(&mut out, program, semantic, block.id); } }
+    emit_dispatcher(&mut out, semantic); emit_linked_predicate(&mut out, semantic); for function in &semantic.functions { for block in &function.blocks { emit_block(&mut out, program, semantic, block.id); } }
     RustModule { source: out }
 }
 
