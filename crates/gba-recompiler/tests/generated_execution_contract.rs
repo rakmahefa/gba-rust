@@ -13,7 +13,10 @@ fn generated_blocks_execute_across_edges_and_preserve_memory_state() {
     let semantic = build_semantic_program(&program, &functions).expect("semantic contract");
     let generated = generate_semantic(&program, &semantic, "entry");
     assert!(generated.source.contains("run_generated_contract"));
-    assert!(generated.source.contains("GeneratedBlockExit::continue_to"));
+    assert!(generated.source.contains("fn dispatch_block"));
+    assert!(generated.source.contains("GeneratedBlockExit"));
+    assert!(!generated.source.contains("execute_arm_instruction"));
+    assert!(!generated.source.contains("execute_thumb_instruction"));
 
     let mut runtime = Runtime::new();
     runtime.write_reg(1, 0x0400_0000);
