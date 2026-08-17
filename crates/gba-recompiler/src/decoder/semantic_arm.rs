@@ -6,46 +6,24 @@ const BX_LINK_MASK: u32 = 0x0FFF_FFF0;
 const BX_LINK_PATTERN: u32 = 0x012F_FF30;
 const BX_MASK: u32 = 0x0FFF_FFF0;
 const BX_PATTERN: u32 = 0x012F_FF10;
-const SWP_MASK: u32 = 0x0F00_00F0;
-const SWP_PATTERN: u32 = 0x0100_0090;
-const BRANCH_MASK: u32 = 0x0E00_0000;
-const BRANCH_PATTERN: u32 = 0x0A00_0000;
-const SWI_MASK: u32 = 0x0F00_0000;
-const SWI_PATTERN: u32 = 0x0F00_0000;
-const MRS_MASK: u32 = 0x0FBF_0FFF;
-const MRS_PATTERN: u32 = 0x010F_0000;
-const MSR_MASK: u32 = 0x0DB0_F000;
-const MSR_PATTERN: u32 = 0x0120_F000;
-const MULTIPLY_MASK: u32 = 0x0FC0_00F0;
-const MULTIPLY_PATTERN: u32 = 0x0000_0090;
-const MULTIPLY_LONG_MASK: u32 = 0x0F80_00F0;
-const MULTIPLY_LONG_PATTERN: u32 = 0x0080_0090;
-const BLOCK_TRANSFER_MASK: u32 = 0x0E00_0000;
-const BLOCK_TRANSFER_PATTERN: u32 = 0x0800_0000;
-const SINGLE_TRANSFER_MASK: u32 = 0x0E00_0000;
-const SINGLE_TRANSFER_PATTERN: u32 = 0x0400_0000;
-const HALFWORD_MASK: u32 = 0x0E00_0090;
-const HALFWORD_PATTERN: u32 = 0x0000_0090;
-const DATA_PROCESSING_MASK: u32 = 0x0C00_0000;
-const DATA_PROCESSING_PATTERN: u32 = 0x0000_0000;
-const COPROC_REG_MASK: u32 = 0x0C00_0010;
-const COPROC_REG_PATTERN: u32 = 0x0000_0010;
-const COPROC_TRANSFER_MASK: u32 = 0x0E00_0000;
-const COPROC_TRANSFER_PATTERN: u32 = 0x0C00_0000;
-const COPROC_DATA_MASK_LO: u32 = 0x0F00_0010;
-const COPROC_DATA_PATTERN_LO: u32 = 0x0E00_0000;
-const COPROC_DATA_MASK_HI: u32 = 0x0F00_0010;
-const COPROC_DATA_PATTERN_HI: u32 = 0x0E00_0010;
 
 pub fn decode(address: u32, raw: u32, class: ArmClass) -> Instruction {
     let op = match class {
-        ArmClass::Nop | ArmClass::BranchExchange | ArmClass::Branch | ArmClass::Swap |
-        ArmClass::SoftwareInterrupt | ArmClass::Mrs | ArmClass::Msr | ArmClass::Multiply |
-        ArmClass::MultiplyLong | ArmClass::BlockTransfer => decode_control_special(raw, address, class),
+        ArmClass::Nop
+        | ArmClass::BranchExchange
+        | ArmClass::Branch
+        | ArmClass::Swap
+        | ArmClass::SoftwareInterrupt
+        | ArmClass::Mrs
+        | ArmClass::Msr
+        | ArmClass::Multiply
+        | ArmClass::MultiplyLong
+        | ArmClass::BlockTransfer => decode_control_special(raw, address, class),
         ArmClass::SingleDataTransfer | ArmClass::HalfwordTransfer => decode_memory(raw, class),
         ArmClass::DataProcessing => decode_data_processing(raw),
-        ArmClass::CoprocessorRegisterTransfer | ArmClass::CoprocessorTransfer |
-        ArmClass::CoprocessorData => decode_coprocessor(raw, class),
+        ArmClass::CoprocessorRegisterTransfer
+        | ArmClass::CoprocessorTransfer
+        | ArmClass::CoprocessorData => decode_coprocessor(raw, class),
         ArmClass::Unknown => ArmOp::Unknown,
     };
 
@@ -143,17 +121,36 @@ fn decode_single_transfer(raw: u32) -> ArmOp {
     let write_back = raw & (1 << 21) != 0;
     let offset = arm_operand2(raw);
 
-    if !pre_index && !write_back && let Operand2::Imm(value) = offset {
-        let magnitude = if up { value as i32 } else { -(value as i32) };
-        return if load {
-            ArmOp::Load { rd, rn, offset: magnitude, byte }
-        } else {
-            ArmOp::Store { rd, rn, offset: magnitude, byte }
-        };
+    if !pre_index && !write_back {
+        if let Operand2::Imm(value) = offset {
+            let magnitude = if up { value as i32 } else { -(value as i32) };
+            return if load {
+                ArmOp::Load {
+                    rd,
+                    rn,
+                    offset: magnitude,
+                    byte,
+                }
+            } else {
+                ArmOp::Store {
+                    rd,
+                    rn,
+                    offset: magnitude,
+                    byte,
+                }
+            };
+        }
     }
 
     ArmOp::Extended(ArmExtended::SingleDataTransfer {
-        load, byte, rd, rn, offset, pre_index, up, write_back,
+        load,
+        byte,
+        rd,
+        rn,
+        offset,
+        pre_index,
+        up,
+        write_back,
     })
 }
 
@@ -280,7 +277,10 @@ mod tests {
         ] {
             let class = classify_arm(raw);
             let instruction = decode(0x0800_0000, raw, class);
-            assert!(!matches!(instruction.kind, InstructionKind::Arm(ArmOp::Unknown)), "{raw:#010x}");
+            assert!(
+                !matches!(instruction.kind, InstructionKind::Arm(ArmOp::Unknown)),
+                "{raw:#010x}"
+            );
         }
     }
 }
