@@ -101,6 +101,7 @@ impl Runtime {
     pub fn write_reg(&mut self, index: usize, value: u32) { self.cpu.write_reg(index, value); }
     pub fn set_flags(&mut self, flags: Nzcv) { self.cpu.set_nzcv(flags); }
     pub fn nzcv(&self) -> Nzcv { self.cpu.nzcv() }
+    pub fn set_thumb(&mut self, thumb: bool) { self.cpu.set_thumb(thumb); }
     pub fn mov(&mut self, dst: usize, value: u32, set_flags: bool) { self.cpu.write_reg(dst, value); if set_flags { let current = self.cpu.nzcv(); self.set_flags(Nzcv { n: value & 0x8000_0000 != 0, z: value == 0, c: current.c, v: current.v }); } }
     pub fn add(&mut self, dst: usize, lhs: u32, rhs: u32, set_flags: bool) { let (result, flags) = arm7tdmi::add_with_carry(lhs, rhs, false); self.cpu.write_reg(dst, result); if set_flags { self.set_flags(flags); } }
     pub fn adc(&mut self, dst: usize, lhs: u32, rhs: u32, set_flags: bool) { let (result, flags) = arm7tdmi::add_with_carry(lhs, rhs, self.cpu.nzcv().c); self.cpu.write_reg(dst, result); if set_flags { self.set_flags(flags); } }
