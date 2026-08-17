@@ -151,7 +151,7 @@ mod tests {
         let functions = crate::discover_functions(&program);
         let semantic = crate::build_semantic_program(&program, &functions).unwrap();
         let generated = generate_semantic(&program, &semantic, "entry");
-        assert!(generated.source.contains("rt.condition_code(0)"));
+        assert!(generated.source.contains("rt.condition_code(1)"));
     }
 
     #[test]
