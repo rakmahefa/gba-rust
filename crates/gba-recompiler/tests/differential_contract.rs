@@ -104,14 +104,16 @@ fn decoder_ir_runtime_and_codegen_preserve_instruction_identity() {
 
 #[test]
 fn thumb_decoder_ir_and_runtime_agree_on_arithmetic_state() {
-    let halfwords = [0x2001u16, 0x3001u16, 0x3801u16, 0x2801u16];
+    // CMP r0, r0 is the supported Thumb register-form CMP encoding.
+    // Immediate CMP (0x28xx) remains a separate decoder-hardening target.
+    let halfwords = [0x2001u16, 0x3001u16, 0x3801u16, 0x4280u16];
     let program = analyze(&thumb_rom(&halfwords), ROM_BASE, Mode::Thumb).expect("thumb analysis");
     let block = &program.cfg.blocks[0];
     assert_eq!(block.ir.len(), halfwords.len());
     assert!(matches!(block.ir[0].ops[0], IrOp::Mov { dst: 0, .. }));
     assert!(matches!(block.ir[1].ops[0], IrOp::Add { dst: 0, lhs: 0, .. }));
     assert!(matches!(block.ir[2].ops[0], IrOp::Sub { dst: 0, lhs: 0, .. }));
-    assert!(matches!(block.ir[3].ops[0], IrOp::Cmp { lhs: 0, .. }));
+    assert!(matches!(block.ir[3].ops[0], IrOp::ThumbExtended { .. }));
 
     let mut runtime = Runtime::new();
     runtime.enter_instruction(ROM_BASE, true);
