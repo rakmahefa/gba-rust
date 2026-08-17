@@ -1,6 +1,7 @@
 use crate::{Runtime, REG_PC};
 
-pub const RUNTIME_CONTRACT_VERSION: u32 = 2;
+pub const RUNTIME_CONTRACT_VERSION: u32 = 3;
+pub const GENERATED_TARGET_OUTSIDE_CFG: &str = "generated target is outside the statically linked CFG";
 
 /// Architectural state exposed to differential tests and alternate generated backends.
 /// This deliberately excludes host-only runtime state (PPU/APU buffers, cartridge caches,
@@ -19,7 +20,70 @@ impl ArchitecturalState {
     }
 }
 
-/// Stable execution surface consumed by generated code and differential tests.
+/// Result produced by one generated basic block.
+///
+/// `Continue` is the normal control-flow edge between statically linked blocks.
+/// `Return` preserves a function return as a first-class event so the execution
+/// driver can distinguish it from an ordinary branch. An unlinked return target
+/// becomes the terminal boundary of the generated entry program.
+/// `Halt` is an explicit generated-program termination event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedBlockExit {
+    Continue { address: u32, thumb: bool },
+    Return { address: u32, thumb: bool },
+    Halt { address: u32, thumb: bool },
+}
+
+impl GeneratedBlockExit {
+    pub const fn continue_to(address: u32, thumb: bool) -> Self {
+        Self::Continue { address, thumb }
+    }
+
+    pub const fn return_to(address: u32, thumb: bool) -> Self {
+        Self::Return { address, thumb }
+    }
+
+    pub const fn halt(address: u32, thumb: bool) -> Self {
+        Self::Halt { address, thumb }
+    }
+
+    pub const fn target(self) -> (u32, bool) {
+        match self {
+            Self::Continue { address, thumb }
+            | Self::Return { address, thumb }
+            | Self::Halt { address, thumb } => (address, thumb),
+        }
+    }
+}
+
+/// Terminal reason for a generated execution session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedExecutionExit {
+    Returned { address: u32, thumb: bool },
+    Halted { address: u32, thumb: bool },
+    StepLimitExceeded { address: u32, thumb: bool },
+}
+
+/// Deterministic result for the generated block execution driver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedExecutionResult {
+    pub exit: GeneratedExecutionExit,
+    pub steps: u64,
+    pub state: ArchitecturalState,
+}
+
+impl GeneratedExecutionResult {
+    pub const fn target(&self) -> (u32, bool) {
+        match self.exit {
+            GeneratedExecutionExit::Returned { address, thumb }
+            | GeneratedExecutionExit::Halted { address, thumb }
+            | GeneratedExecutionExit::StepLimitExceeded { address, thumb } => (address, thumb),
+        }
+    }
+}
+
+/// Stable instruction- and block-level execution surface consumed by generated code and
+/// differential tests.
 ///
 /// The inherent `Runtime` methods remain the zero-overhead implementation path; this trait
 /// names the architectural contract explicitly and keeps host-only state out of comparisons.
@@ -38,6 +102,19 @@ pub trait RuntimeContract {
     fn execute_thumb_instruction(&mut self, raw: u16) -> Option<(u32, bool)>;
     fn exchange_target_for_dispatch(&mut self, target: u32) -> (u32, bool);
     fn tick(&mut self, cycles: u32);
+
+    fn run_generated_contract<F, L>(
+        &mut self,
+        address: u32,
+        thumb: bool,
+        max_steps: Option<u64>,
+        dispatch: F,
+        is_linked: L,
+    ) -> Result<GeneratedExecutionResult, &'static str>
+    where
+        Self: Sized,
+        F: FnMut(&mut Runtime, u32, bool) -> Result<GeneratedBlockExit, &'static str>,
+        L: Fn(u32, bool) -> bool;
 }
 
 impl RuntimeContract for Runtime {
@@ -105,6 +182,75 @@ impl RuntimeContract for Runtime {
     fn tick(&mut self, cycles: u32) {
         Runtime::tick(self, cycles);
     }
+
+    fn run_generated_contract<F, L>(
+        &mut self,
+        address: u32,
+        thumb: bool,
+        max_steps: Option<u64>,
+        mut dispatch: F,
+        is_linked: L,
+    ) -> Result<GeneratedExecutionResult, &'static str>
+    where
+        F: FnMut(&mut Runtime, u32, bool) -> Result<GeneratedBlockExit, &'static str>,
+        L: Fn(u32, bool) -> bool,
+    {
+        fn align(address: u32, thumb: bool) -> u32 {
+            address & if thumb { !1 } else { !3 }
+        }
+
+        let mut next = (align(address, thumb), thumb);
+        let mut steps = 0u64;
+
+        loop {
+            if let Some(limit) = max_steps {
+                if steps >= limit {
+                    self.cpu.set_thumb(next.1);
+                    self.cpu.r[REG_PC] = next.0;
+                    return Ok(GeneratedExecutionResult {
+                        exit: GeneratedExecutionExit::StepLimitExceeded { address: next.0, thumb: next.1 },
+                        steps,
+                        state: self.architectural_state(),
+                    });
+                }
+            }
+
+            self.cpu.set_thumb(next.1);
+            self.cpu.r[REG_PC] = next.0;
+            let exit = dispatch(self, next.0, next.1)?;
+            steps = steps.wrapping_add(1);
+
+            match exit {
+                GeneratedBlockExit::Continue { address, thumb } => {
+                    next = (align(address, thumb), thumb);
+                }
+                GeneratedBlockExit::Return { address, thumb } => {
+                    let target = (align(address, thumb), thumb);
+                    self.cpu.set_thumb(target.1);
+                    self.cpu.r[REG_PC] = target.0;
+                    if is_linked(target.0, target.1) {
+                        next = target;
+                    } else {
+                        return Ok(GeneratedExecutionResult {
+                            exit: GeneratedExecutionExit::Returned { address: target.0, thumb: target.1 },
+                            steps,
+                            state: self.architectural_state(),
+                        });
+                    }
+                }
+                GeneratedBlockExit::Halt { address, thumb } => {
+                    let target = (align(address, thumb), thumb);
+                    self.cpu.set_thumb(target.1);
+                    self.cpu.r[REG_PC] = target.0;
+                    return Ok(GeneratedExecutionResult {
+                        exit: GeneratedExecutionExit::Halted { address: target.0, thumb: target.1 },
+                        steps,
+                        state: self.architectural_state(),
+                    });
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -117,7 +263,7 @@ mod tests {
         runtime.enter_instruction(0x0800_0100, false);
         runtime.tick(3);
         let state = runtime.architectural_state();
-        assert_eq!(RUNTIME_CONTRACT_VERSION, 2);
+        assert_eq!(RUNTIME_CONTRACT_VERSION, 3);
         assert_eq!(state.pc(), 0x0800_0108);
         assert_eq!(state.cycles, 3);
     }
@@ -153,5 +299,41 @@ mod tests {
         assert_eq!(RuntimeContract::read32(&runtime, 0x0400_0000), 0x4433_2211);
         assert_eq!(RuntimeContract::read32(&runtime, 0x0400_0001), 0x1144_3322);
         assert_eq!(runtime.architectural_state(), before);
+    }
+
+    #[test]
+    fn generated_exit_target_is_stable() {
+        assert_eq!(GeneratedBlockExit::continue_to(0x0800_0100, false).target(), (0x0800_0100, false));
+        assert_eq!(GeneratedBlockExit::return_to(0x0800_0101, true).target(), (0x0800_0101, true));
+        assert_eq!(GeneratedBlockExit::halt(0x0400_0000, false).target(), (0x0400_0000, false));
+    }
+
+    #[test]
+    fn generated_contract_honors_step_limits_without_panicking() {
+        let mut runtime = Runtime::new();
+        let result = runtime
+            .run_generated_contract(0x0800_0000, false, Some(2), |rt, address, thumb| {
+                rt.tick(1);
+                Ok(GeneratedBlockExit::continue_to(address, thumb))
+            }, |_, _| true)
+            .expect("step limit is an expected terminal result");
+        assert_eq!(result.steps, 2);
+        assert_eq!(result.exit, GeneratedExecutionExit::StepLimitExceeded { address: 0x0800_0000, thumb: false });
+        assert_eq!(result.state.pc(), 0x0800_0000);
+        assert_eq!(runtime.cycles, 2);
+    }
+
+    #[test]
+    fn generated_contract_returns_at_an_unlinked_function_return() {
+        let mut runtime = Runtime::new();
+        let result = runtime
+            .run_generated_contract(0x0800_0000, false, None, |_, _, _| {
+                Ok(GeneratedBlockExit::return_to(0x0200_0001, true))
+            }, |_, _| false)
+            .expect("return is an expected terminal boundary");
+        assert_eq!(result.steps, 1);
+        assert_eq!(result.exit, GeneratedExecutionExit::Returned { address: 0x0200_0000, thumb: true });
+        assert!(result.state.thumb);
+        assert_eq!(result.state.pc(), 0x0200_0000);
     }
 }
