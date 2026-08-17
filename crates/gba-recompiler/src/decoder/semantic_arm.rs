@@ -119,7 +119,14 @@ fn decode_single_transfer(raw: u32) -> ArmOp {
     let pre_index = raw & (1 << 24) != 0;
     let up = raw & (1 << 23) != 0;
     let write_back = raw & (1 << 21) != 0;
-    let offset = arm_operand2(raw);
+    // For ARM single data transfers, I=0 encodes a 12-bit immediate offset
+    // in bits [11:0]; it is not the data-processing Operand2 encoding.
+    // Only I=1 uses the register+barrel-shifter form represented by Operand2.
+    let offset = if raw & (1 << 25) == 0 {
+        Operand2::Imm(raw & 0x0FFF)
+    } else {
+        arm_operand2(raw)
+    };
 
     if !pre_index && !write_back {
         if let Operand2::Imm(value) = offset {
@@ -281,6 +288,32 @@ mod tests {
                 !matches!(instruction.kind, InstructionKind::Arm(ArmOp::Unknown)),
                 "{raw:#010x}"
             );
+        }
+    }
+
+    #[test]
+    fn single_data_transfer_immediate_offset_is_not_decoded_as_shifted_register() {
+        let raw = 0xE5C0_1004; // STRB r1, [r0, #4]
+        let class = classify_arm(raw);
+        let instruction = decode(0x0800_0000, raw, class);
+        match instruction.kind {
+            InstructionKind::Arm(ArmOp::Extended(ArmExtended::SingleDataTransfer { offset, .. })) => {
+                assert_eq!(offset, Operand2::Imm(4));
+            }
+            other => panic!("unexpected decode: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_data_transfer_register_offset_keeps_barrel_shifter_semantics() {
+        let raw = 0xE7C0_1004; // STRB r1, [r0, r4] with I=1
+        let class = classify_arm(raw);
+        let instruction = decode(0x0800_0000, raw, class);
+        match instruction.kind {
+            InstructionKind::Arm(ArmOp::Extended(ArmExtended::SingleDataTransfer { offset, .. })) => {
+                assert!(matches!(offset, Operand2::Reg { rm: 4, .. }));
+            }
+            other => panic!("unexpected decode: {other:?}"),
         }
     }
 }
