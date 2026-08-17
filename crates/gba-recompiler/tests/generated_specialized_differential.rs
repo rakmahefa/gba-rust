@@ -1,17 +1,12 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use gba_recompiler::{analyze, build_semantic_program, discover_functions, generate_semantic, Mode, ROM_BASE};
+use gba_recompiler::{analyze, build_semantic_program, discover_functions, generate_semantic, IrControlEffect, Mode, ROM_BASE};
 
-fn arm_rom(words: &[u32]) -> Vec<u8> {
-    words.iter().flat_map(|word| word.to_le_bytes()).collect()
-}
-
-fn thumb_rom(halfwords: &[u16]) -> Vec<u8> {
-    halfwords.iter().flat_map(|word| word.to_le_bytes()).collect()
-}
+fn arm_rom(words: &[u32]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
+fn thumb_rom(halfwords: &[u16]) -> Vec<u8> { halfwords.iter().flat_map(|word| word.to_le_bytes()).collect() }
 
 fn runtime_rlib() -> PathBuf {
     let exe_dir = std::env::current_exe().expect("test executable path").parent().expect("test executable directory").to_path_buf();
@@ -19,9 +14,7 @@ fn runtime_rlib() -> PathBuf {
         .expect("target dependency directory")
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .find(|path| {
-            path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("libgba_runtime-") && name.ends_with(".rlib"))
-        })
+        .find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("libgba_runtime-") && name.ends_with(".rlib")))
         .unwrap_or_else(|| panic!("could not locate gba_runtime rlib in {}", exe_dir.display()))
 }
 
@@ -85,87 +78,31 @@ fn specialized_arm_data_processing_executes_against_architectural_expectations()
         0xE255_6001, // subs r6, r5, #1
         0xE3E7_7000, // mvn r7, r7
     ]);
-    compile_and_run_generated(
-        &source,
-        "entry",
-        "rt.write_reg(7, 0);",
-        "assert_eq!(result.state.registers[0], 1); assert_eq!(result.state.registers[1], 3); assert_eq!(result.state.registers[2], 2); assert_eq!(result.state.registers[3], 7); assert_eq!(result.state.registers[4], 7); assert_eq!(result.state.registers[5], 3); assert_eq!(result.state.registers[6], 2); assert_eq!(result.state.registers[7], u32::MAX);",
-    );
+    compile_and_run_generated(&source, "entry", "rt.write_reg(7, 0);", "assert_eq!(result.state.registers[0], 1); assert_eq!(result.state.registers[1], 3); assert_eq!(result.state.registers[2], 2); assert_eq!(result.state.registers[3], 7); assert_eq!(result.state.registers[4], 7); assert_eq!(result.state.registers[5], 3); assert_eq!(result.state.registers[6], 2); assert_eq!(result.state.registers[7], u32::MAX);");
 }
 
 #[test]
 fn specialized_arm_shift_and_multiply_execute_without_raw_dispatch() {
-    let source = generate_arm(&[
-        0xE3A0_0003, // mov r0, #3
-        0xE1A0_1080, // mov r1, r0, lsl #1
-        0xE000_0291, // mul r0, r1, r2
-    ]);
-    compile_and_run_generated(
-        &source,
-        "entry",
-        "rt.write_reg(2, 4);",
-        "assert_eq!(result.state.registers[1], 6); assert_eq!(result.state.registers[0], 24);",
-    );
+    let source = generate_arm(&[0xE3A0_0003, 0xE1A0_1080, 0xE000_0291]);
+    compile_and_run_generated(&source, "entry", "rt.write_reg(2, 4);", "assert_eq!(result.state.registers[1], 6); assert_eq!(result.state.registers[0], 24);");
 }
 
 #[test]
 fn specialized_thumb_shifted_and_alu_operations_execute() {
-    let source = generate_thumb(&[
-        0x2003, // movs r0, #3
-        0x2107, // movs r1, #7
-        0x0040, // lsls r0, r0, #1
-        0x4008, // ands r0, r1
-        0x4048, // eors r0, r1
-        0x4308, // orrs r0, r1
-        0x4388, // bics r0, r1
-        0x43C8, // mvns r0, r1
-    ]);
-    compile_and_run_generated(
-        &source,
-        "entry",
-        "",
-        "assert_eq!(result.state.registers[0], !7u32); assert!(result.state.cpsr & gba_runtime::CPSR_N != 0); assert!(!result.state.thumb || result.state.thumb);",
-    );
+    let source = generate_thumb(&[0x2003, 0x2107, 0x0040, 0x4008, 0x4048, 0x4308, 0x4388, 0x43C8]);
+    compile_and_run_generated(&source, "entry", "", "assert_eq!(result.state.registers[0], !7u32); assert!(result.state.cpsr & gba_runtime::CPSR_N != 0);");
 }
 
 #[test]
 fn specialized_thumb_arithmetic_and_compare_flags_execute() {
-    let source = generate_thumb(&[
-        0x2001, // movs r0, #1
-        0x3001, // adds r0, #1
-        0x3801, // subs r0, #1
-        0x2801, // cmp r0, #1
-        0x42C8, // cmn r0, r1
-        0x4148, // adcs r0, r1
-        0x4188, // sbcs r0, r1
-        0x4248, // negs r0, r1
-        0x4348, // muls r0, r1
-    ]);
-    compile_and_run_generated(
-        &source,
-        "entry",
-        "rt.write_reg(1, 2); rt.set_flags(gba_runtime::Nzcv::new(false, false, true, false));",
-        "assert_eq!(result.state.registers[0], 0xFFFF_FFFEu32.wrapping_mul(2)); assert_eq!(result.steps, 9);",
-    );
+    let source = generate_thumb(&[0x2001, 0x3001, 0x3801, 0x2801, 0x42C8, 0x4148, 0x4188, 0x4248, 0x4348]);
+    compile_and_run_generated(&source, "entry", "rt.write_reg(1, 2);", "assert_eq!(result.state.registers[0], 0xFFFF_FFFCu32); assert_eq!(result.steps, 9);");
 }
 
 #[test]
 fn specialized_memory_codegen_executes_load_store_roundtrip() {
-    let source = generate_arm(&[
-        0xE3A0_0000, // mov r0, #0
-        0xE280_0004, // add r0, r0, #4
-        0xE3A1_102A, // mov r1, #0x2a
-        0xE580_1000, // str r1, [r0]
-        0xE590_2000, // ldr r2, [r0]
-        0xE5C0_1020, // strb r1, [r0]
-        0xE5D0_3000, // ldrb r3, [r0]
-    ]);
-    compile_and_run_generated(
-        &source,
-        "entry",
-        "",
-        "assert_eq!(result.state.registers[2], 0x2a); assert_eq!(result.state.registers[3], 0x2a); assert_eq!(rt.read32(4), 0x2a);",
-    );
+    let source = generate_arm(&[0xE3A0_0000, 0xE280_0004, 0xE3A0_102A, 0xE580_1000, 0xE590_2000, 0xE5C0_1000, 0xE5D0_3000]);
+    compile_and_run_generated(&source, "entry", "", "assert_eq!(result.state.registers[2], 0x2a); assert_eq!(result.state.registers[3], 0x2a); assert_eq!(rt.read32(4), 0x2a);");
 }
 
 #[test]
@@ -173,10 +110,7 @@ fn semantic_ir_rejects_codegen_contract_tampering_before_generation() {
     let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).expect("analysis");
     let functions = discover_functions(&program);
     let mut semantic = build_semantic_program(&program, &functions).expect("semantic");
-    semantic.functions[0].blocks[0].instructions[0].control = gba_recompiler::IrControlEffect::Branch { target: ROM_BASE, condition: gba_recompiler::Condition::Al, link: false };
+    semantic.functions[0].blocks[0].instructions[0].ops.push(IrControlEffect::Branch { target: ROM_BASE, condition: gba_recompiler::Condition::Al, link: false });
     let error = gba_recompiler::validate_semantic_program(&program, &functions, &semantic).expect_err("tampered semantic contract must fail");
     assert!(error.contains("control-effect instruction before its terminator"));
 }
-
-#[allow(dead_code)]
-fn _assert_file_path_is_absolute(path: &Path) { assert!(path.is_absolute()); }
