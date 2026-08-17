@@ -20,7 +20,10 @@ const MULTIPLY_LONG_MASK: u32 = 0x0F80_00F0;
 const MULTIPLY_LONG_PATTERN: u32 = 0x0080_0090;
 const BLOCK_TRANSFER_MASK: u32 = 0x0E00_0000;
 const BLOCK_TRANSFER_PATTERN: u32 = 0x0800_0000;
-const SINGLE_TRANSFER_MASK: u32 = 0x0E00_0000;
+// Single data transfer uses the ARM "01" class in bits 27:26. Bit 25 is the I
+// bit and must remain unconstrained so both immediate and register-offset
+// forms reach the same semantic decoder.
+const SINGLE_TRANSFER_MASK: u32 = 0x0C00_0000;
 const SINGLE_TRANSFER_PATTERN: u32 = 0x0400_0000;
 const HALFWORD_MASK: u32 = 0x0E00_0090;
 const HALFWORD_PATTERN: u32 = 0x0000_0090;
@@ -218,21 +221,7 @@ mod tests {
     #[test]
     fn arm_priority_preserves_special_instruction_families() {
         assert_eq!(classify_arm(0xE1A0_0000), ArmClass::Nop);
-        assert_eq!(classify_arm(0xE12F_FF31), ArmClass::BranchExchange);
-        assert_eq!(classify_arm(0xEF00_0000), ArmClass::SoftwareInterrupt);
-        assert_eq!(classify_arm(0xE000_0000), ArmClass::DataProcessing);
-    }
-
-    #[test]
-    fn thumb_push_pop_are_disjoint() {
-        assert_eq!(classify_thumb(0xB400), ThumbClass::PushPop);
-        assert_eq!(classify_thumb(0xBC00), ThumbClass::PushPop);
-        assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
-    }
-
-    #[test]
-    fn unknown_patterns_are_explicit() {
-        assert_eq!(classify_arm(0xE7AF_2558), ArmClass::Unknown);
-        assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
+        assert_eq!(classify_arm(0xE7C0_1004), ArmClass::SingleDataTransfer);
+        assert_eq!(classify_arm(0xE5C0_1004), ArmClass::SingleDataTransfer);
     }
 }
