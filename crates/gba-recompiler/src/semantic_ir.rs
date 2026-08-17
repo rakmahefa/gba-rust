@@ -6,13 +6,24 @@ use crate::function::{CallSite, FunctionControlFlowGraph, FunctionId, ReturnSite
 use crate::ir::{IrInstruction, IrMemoryKind, IrMemoryWidth, IrOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemoryWidth { Byte, Word }
+pub enum MemoryWidth {
+    Byte,
+    Halfword,
+    Word,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemoryEffect { Read { width: MemoryWidth, base: u8 }, Write { width: MemoryWidth, base: u8 } }
+pub enum MemoryEffect {
+    Read { width: MemoryWidth, base: u8 },
+    Write { width: MemoryWidth, base: u8 },
+    ReadWrite { width: MemoryWidth, base: u8 },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FlagEffect { pub read: bool, pub write: bool }
+pub struct FlagEffect {
+    pub read: bool,
+    pub write: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticTerminator {
@@ -63,16 +74,19 @@ pub struct SemanticProgram {
     pub block_to_function: HashMap<BlockId, FunctionId>,
 }
 
+fn memory_width(width: IrMemoryWidth) -> MemoryWidth {
+    match width {
+        IrMemoryWidth::Byte => MemoryWidth::Byte,
+        IrMemoryWidth::Halfword => MemoryWidth::Halfword,
+        IrMemoryWidth::Word => MemoryWidth::Word,
+    }
+}
+
 fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
     let memory = ir.memory().map(|memory| match memory.kind {
-        IrMemoryKind::Read => MemoryEffect::Read {
-            width: match memory.width { IrMemoryWidth::Byte => MemoryWidth::Byte, IrMemoryWidth::Word => MemoryWidth::Word },
-            base: memory.base,
-        },
-        IrMemoryKind::Write => MemoryEffect::Write {
-            width: match memory.width { IrMemoryWidth::Byte => MemoryWidth::Byte, IrMemoryWidth::Word => MemoryWidth::Word },
-            base: memory.base,
-        },
+        IrMemoryKind::Read => MemoryEffect::Read { width: memory_width(memory.width), base: memory.base },
+        IrMemoryKind::Write => MemoryEffect::Write { width: memory_width(memory.width), base: memory.base },
+        IrMemoryKind::ReadWrite => MemoryEffect::ReadWrite { width: memory_width(memory.width), base: memory.base },
     });
     let flags = ir.flags();
     SemanticInstruction {
@@ -95,7 +109,9 @@ fn terminator(block: &SemanticBlock) -> SemanticTerminator {
         IrOp::BranchExchange { register: 14, link: false } => SemanticTerminator::Return,
         IrOp::BranchExchange { register, link: true } => SemanticTerminator::IndirectCall { register: *register, mode: block.mode },
         IrOp::BranchExchange { register, link: false } => SemanticTerminator::IndirectBranch { register: *register },
-        IrOp::Unknown { .. } => SemanticTerminator::Unknown,
+        IrOp::Unknown { .. }
+        | IrOp::ArmExtended { op: crate::decoder::ArmExtended::SoftwareInterrupt { .. } }
+        | IrOp::ThumbExtended { op: crate::decoder::ThumbExtended::SoftwareInterrupt { .. } } => SemanticTerminator::Unknown,
         _ => SemanticTerminator::Fallthrough,
     }
 }
@@ -128,7 +144,9 @@ pub fn validate_semantic_program(program: &Program, functions: &FunctionControlF
             if owned.insert(block.id, function.id).is_some() { return Err(format!("block {} belongs to multiple functions", block.id.0)); }
             let source = &program.cfg.blocks[block.id.0];
             if source.instructions.len() != block.instructions.len() { return Err(format!("block {} instruction count changed during semantic lowering", block.id.0)); }
-            for (source, semantic) in source.ir.iter().zip(&block.instructions) { if source.address != semantic.address || source.size != semantic.size { return Err(format!("block {} instruction identity changed", block.id.0)); } }
+            for (source, semantic) in source.ir.iter().zip(&block.instructions) {
+                if source.address != semantic.address || source.size != semantic.size { return Err(format!("block {} instruction identity changed", block.id.0)); }
+            }
             for successor in &block.successors { if successor.0 >= program.cfg.blocks.len() { return Err(format!("block {} has invalid successor {}", block.id.0, successor.0)); } }
             match &block.terminator {
                 SemanticTerminator::Call { .. } | SemanticTerminator::IndirectCall { .. } => { if block.successors.is_empty() { return Err(format!("call block {} lost its continuation", block.id.0)); } }
@@ -174,6 +192,17 @@ mod tests {
         let flags = semantic.functions[0].blocks[0].instructions[0].flags;
         assert!(flags.read);
         assert!(!flags.write);
+    }
+
+    #[test]
+    fn semantic_extended_instruction_has_effects() {
+        let program = analyze(&arm_rom(&[0xE000_0090]), ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let instruction = &semantic.functions[0].blocks[0].instructions[0];
+        assert_eq!(instruction.reads, vec![1, 2]);
+        assert_eq!(instruction.writes, vec![0]);
+        assert!(!instruction.flags.write);
     }
 
     #[test]
