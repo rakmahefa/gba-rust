@@ -44,6 +44,9 @@ pub(super) fn arm_operand2(raw: u32) -> Operand2 {
         Operand2::Reg {
             rm: (raw & 0xF) as u8,
             shift: ((raw >> 7) & 0x1F) as u8,
+            shift_kind: ((raw >> 5) & 0x3) as u8,
+            by_register: raw & (1 << 4) != 0,
+            shift_register: ((raw >> 8) & 0xF) as u8,
         }
     }
 }
@@ -76,5 +79,11 @@ mod tests {
     fn rejects_patterns_that_escape_the_mask() {
         assert!(arm_matches(0x1234_5678, 0xFFFF_FFFF, 0x1234_5678));
         assert!(thumb_matches(0xB400, 0xFE00, 0xB400));
+    }
+
+    #[test]
+    fn decodes_all_operand2_shift_fields() {
+        let raw = (0b10 << 5) | (1 << 4) | (7 << 8) | 3;
+        assert_eq!(arm_operand2(raw), Operand2::Reg { rm: 3, shift: 0, shift_kind: 2, by_register: true, shift_register: 7 });
     }
 }
