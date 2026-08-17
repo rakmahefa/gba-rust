@@ -162,7 +162,7 @@ fn successor_matches_target(program: &Program, block: &SemanticBlock, target: u3
     block.successors.iter().any(|id| program.cfg.blocks.get(id.0).is_some_and(|successor| successor.key.address == target))
 }
 
-pub fn validate_semantic_program(program: &Program, functions: &FunctionControlFlowGraphGraph, semantic: &SemanticProgram) -> Result<(), String> {
+pub fn validate_semantic_program(program: &Program, functions: &FunctionControlFlowGraph, semantic: &SemanticProgram) -> Result<(), String> {
     if semantic.functions.len() != functions.functions.len() { return Err("semantic/function count mismatch".into()); }
     if semantic.functions.get(semantic.entry.0).is_none() { return Err(format!("semantic entry function {} does not exist", semantic.entry.0)); }
 
