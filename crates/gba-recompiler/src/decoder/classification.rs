@@ -227,12 +227,12 @@ mod tests {
     fn thumb_push_pop_are_disjoint() {
         assert_eq!(classify_thumb(0xB400), ThumbClass::PushPop);
         assert_eq!(classify_thumb(0xBC00), ThumbClass::PushPop);
-        assert_eq!(classify_thumb(0xBE00), ThumbClass::ConditionalBranch);
+        assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
     }
 
     #[test]
     fn unknown_patterns_are_explicit() {
         assert_eq!(classify_arm(0xF000_0000), ArmClass::Unknown);
-        assert_eq!(classify_thumb(0xBE00), ThumbClass::ConditionalBranch);
+        assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
     }
 }
