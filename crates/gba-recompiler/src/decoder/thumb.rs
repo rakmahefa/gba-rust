@@ -1,4 +1,4 @@
-use super::common::{sign_extend, thumb_condition};
+use super::common::{sign_extend, thumb_condition, thumb_matches};
 use super::types::{Condition, Instruction, InstructionKind, Mode, ThumbAluOp, ThumbExtended, ThumbOp};
 
 pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
@@ -6,14 +6,14 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
     let rs = ((raw >> 3) & 7) as u8;
     let op = if raw == 0x46C0 {
         ThumbOp::Nop
-    } else if (raw & 0xE000) == 0x0000 {
+    } else if thumb_matches(raw, 0xE000, 0x0000) {
         ThumbOp::Extended(ThumbExtended::MoveShifted {
             kind: ((raw >> 11) & 3) as u8,
             rd,
             rs,
             offset: ((raw >> 6) & 0x1F) as u8,
         })
-    } else if (raw & 0xF800) == 0x1800 {
+    } else if thumb_matches(raw, 0xF800, 0x1800) {
         let sub = raw & (1 << 9) != 0;
         let immediate = raw & (1 << 10) != 0;
         if immediate {
@@ -31,24 +31,24 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
                 rn: ((raw >> 6) & 7) as u8,
             })
         }
-    } else if (raw & 0xF800) == 0x2000 {
+    } else if thumb_matches(raw, 0xF800, 0x2000) {
         ThumbOp::MovImm {
             rd: ((raw >> 8) & 7) as u8,
             imm: (raw & 0xFF) as u8,
         }
-    } else if (raw & 0xF800) == 0x3000 {
+    } else if thumb_matches(raw, 0xF800, 0x3000) {
         ThumbOp::AddImm {
             rd: ((raw >> 8) & 7) as u8,
             rn: ((raw >> 8) & 7) as u8,
             imm: (raw & 0xFF) as u8,
         }
-    } else if (raw & 0xF800) == 0x3800 {
+    } else if thumb_matches(raw, 0xF800, 0x3800) {
         ThumbOp::SubImm {
             rd: ((raw >> 8) & 7) as u8,
             rn: ((raw >> 8) & 7) as u8,
             imm: (raw & 0xFF) as u8,
         }
-    } else if (raw & 0xFC00) == 0x4000 {
+    } else if thumb_matches(raw, 0xFC00, 0x4000) {
         let opcode = ((raw >> 6) & 0xF) as u8;
         ThumbOp::Extended(ThumbExtended::Alu {
             op: match opcode {
@@ -72,23 +72,23 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
             rd,
             rs,
         })
-    } else if (raw & 0xFF87) == 0x4700 {
+    } else if thumb_matches(raw, 0xFF87, 0x4700) {
         ThumbOp::BranchExchange {
             rm: ((raw >> 3) & 0xF) as u8,
         }
-    } else if (raw & 0xFC00) == 0x4400 {
+    } else if thumb_matches(raw, 0xFC00, 0x4400) {
         ThumbOp::Extended(ThumbExtended::HighRegister {
             op: ((raw >> 8) & 3) as u8,
             rd: (((raw >> 7) & 1) << 3 | (raw & 7)) as u8,
             rs: (((raw >> 6) & 1) << 3 | ((raw >> 3) & 7)) as u8,
         })
-    } else if (raw & 0xF800) == 0x4800 {
+    } else if thumb_matches(raw, 0xF800, 0x4800) {
         ThumbOp::LoadImm {
             rd: ((raw >> 8) & 7) as u8,
             rn: 15,
             word_offset: (raw & 0xFF) as u8,
         }
-    } else if (raw & 0xF000) == 0x5000 {
+    } else if thumb_matches(raw, 0xF000, 0x5000) {
         let opcode = ((raw >> 9) & 7) as u8;
         if opcode < 4 {
             ThumbOp::Extended(ThumbExtended::LoadStoreRegister {
@@ -106,7 +106,7 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
                 ro: ((raw >> 6) & 7) as u8,
             })
         }
-    } else if (raw & 0xE000) == 0x6000 {
+    } else if thumb_matches(raw, 0xE000, 0x6000) {
         ThumbOp::Extended(ThumbExtended::LoadStoreImmediate {
             load: raw & (1 << 11) != 0,
             byte: raw & (1 << 12) != 0,
@@ -114,54 +114,54 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
             rb: rs,
             offset: ((raw >> 6) & 0x1F) as u8,
         })
-    } else if (raw & 0xF000) == 0x8000 {
+    } else if thumb_matches(raw, 0xF000, 0x8000) {
         ThumbOp::Extended(ThumbExtended::LoadStoreHalfword {
             load: raw & (1 << 11) != 0,
             rd,
             rb: rs,
             offset: ((raw >> 6) & 0x1F) as u8,
         })
-    } else if (raw & 0xF000) == 0x9000 {
+    } else if thumb_matches(raw, 0xF000, 0x9000) {
         ThumbOp::Extended(ThumbExtended::SpRelativeLoadStore {
             load: raw & (1 << 11) != 0,
             rd: ((raw >> 8) & 7) as u8,
             offset: (raw & 0xFF) as u8,
         })
-    } else if (raw & 0xF000) == 0xA000 {
+    } else if thumb_matches(raw, 0xF000, 0xA000) {
         ThumbOp::Extended(ThumbExtended::Address {
             rd: ((raw >> 8) & 7) as u8,
             use_sp: raw & (1 << 11) != 0,
             word_offset: (raw & 0xFF) as u8,
         })
-    } else if (raw & 0xFF80) == 0xB000 {
+    } else if thumb_matches(raw, 0xFF80, 0xB000) {
         ThumbOp::Extended(ThumbExtended::AddSp {
             negative: raw & (1 << 7) != 0,
             imm: ((raw & 0x7F) as u16) << 2,
         })
-    } else if (raw & 0xFE00) == 0xB400 || (raw & 0xFE00) == 0xBC00 {
+    } else if thumb_matches(raw, 0xFE00, 0xB400) || thumb_matches(raw, 0xFE00, 0xBC00) {
         ThumbOp::Extended(ThumbExtended::PushPop {
             load: raw & (1 << 11) != 0,
             registers: (raw & 0xFF) as u8,
             extra_lr_pc: raw & (1 << 8) != 0,
         })
-    } else if (raw & 0xF000) == 0xC000 {
+    } else if thumb_matches(raw, 0xF000, 0xC000) {
         ThumbOp::Extended(ThumbExtended::MultipleLoadStore {
             load: raw & (1 << 11) != 0,
             rb: ((raw >> 8) & 7) as u8,
             register_list: (raw & 0xFF) as u8,
         })
-    } else if (raw & 0xF000) == 0xD000 && (raw & 0x0F00) != 0x0F00 {
+    } else if thumb_matches(raw, 0xF000, 0xD000) && !thumb_matches(raw, 0x0F00, 0x0F00) {
         let cond = thumb_condition(raw);
         let offset = sign_extend(((raw & 0xFF) as u32) << 1, 9);
         ThumbOp::Branch {
             target: address.wrapping_add(4).wrapping_add(offset as u32),
             condition: cond,
         }
-    } else if (raw & 0xFF00) == 0xDF00 {
+    } else if thumb_matches(raw, 0xFF00, 0xDF00) {
         ThumbOp::Extended(ThumbExtended::SoftwareInterrupt {
             comment: (raw & 0xFF) as u8,
         })
-    } else if (raw & 0xF800) == 0xE000 {
+    } else if thumb_matches(raw, 0xF800, 0xE000) {
         let offset = sign_extend(((raw & 0x07FF) as u32) << 1, 12);
         ThumbOp::Branch {
             target: address.wrapping_add(4).wrapping_add(offset as u32),
@@ -201,5 +201,18 @@ pub fn decode_thumb_bl(address: u32, first: u16, second: u16) -> Instruction {
         size: 4,
         condition: Condition::Al,
         kind: InstructionKind::Thumb(ThumbOp::BranchLink { target }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn push_and_pop_use_disjoint_masks() {
+        assert!(thumb_matches(0xB400, 0xFE00, 0xB400));
+        assert!(thumb_matches(0xBC00, 0xFE00, 0xBC00));
+        assert!(!thumb_matches(0xBE00, 0xFE00, 0xB400));
+        assert!(!thumb_matches(0xBE00, 0xFE00, 0xBC00));
     }
 }
