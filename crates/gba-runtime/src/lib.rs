@@ -281,6 +281,41 @@ impl Runtime {
     pub fn dispatch(&mut self, address: u32) -> ! { self.dispatch_mode(address, self.cpu.thumb) }
     pub fn halt(&mut self) -> ! { panic!("recompiled program halted") }
     pub fn unimplemented(&mut self, address: u32, raw: u32, mode: &str) -> ! { panic!("unimplemented {mode} instruction {raw:#010x} at {address:#010x}") }
+
+    /// Run generated basic blocks iteratively. Each dispatch step returns the next architectural target;
+    /// returning `Err` terminates execution without recursive block calls.
+    pub fn run_generated<F>(
+        &mut self,
+        address: u32,
+        thumb: bool,
+        max_steps: Option<u64>,
+        mut dispatch: F,
+    ) -> Result<(u32, bool), &'static str>
+    where
+        F: FnMut(&mut Runtime, u32, bool) -> Result<(u32, bool), &'static str>,
+    {
+        let mut next = (address & if thumb { !1 } else { !3 }, thumb);
+        let mut steps = 0u64;
+        loop {
+            if let Some(limit) = max_steps {
+                if steps >= limit {
+                    return Err("generated execution step limit exceeded");
+                }
+            }
+            self.cpu.set_thumb(next.1);
+            self.cpu.r[REG_PC] = next.0;
+            next = dispatch(self, next.0, next.1)?;
+            steps = steps.wrapping_add(1);
+        }
+    }
+
+    /// Resolve a BX/BLX-style exchange without entering the legacy panic-only dispatcher.
+    pub fn exchange_target_for_dispatch(&mut self, target: u32) -> (u32, bool) {
+        let (address, thumb) = arm7tdmi::exchange_target(target);
+        self.cpu.set_thumb(thumb);
+        self.cpu.r[REG_PC] = address;
+        (address, thumb)
+    }
 }
 
 #[cfg(test)]
@@ -302,4 +337,21 @@ mod tests {
     fn banked_modes_keep_distinct_stack_and_link_registers() { let mut runtime = Runtime::new(); runtime.write_reg(REG_SP, 0x1000); runtime.write_reg(REG_LR, 0x2000); runtime.switch_mode(CpuMode::Supervisor); runtime.write_reg(REG_SP, 0x3000); runtime.write_reg(REG_LR, 0x4000); runtime.switch_mode(CpuMode::System); assert_eq!(runtime.read_reg(REG_SP), 0x1000); assert_eq!(runtime.read_reg(REG_LR), 0x2000); runtime.switch_mode(CpuMode::Supervisor); assert_eq!(runtime.read_reg(REG_SP), 0x3000); assert_eq!(runtime.read_reg(REG_LR), 0x4000); }
     #[test]
     fn swi_exception_saves_cpsr_and_restores_banks() { let mut runtime = Runtime::new(); runtime.enter_instruction(0x0800_0100, false); runtime.write_reg(REG_SP, 0x1000); runtime.write_reg(REG_LR, 0x2000); let old = runtime.cpu.cpsr; let (vector, thumb) = runtime.raise_exception(ExceptionKind::SoftwareInterrupt); assert_eq!((vector, thumb), (0x08, false)); assert_eq!(runtime.mode(), CpuMode::Supervisor); runtime.write_reg(REG_SP, 0x3000); runtime.write_reg(REG_LR, 0x4000); assert_eq!(runtime.cpu.banked.spsr(CpuMode::Supervisor), Some(old)); let result = runtime.exception_return(0x0800_0104).expect("exception return"); assert_eq!(result, (0x0800_0104, false)); assert_eq!(runtime.mode(), CpuMode::System); assert_eq!(runtime.read_reg(REG_SP), 0x1000); assert_eq!(runtime.read_reg(REG_LR), 0x2000); }
+    #[test]
+    fn generated_engine_dispatches_iteratively_without_recursive_calls() {
+        let mut runtime = Runtime::new();
+        let result = runtime.run_generated(0x0800_0000, false, Some(10_000), |rt, address, thumb| {
+            rt.tick(1);
+            if rt.cycles == 10_000 { Err("done") } else { Ok((address, thumb)) }
+        });
+        assert_eq!(result, Err("done"));
+        assert_eq!(runtime.cycles, 10_000);
+    }
+    #[test]
+    fn exchange_target_for_dispatch_updates_thumb_and_pc() {
+        let mut runtime = Runtime::new();
+        assert_eq!(runtime.exchange_target_for_dispatch(0x0800_0101), (0x0800_0100, true));
+        assert!(runtime.cpu.thumb);
+        assert_eq!(runtime.read_reg(REG_PC), 0x0800_0100);
+    }
 }
