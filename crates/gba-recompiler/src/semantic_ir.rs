@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use crate::cfg::{BlockId, Program};
-use crate::function::{CallSite, FunctionControlFlowGraph, FunctionId, ReturnSite};
-use crate::ir::{IrInstruction, IrOp, Value};
 use crate::decoder::{Condition, Mode};
+use crate::function::{CallSite, FunctionControlFlowGraph, FunctionId, ReturnSite};
+use crate::ir::{IrInstruction, IrMemoryKind, IrMemoryWidth, IrOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryWidth { Byte, Word }
@@ -64,24 +64,26 @@ pub struct SemanticProgram {
 }
 
 fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
-    let mut reads = Vec::new();
-    let mut writes = Vec::new();
-    let mut memory = None;
-    let mut flags = FlagEffect { read: false, write: false };
-    for op in &ir.ops {
-        match op {
-            IrOp::Mov { dst, src } => { if let Value::Reg(reg) = src { reads.push(*reg); } writes.push(*dst); }
-            IrOp::Add { dst, lhs, rhs } | IrOp::Sub { dst, lhs, rhs } => { reads.push(*lhs); if let Value::Reg(reg) = rhs { reads.push(*reg); } writes.push(*dst); }
-            IrOp::Cmp { lhs, rhs } => { reads.push(*lhs); if let Value::Reg(reg) = rhs { reads.push(*reg); } flags.write = true; }
-            IrOp::Load { dst, base, byte, .. } => { reads.push(*base); writes.push(*dst); memory = Some(MemoryEffect::Read { width: if *byte { MemoryWidth::Byte } else { MemoryWidth::Word }, base: *base }); }
-            IrOp::Store { src, base, byte, .. } => { reads.extend([*src, *base]); memory = Some(MemoryEffect::Write { width: if *byte { MemoryWidth::Byte } else { MemoryWidth::Word }, base: *base }); }
-            IrOp::Branch { condition, link, .. } => { flags.read = *condition != Condition::Al; if *link { writes.push(14); } }
-            IrOp::BranchExchange { register, link } => { reads.push(*register); if *link { writes.push(14); } }
-            IrOp::Nop | IrOp::Unknown { .. } => {}
-        }
+    let memory = ir.memory().map(|memory| match memory.kind {
+        IrMemoryKind::Read => MemoryEffect::Read {
+            width: match memory.width { IrMemoryWidth::Byte => MemoryWidth::Byte, IrMemoryWidth::Word => MemoryWidth::Word },
+            base: memory.base,
+        },
+        IrMemoryKind::Write => MemoryEffect::Write {
+            width: match memory.width { IrMemoryWidth::Byte => MemoryWidth::Byte, IrMemoryWidth::Word => MemoryWidth::Word },
+            base: memory.base,
+        },
+    });
+    let flags = ir.flags();
+    SemanticInstruction {
+        address: ir.address,
+        size: ir.size,
+        ops: ir.ops.clone(),
+        reads: ir.reads(),
+        writes: ir.writes(),
+        memory,
+        flags: FlagEffect { read: flags.reads_any(), write: flags.writes_any() },
     }
-    reads.sort_unstable(); reads.dedup(); writes.sort_unstable(); writes.dedup();
-    SemanticInstruction { address: ir.address, size: ir.size, ops: ir.ops.clone(), reads, writes, memory, flags }
 }
 
 fn terminator(block: &SemanticBlock) -> SemanticTerminator {
@@ -136,7 +138,11 @@ pub fn validate_semantic_program(program: &Program, functions: &FunctionControlF
         }
     }
     if owned != semantic.block_to_function { return Err("semantic block ownership differs from function recovery".into()); }
-    for call in semantic.functions.iter().flat_map(|f| f.calls.iter()) { if let Some(return_block) = call.return_block { if !owned.contains_key(&return_block) { return Err(format!("call continuation {} is not owned by a function", return_block.0)); } } }
+    for call in semantic.functions.iter().flat_map(|f| f.calls.iter()) {
+        if let Some(return_block) = call.return_block {
+            if !owned.contains_key(&return_block) { return Err(format!("call continuation {} is not owned by a function", return_block.0)); }
+        }
+    }
     Ok(())
 }
 
@@ -145,26 +151,46 @@ mod tests {
     use super::*;
     use crate::{analyze, discover_functions};
     use crate::decoder::{Mode, ROM_BASE};
+
     fn arm_rom(words: &[u32]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
+
     #[test]
-    fn semantic_lowering_preserves_instruction_identity() {
+    fn semantic_lowering_preserves_instruction_effects() {
         let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
         let block = &semantic.functions[0].blocks[0];
-        assert_eq!(block.instructions[0].reads, Vec::<u8>::new()); assert_eq!(block.instructions[0].writes, vec![0]);
-        assert_eq!(block.instructions[1].reads, vec![0]); assert_eq!(block.instructions[1].writes, vec![0]);
+        assert_eq!(block.instructions[0].reads, Vec::<u8>::new());
+        assert_eq!(block.instructions[0].writes, vec![0]);
+        assert_eq!(block.instructions[1].reads, vec![0]);
+        assert_eq!(block.instructions[1].writes, vec![0]);
     }
+
+    #[test]
+    fn semantic_condition_preserves_flag_dependency() {
+        let program = analyze(&arm_rom(&[0x0A00_0000]), ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let flags = semantic.functions[0].blocks[0].instructions[0].flags;
+        assert!(flags.read);
+        assert!(!flags.write);
+    }
+
     #[test]
     fn semantic_call_has_explicit_continuation() {
         let program = analyze(&arm_rom(&[0xEB00_0000, 0xE1A0_0000]), ROM_BASE, Mode::Arm).unwrap();
-        let functions = discover_functions(&program); let semantic = build_semantic_program(&program, &functions).unwrap();
-        assert!(matches!(semantic.functions[0].blocks[0].terminator, SemanticTerminator::Call { .. })); assert_eq!(semantic.functions[0].blocks[0].successors, vec![BlockId(1)]);
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        assert!(matches!(semantic.functions[0].blocks[0].terminator, SemanticTerminator::Call { .. }));
+        assert_eq!(semantic.functions[0].blocks[0].successors, vec![BlockId(1)]);
     }
+
     #[test]
     fn semantic_return_has_no_successor() {
         let program = analyze(&arm_rom(&[0xE12F_FF1E]), ROM_BASE, Mode::Arm).unwrap();
-        let functions = discover_functions(&program); let semantic = build_semantic_program(&program, &functions).unwrap();
-        assert_eq!(semantic.functions[0].blocks[0].terminator, SemanticTerminator::Return); assert!(semantic.functions[0].blocks[0].successors.is_empty());
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        assert_eq!(semantic.functions[0].blocks[0].terminator, SemanticTerminator::Return);
+        assert!(semantic.functions[0].blocks[0].successors.is_empty());
     }
 }
