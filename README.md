@@ -29,17 +29,20 @@ Conservative optimization
 Rust code generation
   │
   ▼
-Native Rust / LLVM
+Generated block execution
   │
   ▼
 GBA runtime services
+  │
+  ▼
+Native Rust / LLVM
 ```
 
 > Inspired by the engineering direction of [`arcanite24/gb-recompiled`](https://github.com/arcanite24/gb-recompiled), but implemented as an independent Rust-first GBA architecture.
 
 ## Current status
 
-The project has moved beyond the initial decoder/CFG prototype. The main branch currently contains an end-to-end **static analysis → semantic IR → optimization → Rust code generation** pipeline, with the semantic layer being actively hardened around architectural side effects.
+The project has moved well beyond the initial decoder/CFG prototype. `main` currently contains an end-to-end **static analysis → semantic IR → optimization → Rust code generation** pipeline, together with a substantially hardened **ARM7TDMI architectural execution layer** in the runtime.
 
 Recent work has specifically strengthened:
 
@@ -50,11 +53,11 @@ Recent work has specifically strengthened:
 - semantic IR preservation of instruction identity and architectural effects;
 - complete modeling of the currently represented memory-effect kinds, including extended and Thumb memory operations;
 - optimizer safeguards so transformations respect modeled IR effects;
-- code generation for the expanded IR operation set;
-- regression tests for semantic completeness and non-trivial instruction fixtures;
-- deterministic Rust source generation.
+- ARM7TDMI execution semantics for arithmetic, shifts, conditions, PC/LR roles, BX exchange, unaligned word reads, exceptions, CPSR/SPSR state and banked registers;
+- generated Rust support for the expanded execution contract;
+- deterministic regression tests around architectural edge cases and semantic/code-generation integration.
 
-The generated program is **not yet a complete playable GBA game**. Full ARM7TDMI behavior, the GBA hardware contract, generated-block linking/dispatch, and broad instruction coverage remain under active development.
+The generated program is **not yet a complete playable GBA game**. The major remaining boundary is joining generated basic blocks into a real execution loop and completing the GBA hardware contract around memory-mapped I/O, DMA, timers, interrupts, PPU, APU, keypad and cartridge timing/protocol behavior.
 
 ## Architecture
 
@@ -81,7 +84,7 @@ The generated program is **not yet a complete playable GBA game**. Full ARM7TDMI
                  ┌──────────────────────────┐
                  │       gba-runtime        │
                  │                          │
-                 │ CPU state               │
+                 │ ARM7TDMI state          │
                  │ Memory / cartridge      │
                  │ Save devices             │
                  │ PPU / APU foundations   │
@@ -89,7 +92,7 @@ The generated program is **not yet a complete playable GBA game**. Full ARM7TDMI
                  └────────────┬─────────────┘
                               │
                               ▼
-                       Native Rust
+                       Native Rust / LLVM
 ```
 
 The separation is intentional:
@@ -101,9 +104,9 @@ The separation is intentional:
 - **`gba-core`** contains lower-level CPU, bus and cartridge foundations.
 - **`gba-egui`** contains an `egui`/`eframe` frontend prototype.
 
-`gba-core` and `gba-egui` are present in the repository but are currently **not declared as root workspace members**. They should therefore be considered auxiliary/prototype layers until they are integrated into the workspace architecture.
+`gba-core` and `gba-egui` are present in the repository but are currently **not declared as root workspace members**. They should therefore be considered auxiliary/prototype layers until the workspace architecture explicitly integrates them.
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the architectural contract and long-term roadmap.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the architectural contract and long-term direction.
 
 ## Workspace
 
@@ -115,7 +118,7 @@ crates/
 │   └── ARM/Thumb decoding, CFG, function analysis, IR, optimization and codegen
 │
 ├── gba-runtime/
-│   └── CPU, memory, cartridge/save and runtime services
+│   └── ARM7TDMI state, memory, cartridge/save and runtime services
 │
 └── gba-cli/
     └── ROM analysis and generated-source development harness
@@ -182,7 +185,7 @@ The function-analysis layer groups CFG blocks into functions and tracks:
 - return continuations;
 - indirect call/branch cases that cannot be fully resolved statically.
 
-This provides the structure consumed by the semantic IR.
+This provides the structure consumed by the semantic IR and later code-generation stages.
 
 ### 5. Lower to typed IR
 
@@ -190,14 +193,13 @@ The typed IR keeps architectural operations explicit rather than exposing decode
 
 Representative operations include:
 
-- `Mov`
-- arithmetic and logical operations
-- `Cmp`
-- `Load`
-- `Store`
-- branches and exchange operations
-- `Nop`
-- `Unknown`
+- `Mov`;
+- arithmetic and logical operations;
+- `Cmp`;
+- `Load` / `Store`;
+- branches and exchange operations;
+- `Nop`;
+- `Unknown`.
 
 IR instructions also expose architectural effects such as register reads/writes, memory access width and kind, flag effects, and control-flow effects.
 
@@ -215,8 +217,6 @@ The semantic layer makes control flow and side effects explicit. Semantic blocks
 
 Semantic instructions preserve the effects needed by later optimization and code generation, including modeled register dependencies, flag effects and memory effects.
 
-Recent hardening work specifically corrected and completed memory-effect propagation for extended instructions and Thumb memory operations. This is important because optimization correctness depends on the semantic layer accurately describing what an instruction can read, write or affect.
-
 Semantic-program validation protects invariants such as:
 
 - block ownership;
@@ -225,9 +225,11 @@ Semantic-program validation protects invariants such as:
 - call continuations;
 - structural consistency between recovered functions and semantic blocks.
 
+Recent hardening corrected and completed memory-effect propagation for represented extended instructions and Thumb memory operations. This is critical because optimization correctness depends on the semantic layer accurately describing what an instruction can read, write or affect.
+
 ### 7. Optimize conservatively
 
-The optimizer currently prioritizes transformations that are justified by the modeled semantics, including:
+The optimizer currently prioritizes transformations justified by the modeled semantics, including:
 
 - identity-move elimination to timing-preserving `Nop`;
 - `Add 0` / `Sub 0` normalization;
@@ -240,49 +242,53 @@ More aggressive dead-code elimination and global optimization should wait until 
 
 ### 8. Generate Rust
 
-`gba-recompiler` emits deterministic Rust representing recovered program structure and basic blocks. Generated code uses runtime services for register state, memory operations, condition evaluation, timing and control-flow dispatch.
+`gba-recompiler` emits deterministic Rust representing recovered program structure and basic blocks. Generated code uses the runtime execution contract for registers, memory operations, flags, condition evaluation, PC/Thumb state, linking and control-flow behavior.
 
-The generator now handles the expanded IR operation set needed by the semantic hardening work. The generated source remains a **development artifact and intermediate execution target**, not a packaged standalone game executable.
+The generator now handles the expanded IR operation set required by the semantic and execution hardening work. The generated source remains a **development artifact and intermediate execution target**, not a packaged standalone game executable.
 
-## Recompiler crate API
+### 9. Execute generated blocks
 
-The public `gba-recompiler` surface is organized around the major compilation stages:
+The next architectural step is to replace the remaining generated-dispatch placeholder with a deterministic block-execution loop.
 
-```rust
-pub mod cfg;
-pub mod codegen;
-pub mod decoder;
-pub mod function;
-pub mod ir;
-pub mod optimization;
-pub mod semantic_ir;
-```
-
-The crate exposes the main pipeline building blocks, including:
+The intended execution path is:
 
 ```text
-decode_arm / decode_thumb
-        │
-        ▼
-analyze
-        │
-        ▼
-discover_functions
-        │
-        ▼
-build_semantic_program
-        │
-        ▼
-validate_semantic_program
-        │
-        ▼
-optimize_semantic_program
-        │
-        ▼
-generate
+Generated block
+      │
+      ▼
+Execution contract
+      │
+      ├── register / flag state
+      ├── memory access
+      ├── branch / call / return
+      ├── ARM / Thumb exchange
+      └── runtime side effects
+      │
+      ▼
+Next generated block
 ```
 
-A full-pipeline regression test in the crate verifies that analysis reaches semantic IR, optimization and Rust code generation as a single flow.
+This stage is intentionally separated from the instruction decoder and optimizer. The goal is to prove that statically recovered blocks can execute correctly before introducing aggressive block linking and native fast paths.
+
+## ARM7TDMI execution model
+
+The runtime now contains an explicit ARM7TDMI architectural state model rather than treating CPU execution as a thin collection of generic integer helpers.
+
+Current foundations include:
+
+- ARM7TDMI user/system, FIQ, IRQ, Supervisor, Abort and Undefined modes;
+- banked SP/LR registers and FIQ banked `r8-r12`;
+- SPSR handling for exception modes;
+- CPSR `N/Z/C/V`, interrupt masks, mode bits and Thumb state;
+- architectural condition-code evaluation;
+- ARM/Thumb exchange semantics through BX;
+- architectural PC and link-address rules;
+- ARM shift edge cases and ROR modulo behavior;
+- add/subtract with carry/borrow semantics;
+- ARM unaligned word rotation behavior;
+- exception entry and exception-state restoration foundations.
+
+These rules are shared as pure architectural primitives where practical so that the recompiler execution contract and runtime implementation can be tested against the same semantics without making the runtime depend on the recompiler crate.
 
 ## Runtime
 
@@ -290,15 +296,16 @@ A full-pipeline regression test in the crate verifies that analysis reaches sema
 
 Current foundations include:
 
-- ARM7TDMI register state (`r[0..15]`), CPSR and Thumb state;
+- ARM7TDMI register and status state;
+- banked registers and exception-state support;
 - 240×160 framebuffer storage and frame counter;
 - APU state foundation;
 - cartridge ROM storage;
-- byte and little-endian 32-bit memory access;
+- byte and little-endian 32-bit memory access with ARM unaligned-word behavior;
 - simple I/O backing storage;
 - cartridge save access;
 - cycle/tick accounting;
-- basic condition-code evaluation;
+- basic condition-code and execution support;
 - hooks for generated-code dispatch, halt and unsupported instructions.
 
 The runtime is intentionally separate from the source ROM and from the frontend.
@@ -308,7 +315,7 @@ The runtime is intentionally separate from the source ROM and from the frontend.
 The runtime is still a foundation rather than a complete GBA hardware implementation. Major missing areas include:
 
 - complete GBA memory map and I/O register semantics;
-- complete ARM7TDMI instruction and exception behavior;
+- complete ARM7TDMI pipeline/timing behavior and remaining architectural corner cases;
 - full PPU/video mode implementation, sprites and windows;
 - complete APU channels and audio output;
 - DMA;
@@ -316,7 +323,7 @@ The runtime is still a foundation rather than a complete GBA hardware implementa
 - interrupts and scheduling;
 - keypad/input behavior;
 - complete cartridge protocol/timing behavior;
-- generated block linking and a full execution loop.
+- generated block linking and a complete ROM execution loop.
 
 ## Cartridge saves
 
@@ -393,8 +400,8 @@ The intended role of the frontend is to provide a native development/debugging s
 
 Development ROMs currently present under `roms/` include:
 
-- `1636 - Pokemon Fire Red (U)(Squirrels).gba`
-- `1986 - Pokemon Emerald (U)(TrashMan).gba`
+- `1636 - Pokemon Fire Red (U)(Squirrels).gba`;
+- `1986 - Pokemon Emerald (U)(TrashMan).gba`.
 
 These files are development/test inputs. Ensure that your use of any ROM complies with applicable copyright and ownership rules.
 
@@ -402,33 +409,50 @@ These files are development/test inputs. Ensure that your use of any ROM complie
 
 Prerequisites:
 
-- Rust stable toolchain
-- Cargo
+- Rust stable toolchain;
+- Cargo.
 
 Run the root workspace validation locally with:
 
 ```bash
-cargo fmt
-cargo test --workspace
+cargo fmt --check
+cargo test --workspace --all-targets
 cargo check --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-The repository uses GitHub Actions for automated validation. The latest merged work has focused on semantic IR correctness, memory-effect completeness, optimizer effect-awareness and expanded code-generation coverage.
+The repository uses GitHub Actions for automated validation. The workflow currently has separate jobs for formatting, tests, workspace checks and Clippy, with read-only repository permissions and Cargo caching. Formatting and Clippy are currently configured as advisory jobs; making all quality gates blocking is a recommended hardening step before the project enters its end-to-end execution phase.
+
+## Validation strategy
+
+The next validation layer should focus on **cross-stage correctness**, not only per-module unit tests.
+
+Recommended progression:
+
+1. architectural primitive tests for ARM7TDMI corner cases;
+2. semantic IR regression fixtures;
+3. semantic-to-codegen integration tests;
+4. generated-block execution tests with deterministic final CPU/memory state;
+5. ROM-level regression fixtures for FireRed/Emerald analysis;
+6. differential tests against a trusted ARM7TDMI/GBA reference for selected instruction and hardware behaviors;
+7. deterministic performance benchmarks for generated native code and runtime hot paths.
+
+This strategy reduces the risk of having a decoder, semantic IR, code generator and runtime that are individually plausible but disagree at their boundaries.
 
 ## Optimization strategy
 
 Optimization is deliberately staged behind correctness and deterministic analysis:
 
-1. Expand correct ARM/Thumb decoding.
-2. Make CFG and function discovery robust across real GBA control flow.
-3. Strengthen typed and semantic IR side-effect modeling.
-4. Extend constant propagation/folding safely across valid control-flow regions.
-5. Add dead-code elimination only when flags, timing and memory side effects are explicit enough to prove safety.
-6. Specialize safe memory accesses.
-7. Add basic-block linking and branch-target specialization.
-8. Let Rust/LLVM optimize generated code.
-9. Add runtime fast paths for hot hardware operations.
-10. Build deterministic ROM regression and benchmark suites.
+1. expand correct ARM/Thumb decoding;
+2. make CFG and function discovery robust across real GBA control flow;
+3. strengthen typed and semantic IR side-effect modeling;
+4. validate generated-block execution end to end;
+5. extend constant propagation/folding safely across valid control-flow regions;
+6. add dead-code elimination only when flags, timing and memory side effects are explicit enough to prove safety;
+7. specialize safe memory accesses;
+8. add basic-block linking and branch-target specialization;
+9. let Rust/LLVM optimize generated code;
+10. add runtime fast paths for hot hardware operations.
 
 The guiding principle is to perform as much work as possible at **compile time**, whenever the ROM makes that information statically recoverable.
 
@@ -446,15 +470,19 @@ The guiding principle is to perform as much work as possible at **compile time**
 - [x] Semantic memory-effect hardening for represented instruction classes.
 - [x] Effect-aware conservative optimization foundation.
 - [x] Rust code generation for the expanded IR operation set.
+- [x] ARM7TDMI execution-contract hardening.
+- [x] ARM7TDMI banked-register and exception-state foundations.
+- [ ] Complete generated basic-block dispatch/execution loop.
 - [ ] Expand ARM/Thumb instruction coverage toward real game code.
 - [ ] Improve function/call/return recovery for real-world ROM control flow.
-- [ ] Strengthen timing, exception and remaining architectural side-effect modeling.
+- [ ] Strengthen timing and remaining architectural side-effect modeling.
 - [ ] Add control-flow-aware/global optimization passes.
-- [ ] Replace generated dispatch placeholders with linked block execution.
+- [ ] Replace dispatch placeholders with linked block execution.
 
 ### Runtime
 
 - [x] CPU/register state foundation.
+- [x] ARM7TDMI mode/banked-register foundation.
 - [x] Cartridge and save-device foundations.
 - [x] Cycle/tick accounting foundation.
 - [ ] Complete GBA memory/I/O contract.
@@ -470,6 +498,7 @@ The guiding principle is to perform as much work as possible at **compile time**
 - [ ] Integrate `gba-core` and `gba-egui` into the workspace architecture.
 - [ ] Add deterministic FireRed/Emerald regression suites.
 - [ ] Add generated-code/runtime differential tests.
+- [ ] Add generated-block execution tests.
 - [ ] Benchmark generated native code and runtime hot paths.
 - [ ] Reach a genuinely playable end-to-end generated ROM.
 
@@ -482,11 +511,11 @@ The guiding principle is to perform as much work as possible at **compile time**
 - **semantic information before aggressive optimization**;
 - **effect-aware transformations**;
 - **deterministic compilation stages**;
-- **correctness before performance**;
+- **architectural correctness before performance**;
 - **small, testable Rust components**;
 - **native-code execution as the eventual performance target**.
 
-The project should therefore be understood as an actively developed **static GBA recompilation system with emulator/runtime foundations**, not as a finished general-purpose GBA emulator.
+The project should therefore be understood as an actively developed **static GBA recompilation system with an increasingly complete ARM7TDMI execution foundation**, not as a finished general-purpose GBA emulator or a currently playable recompiled game.
 
 ## License
 
