@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn unknown_patterns_are_explicit() {
-        assert_eq!(classify_arm(0xF000_0000), ArmClass::Unknown);
+        assert_eq!(classify_arm(0xE7AF_2558), ArmClass::Unknown);
         assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
     }
 }
