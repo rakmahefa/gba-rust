@@ -496,6 +496,15 @@ pub fn decode_arm(address: u32, raw: u32) -> Instruction {
             write_back: raw & (1 << 21) != 0,
             user_mode: raw & (1 << 22) != 0,
         })
+    } else if (raw & 0x0F00_0010) == 0x0E00_0000 {
+        ArmOp::Extended(ArmExtended::CoprocessorData {
+            cp: ((raw >> 8) & 0xF) as u8,
+            opcode1: ((raw >> 20) & 0xF) as u8,
+            crd: ((raw >> 12) & 0xF) as u8,
+            crn: ((raw >> 16) & 0xF) as u8,
+            crm: (raw & 0xF) as u8,
+            opcode2: ((raw >> 5) & 0x7) as u8,
+        })
     } else if (raw & 0x0E00_0000) == 0x0400_0000 {
         let load = raw & (1 << 20) != 0;
         let byte = raw & (1 << 22) != 0;
@@ -817,7 +826,7 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
         ThumbOp::Extended(ThumbExtended::SoftwareInterrupt {
             comment: (raw & 0xFF) as u8,
         })
-    } else if top == 0b11100 {
+    } else if (raw & 0xF800) == 0xE000 {
         let offset = sign_extend(((raw & 0x07FF) as u32) << 1, 12);
         ThumbOp::Branch {
             target: address.wrapping_add(4).wrapping_add(offset as u32),
