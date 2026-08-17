@@ -1,8 +1,10 @@
+use crate::architecture;
 use crate::decoder::{Condition, Mode};
 
-/// Architectural execution contract shared by semantic IR lowering, generated Rust,
-/// and the concrete runtime. This module intentionally contains no runtime state;
-/// it defines the operations the runtime must implement faithfully.
+/// Stable execution-contract facade kept for callers that already import
+/// `gba_recompiler::execution`. The architectural rules themselves live in
+/// `architecture`, so decoder, semantic IR and runtime-facing codegen can use
+/// the same pure definitions.
 pub const REG_COUNT: usize = 16;
 pub const REG_PC: u8 = 15;
 pub const REG_LR: u8 = 14;
@@ -14,103 +16,48 @@ pub const CPSR_C: u32 = 1 << 29;
 pub const CPSR_V: u32 = 1 << 28;
 pub const CPSR_T: u32 = 1 << 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Nzcv {
-    pub n: bool,
-    pub z: bool,
-    pub c: bool,
-    pub v: bool,
-}
-
-impl Nzcv {
-    pub const fn new(n: bool, z: bool, c: bool, v: bool) -> Self {
-        Self { n, z, c, v }
-    }
-
-    pub fn bits(self) -> u32 {
-        (if self.n { CPSR_N } else { 0 })
-            | (if self.z { CPSR_Z } else { 0 })
-            | (if self.c { CPSR_C } else { 0 })
-            | (if self.v { CPSR_V } else { 0 })
-    }
-}
+pub use architecture::{Nzcv, NzcvMask, ShiftResult, ShiftType};
+pub use architecture::{add_with_carry, architectural_pc, exchange_target, link_address, rotate_unaligned_word, shift_immediate, shift_register, sub_with_borrow};
 
 pub fn add_flags(lhs: u32, rhs: u32, result: u32) -> Nzcv {
-    let wide = (lhs as u64) + (rhs as u64);
-    let carry = wide > u32::MAX as u64;
-    let overflow = ((!(lhs ^ rhs)) & (lhs ^ result) & (1 << 31)) != 0;
-    Nzcv::new(result & CPSR_N != 0, result == 0, carry, overflow)
+    architecture::add_with_carry(lhs, rhs, false).1
 }
 
 pub fn sub_flags(lhs: u32, rhs: u32, result: u32) -> Nzcv {
-    let borrow = lhs < rhs;
-    let overflow = (((lhs ^ rhs) & (lhs ^ result)) & (1 << 31)) != 0;
-    Nzcv::new(result & CPSR_N != 0, result == 0, !borrow, overflow)
+    architecture::sub_with_borrow(lhs, rhs, false).1
 }
 
 pub fn condition_holds(cpsr: u32, condition: Condition) -> bool {
-    let n = cpsr & CPSR_N != 0;
-    let z = cpsr & CPSR_Z != 0;
-    let c = cpsr & CPSR_C != 0;
-    let v = cpsr & CPSR_V != 0;
-    match condition {
-        Condition::Eq => z,
-        Condition::Ne => !z,
-        Condition::Cs => c,
-        Condition::Cc => !c,
-        Condition::Mi => n,
-        Condition::Pl => !n,
-        Condition::Vs => v,
-        Condition::Vc => !v,
-        Condition::Hi => c && !z,
-        Condition::Ls => !c || z,
-        Condition::Ge => n == v,
-        Condition::Lt => n != v,
-        Condition::Gt => !z && (n == v),
-        Condition::Le => z || (n != v),
-        Condition::Al => true,
-    }
+    let nzcv = Nzcv {
+        n: cpsr & CPSR_N != 0,
+        z: cpsr & CPSR_Z != 0,
+        c: cpsr & CPSR_C != 0,
+        v: cpsr & CPSR_V != 0,
+    };
+    architecture::condition_holds(nzcv, condition)
 }
 
 pub fn branch_target(raw_target: u32, mode: Mode) -> u32 {
-    match mode {
-        Mode::Arm => raw_target & !3,
-        Mode::Thumb => raw_target & !1,
-    }
+    architecture::branch_target(raw_target, mode)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decoder::Condition;
 
     #[test]
-    fn add_flags_reports_carry_and_overflow() {
+    fn compatibility_add_flags_keeps_legacy_signature() {
         let result = 0x7fff_ffffu32.wrapping_add(1);
         let flags = add_flags(0x7fff_ffff, 1, result);
-        assert!(flags.n);
-        assert!(!flags.z);
-        assert!(!flags.c);
-        assert!(flags.v);
-
-        let result = u32::MAX.wrapping_add(1);
-        let flags = add_flags(u32::MAX, 1, result);
-        assert!(flags.z);
-        assert!(flags.c);
-        assert!(!flags.v);
+        assert!(flags.n && flags.v);
+        assert!(!flags.c && !flags.z);
     }
 
     #[test]
-    fn sub_flags_reports_no_borrow_as_carry() {
+    fn compatibility_sub_flags_keeps_c_as_not_borrow() {
         let flags = sub_flags(3, 1, 2);
-        assert!(!flags.n);
-        assert!(!flags.z);
         assert!(flags.c);
-        assert!(!flags.v);
-
         let flags = sub_flags(1, 3, u32::MAX - 1);
-        assert!(flags.n);
-        assert!(!flags.z);
         assert!(!flags.c);
     }
 
