@@ -54,16 +54,26 @@ pub fn shift_immediate(value: u32, kind: ShiftKind, amount: u8, carry_in: bool) 
 }
 
 pub fn shift_register(value: u32, kind: ShiftKind, amount: u8, carry_in: bool) -> ShiftResult {
-    match amount {
-        0 => ShiftResult { value, carry: carry_in },
-        1..=31 => shift_immediate(value, kind, amount, carry_in),
-        32 => match kind {
-            ShiftKind::Lsl => ShiftResult { value: 0, carry: value & 1 != 0 },
-            ShiftKind::Lsr => ShiftResult { value: 0, carry: value & 0x8000_0000 != 0 },
-            ShiftKind::Asr => ShiftResult { value: if value & 0x8000_0000 != 0 { u32::MAX } else { 0 }, carry: value & 0x8000_0000 != 0 },
-            ShiftKind::Ror => ShiftResult { value, carry: value & 0x8000_0000 != 0 },
+    match kind {
+        ShiftKind::Ror => match amount {
+            0 => ShiftResult { value, carry: carry_in },
+            1..=255 => {
+                let effective = (amount as u32) & 31;
+                if effective == 0 { ShiftResult { value, carry: value & 0x8000_0000 != 0 } }
+                else { ShiftResult { value: value.rotate_right(effective), carry: value & (1 << (effective - 1)) != 0 } }
+            }
         },
-        _ => ShiftResult { value: 0, carry: false },
+        _ => match amount {
+            0 => ShiftResult { value, carry: carry_in },
+            1..=31 => shift_immediate(value, kind, amount, carry_in),
+            32 => match kind {
+                ShiftKind::Lsl => ShiftResult { value: 0, carry: value & 1 != 0 },
+                ShiftKind::Lsr => ShiftResult { value: 0, carry: value & 0x8000_0000 != 0 },
+                ShiftKind::Asr => ShiftResult { value: if value & 0x8000_0000 != 0 { u32::MAX } else { 0 }, carry: value & 0x8000_0000 != 0 },
+                ShiftKind::Ror => unreachable!(),
+            },
+            _ => ShiftResult { value: 0, carry: false },
+        },
     }
 }
 
@@ -93,6 +103,7 @@ mod tests {
         assert_eq!(shift_immediate(1, ShiftKind::Lsr, 0, true), ShiftResult { value: 0, carry: false });
         assert_eq!(shift_immediate(1, ShiftKind::Ror, 0, true), ShiftResult { value: 0x8000_0000, carry: true });
         assert_eq!(shift_register(1, ShiftKind::Ror, 0, true), ShiftResult { value: 1, carry: true });
+        assert_eq!(shift_register(0x8000_0001, ShiftKind::Ror, 33, false), ShiftResult { value: 0xc000_0000, carry: true });
     }
     #[test]
     fn pc_link_bx_and_unaligned_word_rules_are_distinct() {
