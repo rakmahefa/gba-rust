@@ -1,4 +1,4 @@
-use gba_recompiler::{analyze, discover_functions, generate_semantic, build_semantic_program, IrOp, Mode, ROM_BASE};
+use gba_recompiler::{analyze, build_semantic_program, discover_functions, generate_semantic, IrOp, Mode, ROM_BASE};
 use gba_runtime::{ArchitecturalState, Runtime, RuntimeContract, CPSR_C, CPSR_N, CPSR_V, CPSR_Z};
 
 fn arm_rom(words: &[u32]) -> Vec<u8> {
@@ -47,8 +47,12 @@ fn arm_add_and_sub_match_independent_reference_model() {
         let mut runtime = Runtime::new();
         runtime.cpu.cpsr = gba_runtime::CpuMode::System as u32 | if carry { CPSR_C } else { 0 };
         let (expected, flags) = reference_add(lhs, rhs, carry);
-        runtime.add(0, lhs, rhs, true);
-        assert_eq!(runtime.read_reg(0), expected, "ADD {lhs:#x} + {rhs:#x} carry={carry}");
+        if carry {
+            runtime.adc(0, lhs, rhs, true);
+        } else {
+            runtime.add(0, lhs, rhs, true);
+        }
+        assert_eq!(runtime.read_reg(0), expected, "ADD-family {lhs:#x} + {rhs:#x} carry={carry}");
         assert_nzcv(&runtime.architectural_state(), flags);
 
         let mut runtime = Runtime::new();
@@ -72,9 +76,9 @@ fn decoder_ir_runtime_and_codegen_preserve_instruction_identity() {
     let program = analyze(&arm_rom(&words), ROM_BASE, Mode::Arm).expect("analysis");
     let block = &program.cfg.blocks[0];
     assert_eq!(block.ir.len(), words.len());
-    for (ir, raw) in block.ir.iter().zip(words) {
+    for (index, (ir, raw)) in block.ir.iter().zip(words).enumerate() {
         assert_eq!(ir.source_raw, raw);
-        assert_eq!(ir.address, ROM_BASE + (words.iter().position(|candidate| *candidate == raw).unwrap() as u32) * 4);
+        assert_eq!(ir.address, ROM_BASE + (index as u32) * 4);
         assert_eq!(ir.ops.len(), 1);
     }
 
@@ -87,7 +91,7 @@ fn decoder_ir_runtime_and_codegen_preserve_instruction_identity() {
     let semantic = build_semantic_program(&program, &functions).expect("semantic contract");
     let generated = generate_semantic(&program, &semantic, "entry");
     for raw in words {
-        assert!(generated.source.contains(&format!("rt.enter_instruction")));
+        assert!(generated.source.contains("rt.enter_instruction"));
         assert!(generated.source.contains(&format!("{raw:#010x}")));
     }
     assert!(generated.source.contains("rt.run_generated"));
@@ -105,6 +109,7 @@ fn generated_dispatch_contract_agrees_with_runtime_target_transitions() {
 
     let mut runtime = Runtime::new();
     runtime.enter_instruction(ROM_BASE, false);
+    runtime.write_reg(0, ROM_BASE);
     let first = RuntimeContract::execute_arm_instruction(&mut runtime, 0xE12F_FF10);
-    assert_eq!(first, Some((runtime.read_reg(0), false)));
+    assert_eq!(first, Some((ROM_BASE, false)));
 }
