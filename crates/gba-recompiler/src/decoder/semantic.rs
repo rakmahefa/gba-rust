@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn semantic_unknown_is_explicit() {
         assert!(matches!(
-            decode_arm(0x0800_0000, 0xF000_0000).kind,
+            decode_arm(0x0800_0000, 0xE7AF_2558).kind,
             InstructionKind::Arm(ArmOp::Unknown)
         ));
         assert!(matches!(
