@@ -8,51 +8,37 @@ use gba_recompiler::{analyze, build_semantic_program, discover_functions, genera
 fn arm_rom(words: &[u32]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
 fn thumb_rom(halfwords: &[u16]) -> Vec<u8> { halfwords.iter().flat_map(|word| word.to_le_bytes()).collect() }
 
-fn runtime_rlib() -> PathBuf {
-    let exe_dir = std::env::current_exe().expect("test executable path").parent().expect("test executable directory").to_path_buf();
-    fs::read_dir(&exe_dir)
-        .expect("target dependency directory")
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            let name = path.file_name()?.to_str()?;
-            if name.starts_with("libgba_runtime-") && name.ends_with(".rlib") { Some((entry.metadata().ok()?.modified().ok()?, path)) } else { None }
-        })
-        .max_by_key(|(modified, _)| *modified)
-        .map(|(_, path)| path)
-        .unwrap_or_else(|| panic!("could not locate gba_runtime rlib in {}", exe_dir.display()))
-}
-
 fn compile_and_run_generated(source: &str, entry: &str, setup: &str, assertions: &str) {
     let root = std::env::temp_dir().join(format!("gba-specialized-{}", SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos()));
-    fs::create_dir_all(&root).expect("temporary test directory");
-    let generated_path = root.join("generated.rs");
-    let wrapper_path = root.join("main.rs");
-    let binary_path = root.join("generated-test");
+    fs::create_dir_all(root.join("src")).expect("temporary test directory");
+    let generated_path = root.join("src/generated.rs");
+    let wrapper_path = root.join("src/main.rs");
+    let manifest_path = root.join("Cargo.toml");
+    let binary_path = root.join("target/debug/generated-test");
     fs::write(&generated_path, source).expect("generated source");
-    let wrapper = format!(
+    fs::write(&wrapper_path, format!(
         "mod generated {{ include!(r#\"{}\"#); }}\nfn main() {{ let mut rt = gba_runtime::Runtime::new(); {} let result = generated::{}(&mut rt).expect(\"generated execution\"); {} }}\n",
         generated_path.display(), setup, entry, assertions
+    )).expect("wrapper source");
+
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runtime_path = workspace_root.join("../gba-runtime");
+    let manifest = format!(
+        "[package]\nname = \"gba-generated-specialized-test\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\ngba-runtime = {{ path = \"{}\" }}\n",
+        runtime_path.display()
     );
-    fs::write(&wrapper_path, wrapper).expect("wrapper source");
+    fs::write(&manifest_path, manifest).expect("temporary Cargo manifest");
 
-    let rlib = runtime_rlib();
-    let dep_dir = rlib.parent().expect("runtime rlib directory");
-    let output = Command::new("rustc")
-        .arg("--edition=2021")
-        .arg("-L")
-        .arg(format!("dependency={}", dep_dir.display()))
-        .arg("--extern")
-        .arg(format!("gba_runtime={}", rlib.display()))
-        .arg("-o")
-        .arg(&binary_path)
-        .arg(&wrapper_path)
+    let output = Command::new("cargo")
+        .arg("run")
+        .arg("--quiet")
+        .arg("--manifest-path")
+        .arg(&manifest_path)
         .output()
-        .expect("rustc invocation");
-    assert!(output.status.success(), "generated Rust failed to compile:\nstdout:\n{}\nstderr:\n{}\nsource:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr), source);
+        .expect("cargo invocation");
+    assert!(output.status.success(), "generated Rust failed to compile or execute:\nstdout:\n{}\nstderr:\n{}\nsource:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr), source);
 
-    let run = Command::new(&binary_path).output().expect("generated binary invocation");
-    assert!(run.status.success(), "generated execution failed:\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr));
+    let _ = binary_path;
     let _ = fs::remove_dir_all(root);
 }
 
