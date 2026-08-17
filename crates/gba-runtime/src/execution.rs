@@ -137,9 +137,9 @@ fn arm_block_transfer(rt: &mut Runtime, raw: u32) -> Option<(u32, bool)> {
 
 impl Runtime {
     pub fn execute_arm_instruction(&mut self, raw: u32) -> Option<(u32, bool)> {
+        if raw & 0x0f00_0000 == 0x0f00_0000 { self.halt_with_exception("SWI", raw & 0x00ff_ffff); }
         if !arm7tdmi::condition_holds(self.cpu.cpsr, arm_condition(raw)) { return None; }
         if raw & 0x0fff_fff0 == 0x012f_ff10 || raw & 0x0fff_fff0 == 0x012f_ff30 { return None; }
-        if raw & 0x0f00_0000 == 0x0f00_0000 { self.halt_with_exception("SWI", raw & 0x00ff_ffff); }
         if raw & 0x0e00_0000 == 0x0a00_0000 { return None; }
         if raw & 0x0fc0_00f0 == 0x0000_0090 {
             let rd = ((raw >> 16) & 0xf) as usize; let rn = ((raw >> 12) & 0xf) as usize; let rs = ((raw >> 8) & 0xf) as usize; let rm = (raw & 0xf) as usize;
@@ -212,7 +212,12 @@ impl Runtime {
         }
         if raw & 0xfc00 == 0x4400 {
             let op = ((raw >> 8) & 3) as u8; let rd = (((raw >> 7) & 1) << 3 | (raw & 7)) as usize; let rs = (((raw >> 6) & 1) << 3 | ((raw >> 3) & 7)) as usize;
-            match op { 0 => self.write_reg(rd, self.read_reg(rd).wrapping_add(self.read_reg(rs))), 1 => self.compare(self.read_reg(rd), self.read_reg(rs)), 2 => { let value = self.read_reg(rs); if rd == REG_PC { let target = value & !1; self.write_reg(REG_PC, target); return Some((target, true)); } self.write_reg(rd, value); }, _ => return Some(arm7tdmi::exchange_target(self.read_reg(rs)).into()) }
+            match op {
+                0 => self.write_reg(rd, self.read_reg(rd).wrapping_add(self.read_reg(rs))),
+                1 => self.compare(self.read_reg(rd), self.read_reg(rs)),
+                2 => { let value = self.read_reg(rs); if rd == REG_PC { let target = value & !1; self.write_reg(REG_PC, target); return Some((target, true)); } self.write_reg(rd, value); }
+                _ => { let (target, thumb) = arm7tdmi::exchange_target(self.read_reg(rs)); self.set_thumb(thumb); self.write_reg(REG_PC, target); return Some((target, thumb)); }
+            }
             return None;
         }
         if raw & 0xf800 == 0x4800 { let rd = ((raw >> 8) & 7) as usize; let address = (self.read_reg(REG_PC) & !3).wrapping_add(u32::from(raw & 0xff) * 4); self.write_reg(rd, self.read32(address)); return None; }
@@ -231,7 +236,7 @@ impl Runtime {
         if raw & 0xff80 == 0xb000 { let imm = u32::from(raw & 0x7f) << 2; let sp = self.read_reg(13); self.write_reg(13, if raw & 0x80 != 0 { sp.wrapping_sub(imm) } else { sp.wrapping_add(imm) }); return None; }
         if raw & 0xfe00 == 0xb400 || raw & 0xfe00 == 0xbc00 {
             let load = raw & (1 << 11) != 0; let extra = raw & (1 << 8) != 0; let regs = (raw & 0xff) as u8;
-            if load { let mut address = self.read_reg(13); for reg in 0..8usize { if regs & (1 << reg) != 0 { self.write_reg(reg, self.read32(address)); address = address.wrapping_add(4); } } if extra { let target = self.read32(address) & !1; self.write_reg(REG_PC, target); return Some((target, true)); } self.write_reg(13, address); }
+            if load { let mut address = self.read_reg(13); for reg in 0..8usize { if regs & (1 << reg) != 0 { self.write_reg(reg, self.read32(address)); address = address.wrapping_add(4); } } if extra { let target = self.read32(address) & !1; self.write_reg(13, address.wrapping_add(4)); self.write_reg(REG_PC, target); return Some((target, true)); } self.write_reg(13, address); }
             else { let count = regs.count_ones() + u32::from(extra); let sp = self.read_reg(13).wrapping_sub(count * 4); let mut address = sp; for reg in 0..8usize { if regs & (1 << reg) != 0 { self.write32(address & !3, self.read_reg(reg)); address = address.wrapping_add(4); } } if extra { self.write32(address & !3, self.read_reg(REG_LR)); } self.write_reg(13, sp); }
             return None;
         }
