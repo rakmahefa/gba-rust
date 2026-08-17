@@ -221,7 +221,7 @@ mod tests {
         let mut runtime = Runtime::new();
         runtime.write16(0x0400_0000, 0x5678);
         assert_eq!(runtime.read16(0x0400_0000), 0x5678);
-        assert_eq!(runtime.read32(0x0400_0000), 0x0056_7800);
+        assert_eq!(runtime.read32(0x0400_0000), 0x0000_5678);
     }
 
     #[test]
