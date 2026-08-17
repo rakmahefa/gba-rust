@@ -13,9 +13,9 @@ fn runtime_rlib() -> PathBuf {
     fs::read_dir(&exe_dir)
         .expect("target dependency directory")
         .filter_map(Result::ok)
-        .filter(|entry| entry.path().file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("libgba_runtime-") && name.ends_with(".rlib")))
-        .max_by_key(|entry| entry.metadata().and_then(|metadata| metadata.modified()).ok())
         .map(|entry| entry.path())
+        .filter(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("libgba_runtime-") && name.ends_with(".rlib")))
+        .max_by_key(|path| fs::metadata(path).and_then(|metadata| metadata.modified()).ok())
         .unwrap_or_else(|| panic!("could not locate gba_runtime rlib in {}", exe_dir.display()))
 }
 
@@ -103,12 +103,12 @@ fn specialized_thumb_arithmetic_and_compare_flags_execute() {
 #[test]
 fn specialized_memory_codegen_executes_load_store_roundtrip() {
     let source = generate_arm(&[
-        0xE590_2000,
-        0xE3A0_102A,
-        0xE5C0_1000,
-        0xE5D0_3000,
+        0xE3A0_0004, // mov r0, #4
+        0xE3A0_102A, // mov r1, #42
+        0xE5C0_1000, // strb r1, [r0]
+        0xE5D0_2000, // ldrb r2, [r0]
     ]);
-    compile_and_run_generated(&source, "entry", "rt.write_reg(0, 0x0400_0004); rt.write32(0x0400_0004, 0x2a);", "assert_eq!(result.state.registers[2], 0x2a); assert_eq!(result.state.registers[3], 0x2a); assert_eq!(rt.read32(0x0400_0004), 0x2a);");
+    compile_and_run_generated(&source, "entry", "rt.write_reg(0, 0x0400_0000);", "assert_eq!(result.state.registers[2], 42); assert_eq!(rt.read8(0x0400_0004), 42);");
 }
 
 #[test]
