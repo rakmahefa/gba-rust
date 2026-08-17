@@ -23,7 +23,26 @@ fn emit_unimplemented(out: &mut String, address: u32, raw: u32, mode: &str) {
     let _ = writeln!(out, "    rt.unimplemented({address:#010x}, {raw:#010x}, \"{mode}\");");
 }
 
-fn emit_op(out: &mut String, ins_address: u32, ins_size: u8, mode: Mode, op: &IrOp) {
+fn direct_target(program: &Program, target: u32, mode: Mode) -> Option<BlockId> {
+    program.cfg.blocks.iter().find(|block| block.key.address == target && block.key.mode == mode).map(|block| block.id)
+}
+
+fn emit_direct_branch(out: &mut String, program: &Program, target: u32, mode: Mode, condition: Condition, link: bool) {
+    if link {
+        let _ = writeln!(out, "    return rt.dispatch_mode({target:#010x}, {});", mode_bool(mode));
+        return;
+    }
+    let Some(block_id) = direct_target(program, target, mode) else {
+        if condition == Condition::Al { let _ = writeln!(out, "    return rt.dispatch_mode({target:#010x}, {});", mode_bool(mode)); }
+        else { let _ = writeln!(out, "    if rt.condition_code({}) {{ return rt.dispatch_mode({target:#010x}, {}); }}", condition_code(condition), mode_bool(mode)); }
+        return;
+    };
+    let name = block_name(block_id, mode, target);
+    if condition == Condition::Al { let _ = writeln!(out, "    return {name}(rt);"); }
+    else { let _ = writeln!(out, "    if rt.condition_code({}) {{ return {name}(rt); }}", condition_code(condition)); }
+}
+
+fn emit_op(out: &mut String, program: &Program, ins_address: u32, ins_size: u8, mode: Mode, op: &IrOp) {
     let _ = writeln!(out, "    rt.enter_instruction({ins_address:#010x}, {});", mode_bool(mode));
     match op {
         IrOp::Nop => {}
@@ -43,8 +62,7 @@ fn emit_op(out: &mut String, ins_address: u32, ins_size: u8, mode: Mode, op: &Ir
         }
         IrOp::Branch { target, condition, link } => {
             if *link { let _ = writeln!(out, "    rt.link_from_instruction({ins_address:#010x}, {ins_size}, {});", mode_bool(mode)); }
-            if *condition == Condition::Al { let _ = writeln!(out, "    return rt.dispatch_mode({target:#010x}, {});", mode_bool(mode)); }
-            else { let _ = writeln!(out, "    if rt.condition_code({}) {{ return rt.dispatch_mode({target:#010x}, {}); }}", condition_code(*condition), mode_bool(mode)); }
+            emit_direct_branch(out, program, *target, mode, *condition, *link);
         }
         IrOp::BranchExchange { register, link } => {
             if *link { let _ = writeln!(out, "    rt.link_from_instruction({ins_address:#010x}, {ins_size}, {});", mode_bool(mode)); }
@@ -68,7 +86,7 @@ fn emit_block(out: &mut String, program: &Program, semantic: &SemanticProgram, b
     let name = block_name(semantic_block.id, semantic_block.mode, semantic_block.address);
     let _ = writeln!(out, "#[inline(always)]");
     let _ = writeln!(out, "pub fn {name}(rt: &mut Runtime) -> ! {{");
-    for instruction in &semantic_block.instructions { for op in &instruction.ops { emit_op(out, instruction.address, instruction.size, semantic_block.mode, op); } }
+    for instruction in &semantic_block.instructions { for op in &instruction.ops { emit_op(out, program, instruction.address, instruction.size, semantic_block.mode, op); } }
 
     match &semantic_block.terminator {
         SemanticTerminator::Return => { let _ = writeln!(out, "    return rt.dispatch_exchange(rt.read_reg(14));"); }
@@ -123,10 +141,11 @@ mod tests {
         assert!(generated.source.contains("rt.mov(0, 0x1, false)"));
         assert!(generated.source.contains("rt.add(0, rt.read_reg(0), 0x1, false)"));
         assert!(generated.source.contains("rt.tick(1)"));
+        assert!(!generated.source.contains("rt.cpu.r[0]"));
     }
 
     #[test]
-    fn conditional_branch_uses_runtime_flags_and_static_fallthrough() {
+    fn conditional_branch_uses_runtime_flags_and_fallthrough() {
         let rom = [0x0A00_0000u32, 0xE1A0_0000u32].into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
         let program = crate::analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = crate::discover_functions(&program);
