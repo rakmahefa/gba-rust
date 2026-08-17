@@ -87,10 +87,15 @@ fn emit_successor(out: &mut String, program: &Program, successor: BlockId) {
 
 fn emit_block(out: &mut String, program: &Program, semantic: &SemanticProgram, block_id: BlockId) {
     let semantic_block = semantic.functions.iter().flat_map(|function| function.blocks.iter()).find(|block| block.id == block_id).unwrap_or_else(|| panic!("semantic block {block_id:?} missing during code generation"));
+    let source_block = &program.cfg.blocks[block_id.0];
     let name = block_name(semantic_block.id, semantic_block.mode, semantic_block.address);
     let _ = writeln!(out, "#[inline(always)]");
     let _ = writeln!(out, "pub fn {name}(rt: &mut Runtime) -> ! {{");
-    for instruction in &semantic_block.instructions { for op in &instruction.ops { emit_op(out, program, instruction.address, instruction.raw, instruction.size, semantic_block.mode, op); } }
+    for (instruction, source_ir) in semantic_block.instructions.iter().zip(&source_block.ir) {
+        debug_assert_eq!(instruction.address, source_ir.address);
+        debug_assert_eq!(instruction.size, source_ir.size);
+        for op in &instruction.ops { emit_op(out, program, instruction.address, source_ir.source_raw, instruction.size, semantic_block.mode, op); }
+    }
 
     match &semantic_block.terminator {
         SemanticTerminator::Return => { let _ = writeln!(out, "    return rt.dispatch_exchange(rt.read_reg(14));"); }
