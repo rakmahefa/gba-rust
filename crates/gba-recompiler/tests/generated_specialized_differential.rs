@@ -112,5 +112,5 @@ fn semantic_ir_rejects_codegen_contract_tampering_before_generation() {
     let mut semantic = build_semantic_program(&program, &functions).expect("semantic");
     semantic.functions[0].blocks[0].instructions[0].ops.push(IrOp::Branch { target: ROM_BASE, condition: gba_recompiler::Condition::Al, link: false });
     let error = gba_recompiler::validate_semantic_program(&program, &functions, &semantic).expect_err("tampered semantic contract must fail");
-    assert!(error.contains("control-effect instruction before its terminator"));
+    assert!(error.contains("instruction control effect changed"));
 }
