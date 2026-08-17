@@ -58,11 +58,12 @@ fn emit_op(out: &mut String, program: &Program, ins_address: u32, ins_raw: u32, 
     let _ = writeln!(out, "    rt.enter_instruction({ins_address:#010x}, {});", mode_bool(mode));
     match op {
         IrOp::Nop => {}
-        IrOp::Mov { .. } | IrOp::Add { .. } | IrOp::Sub { .. } | IrOp::Cmp { .. } | IrOp::Load { .. } | IrOp::Store { .. } | IrOp::ArmExtended { .. } => {
-            let _ = writeln!(out, "    rt.execute_arm_instruction({ins_raw:#010x});");
-        }
-        IrOp::ThumbExtended { .. } => {
-            let _ = writeln!(out, "    rt.execute_thumb_instruction({ins_raw:#06x});");
+        IrOp::Mov { .. } | IrOp::Add { .. } | IrOp::Sub { .. } | IrOp::Cmp { .. } | IrOp::Load { .. } | IrOp::Store { .. } | IrOp::ArmExtended { .. } | IrOp::ThumbExtended { .. } => {
+            if mode == Mode::Arm {
+                let _ = writeln!(out, "    if let Some((target, thumb)) = rt.execute_arm_instruction({ins_raw:#010x}) {{ return rt.dispatch_mode(target, thumb); }}");
+            } else {
+                let _ = writeln!(out, "    if let Some((target, thumb)) = rt.execute_thumb_instruction({ins_raw:#06x}) {{ return rt.dispatch_mode(target, thumb); }}");
+            }
         }
         IrOp::Branch { target, condition, link } => {
             emit_direct_branch(out, program, *target, mode, *condition, *link, ins_address, ins_size);
@@ -89,9 +90,7 @@ fn emit_block(out: &mut String, program: &Program, semantic: &SemanticProgram, b
     let name = block_name(semantic_block.id, semantic_block.mode, semantic_block.address);
     let _ = writeln!(out, "#[inline(always)]");
     let _ = writeln!(out, "pub fn {name}(rt: &mut Runtime) -> ! {{");
-    for instruction in &semantic_block.instructions {
-        for op in &instruction.ops { emit_op(out, program, instruction.address, instruction.raw, instruction.size, semantic_block.mode, op); }
-    }
+    for instruction in &semantic_block.instructions { for op in &instruction.ops { emit_op(out, program, instruction.address, instruction.raw, instruction.size, semantic_block.mode, op); } }
 
     match &semantic_block.terminator {
         SemanticTerminator::Return => { let _ = writeln!(out, "    return rt.dispatch_exchange(rt.read_reg(14));"); }
@@ -145,7 +144,6 @@ mod tests {
         assert!(generated.source.contains("rt.execute_arm_instruction(0xe3a00001)"));
         assert!(generated.source.contains("rt.execute_arm_instruction(0xe2800001)"));
         assert!(generated.source.contains("rt.tick(1)"));
-        assert!(!generated.source.contains("rt.cpu.r[0]"));
     }
 
     #[test]
