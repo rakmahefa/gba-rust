@@ -53,6 +53,7 @@ impl CpuMode {
 
 #[derive(Debug, Clone, Default)]
 pub struct BankedRegisters {
+    pub user_system_sp_lr: [u32; 2],
     pub fiq_r8_r12: [u32; 5],
     pub fiq_sp_lr: [u32; 2],
     pub irq_sp_lr: [u32; 2],
@@ -68,22 +69,22 @@ pub struct BankedRegisters {
 impl BankedRegisters {
     fn save_mode(&mut self, mode: CpuMode, r: &[u32; 16]) {
         match mode {
+            CpuMode::User | CpuMode::System => self.user_system_sp_lr = [r[13], r[14]],
             CpuMode::Fiq => { self.fiq_r8_r12.copy_from_slice(&r[8..13]); self.fiq_sp_lr = [r[13], r[14]]; }
             CpuMode::Irq => self.irq_sp_lr = [r[13], r[14]],
             CpuMode::Supervisor => self.svc_sp_lr = [r[13], r[14]],
             CpuMode::Abort => self.abort_sp_lr = [r[13], r[14]],
             CpuMode::Undefined => self.undefined_sp_lr = [r[13], r[14]],
-            CpuMode::User | CpuMode::System => {}
         }
     }
     fn load_mode(&self, mode: CpuMode, r: &mut [u32; 16]) {
         match mode {
+            CpuMode::User | CpuMode::System => { r[13] = self.user_system_sp_lr[0]; r[14] = self.user_system_sp_lr[1]; }
             CpuMode::Fiq => { r[8..13].copy_from_slice(&self.fiq_r8_r12); r[13] = self.fiq_sp_lr[0]; r[14] = self.fiq_sp_lr[1]; }
             CpuMode::Irq => { r[13] = self.irq_sp_lr[0]; r[14] = self.irq_sp_lr[1]; }
             CpuMode::Supervisor => { r[13] = self.svc_sp_lr[0]; r[14] = self.svc_sp_lr[1]; }
             CpuMode::Abort => { r[13] = self.abort_sp_lr[0]; r[14] = self.abort_sp_lr[1]; }
             CpuMode::Undefined => { r[13] = self.undefined_sp_lr[0]; r[14] = self.undefined_sp_lr[1]; }
-            CpuMode::User | CpuMode::System => {}
         }
     }
     fn spsr(&self, mode: CpuMode) -> Option<u32> {
@@ -136,12 +137,11 @@ impl Cpu {
         let old_mode = self.mode();
         if old_mode == new_mode { return; }
         self.banked.save_mode(old_mode, &self.r);
+        if old_mode == CpuMode::Fiq && new_mode != CpuMode::Fiq { self.r[8..13].copy_from_slice(&self.banked.user_system_sp_lr[0..0]); }
         if old_mode == CpuMode::Fiq && new_mode != CpuMode::Fiq { self.r[8..13].copy_from_slice(&self.banked.fiq_r8_r12); }
-        if old_mode != CpuMode::Fiq && new_mode == CpuMode::Fiq {
-            self.banked.load_mode(CpuMode::Fiq, &mut self.r);
-        } else {
-            self.banked.load_mode(new_mode, &mut self.r);
-        }
+        if new_mode == CpuMode::Fiq { self.banked.load_mode(CpuMode::Fiq, &mut self.r); }
+        else if old_mode == CpuMode::Fiq { self.r[8..13].copy_from_slice(&self.banked.fiq_r8_r12); self.banked.load_mode(new_mode, &mut self.r); }
+        else { self.banked.load_mode(new_mode, &mut self.r); }
         self.cpsr = (self.cpsr & !CPSR_MODE_MASK) | new_mode as u32;
     }
     pub fn spsr(&self) -> Option<u32> { self.banked.spsr(self.mode()) }
