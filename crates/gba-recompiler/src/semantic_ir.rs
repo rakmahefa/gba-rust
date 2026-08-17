@@ -162,7 +162,7 @@ fn successor_matches_target(program: &Program, block: &SemanticBlock, target: u3
     block.successors.iter().any(|id| program.cfg.blocks.get(id.0).is_some_and(|successor| successor.key.address == target))
 }
 
-pub fn validate_semantic_program(program: &Program, functions: &FunctionControlFlowGraph, semantic: &SemanticProgram) -> Result<(), String> {
+pub fn validate_semantic_program(program: &Program, functions: &FunctionControlFlowGraphGraph, semantic: &SemanticProgram) -> Result<(), String> {
     if semantic.functions.len() != functions.functions.len() { return Err("semantic/function count mismatch".into()); }
     if semantic.functions.get(semantic.entry.0).is_none() { return Err(format!("semantic entry function {} does not exist", semantic.entry.0)); }
 
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn semantic_condition_preserves_flag_dependency() {
-        let program = analyze(&arm_rom(&[0x0A00_0000]), ROM_BASE, Mode::Arm).unwrap();
+        let program = analyze(&arm_rom(&[0x0A00_0000, 0xE1A0_0000, 0xE1A0_0000]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
         let flags = semantic.functions[0].blocks[0].instructions[0].flags;
@@ -278,12 +278,12 @@ mod tests {
     }
 
     #[test]
-    fn semantic_validation_rejects_control_effect_before_block_end() {
+    fn semantic_validation_rejects_changed_control_effect() {
         let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let mut semantic = build_semantic_program(&program, &functions).unwrap();
         semantic.functions[0].blocks[0].instructions[0].ops.push(IrOp::Branch { target: ROM_BASE, condition: Condition::Al, link: false });
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
-        assert!(error.contains("control-effect instruction before its terminator"));
+        assert!(error.contains("instruction control effect changed"));
     }
 }
