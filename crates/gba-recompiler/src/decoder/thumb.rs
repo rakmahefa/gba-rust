@@ -138,7 +138,7 @@ pub fn decode_thumb(address: u32, raw: u16) -> Instruction {
             negative: raw & (1 << 7) != 0,
             imm: ((raw & 0x7F) as u16) << 2,
         })
-    } else if (raw & 0xF600) == 0xB400 || (raw & 0xF600) == 0xBC00 {
+    } else if (raw & 0xFE00) == 0xB400 || (raw & 0xFE00) == 0xBC00 {
         ThumbOp::Extended(ThumbExtended::PushPop {
             load: raw & (1 << 11) != 0,
             registers: (raw & 0xFF) as u8,
