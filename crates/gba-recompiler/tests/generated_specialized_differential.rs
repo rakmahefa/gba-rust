@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use gba_recompiler::{analyze, build_semantic_program, discover_functions, generate_semantic, IrControlEffect, Mode, ROM_BASE};
+use gba_recompiler::{analyze, build_semantic_program, discover_functions, generate_semantic, IrOp, Mode, ROM_BASE};
 
 fn arm_rom(words: &[u32]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
 fn thumb_rom(halfwords: &[u16]) -> Vec<u8> { halfwords.iter().flat_map(|word| word.to_le_bytes()).collect() }
@@ -68,15 +68,15 @@ fn generate_thumb(halfwords: &[u16]) -> String {
 #[test]
 fn specialized_arm_data_processing_executes_against_architectural_expectations() {
     let source = generate_arm(&[
-        0xE3A0_0001, // mov r0, #1
-        0xE280_1002, // add r1, r0, #2
-        0xE241_2001, // sub r2, r1, #1
-        0xE381_3004, // orr r3, r1, #4
-        0xE213_4007, // ands r4, r3, #7
-        0xE334_0004, // teq r4, #4
-        0xE2A2_5001, // adc r5, r2, #1
-        0xE255_6001, // subs r6, r5, #1
-        0xE3E7_7000, // mvn r7, r7
+        0xE3A0_0001,
+        0xE280_1002,
+        0xE241_2001,
+        0xE381_3004,
+        0xE213_4007,
+        0xE334_0004,
+        0xE2A2_5001,
+        0xE255_6001,
+        0xE3E7_7000,
     ]);
     compile_and_run_generated(&source, "entry", "rt.write_reg(7, 0);", "assert_eq!(result.state.registers[0], 1); assert_eq!(result.state.registers[1], 3); assert_eq!(result.state.registers[2], 2); assert_eq!(result.state.registers[3], 7); assert_eq!(result.state.registers[4], 7); assert_eq!(result.state.registers[5], 3); assert_eq!(result.state.registers[6], 2); assert_eq!(result.state.registers[7], u32::MAX);");
 }
@@ -110,7 +110,7 @@ fn semantic_ir_rejects_codegen_contract_tampering_before_generation() {
     let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).expect("analysis");
     let functions = discover_functions(&program);
     let mut semantic = build_semantic_program(&program, &functions).expect("semantic");
-    semantic.functions[0].blocks[0].instructions[0].ops.push(IrControlEffect::Branch { target: ROM_BASE, condition: gba_recompiler::Condition::Al, link: false });
+    semantic.functions[0].blocks[0].instructions[0].ops.push(IrOp::Branch { target: ROM_BASE, condition: gba_recompiler::Condition::Al, link: false });
     let error = gba_recompiler::validate_semantic_program(&program, &functions, &semantic).expect_err("tampered semantic contract must fail");
     assert!(error.contains("control-effect instruction before its terminator"));
 }
