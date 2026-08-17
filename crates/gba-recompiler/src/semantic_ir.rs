@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn semantic_extended_instruction_has_effects() {
-        let program = analyze(&arm_rom(&[0xE000_0090]), ROM_BASE, Mode::Arm).unwrap();
+        let program = analyze(&arm_rom(&[0xE000_0291]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
         let instruction = &semantic.functions[0].blocks[0].instructions[0];
