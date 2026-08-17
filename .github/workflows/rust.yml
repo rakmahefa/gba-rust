@@ -56,3 +56,4 @@ jobs:
           git add crates/gba-recompiler/src/decoder.rs
           git commit -m 'Fix remaining ARM and Thumb decoder families'
           git push
+      # validation bootstrap
