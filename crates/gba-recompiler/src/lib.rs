@@ -38,8 +38,9 @@ mod tests {
         assert_eq!(optimized.functions[0].blocks[0].instructions.len(), semantic.functions[0].blocks[0].instructions.len());
         let module = generate_semantic(&program, &optimized, "entry");
         assert!(module.source.contains("rt.enter_instruction"));
-        assert!(module.source.contains("rt.mov(0, 0x1, false)"));
-        assert!(module.source.contains("rt.mov(0, 0x2, false)"));
+        assert!(module.source.contains("rt.execute_arm_instruction(0xe3a00001)"));
+        assert!(module.source.contains("rt.execute_arm_instruction(0xe2800001)"));
+        assert!(!module.source.contains("rt.mov(0, 0x1, false)"));
         assert!(!module.source.contains("rt.add(0, rt.read_reg(0), 0x1, false)"));
     }
 }
