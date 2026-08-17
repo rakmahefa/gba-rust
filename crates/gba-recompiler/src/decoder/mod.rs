@@ -1,9 +1,9 @@
-mod arm;
 mod classification;
 mod common;
 mod memory;
 mod semantic;
-mod thumb;
+mod semantic_arm;
+mod semantic_thumb;
 pub mod types;
 
 pub use classification::{classify_arm, classify_thumb, ArmClass, ThumbClass};
