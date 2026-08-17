@@ -164,6 +164,7 @@ fn thumb_writes(op: ThumbExtended) -> Vec<u8> {
         ThumbExtended::MultipleLoadStore { load, rb, register_list } => { if load { reg_list8(&mut v, register_list); } v.push(rb); }
         ThumbExtended::LoadStoreRegister { load: false, .. }
         | ThumbExtended::LoadStoreSignHalf { kind: 0, .. }
+        | ThumbExtended::LoadStoreSignHalf { kind: 4..=u8::MAX, .. }
         | ThumbExtended::LoadStoreImmediate { load: false, .. }
         | ThumbExtended::LoadStoreHalfword { load: false, .. }
         | ThumbExtended::SpRelativeLoadStore { load: false, .. }
