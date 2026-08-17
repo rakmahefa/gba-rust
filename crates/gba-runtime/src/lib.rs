@@ -137,11 +137,8 @@ impl Cpu {
         let old_mode = self.mode();
         if old_mode == new_mode { return; }
         self.banked.save_mode(old_mode, &self.r);
-        if old_mode == CpuMode::Fiq && new_mode != CpuMode::Fiq { self.r[8..13].copy_from_slice(&self.banked.user_system_sp_lr[0..0]); }
         if old_mode == CpuMode::Fiq && new_mode != CpuMode::Fiq { self.r[8..13].copy_from_slice(&self.banked.fiq_r8_r12); }
-        if new_mode == CpuMode::Fiq { self.banked.load_mode(CpuMode::Fiq, &mut self.r); }
-        else if old_mode == CpuMode::Fiq { self.r[8..13].copy_from_slice(&self.banked.fiq_r8_r12); self.banked.load_mode(new_mode, &mut self.r); }
-        else { self.banked.load_mode(new_mode, &mut self.r); }
+        self.banked.load_mode(new_mode, &mut self.r);
         self.cpsr = (self.cpsr & !CPSR_MODE_MASK) | new_mode as u32;
     }
     pub fn spsr(&self) -> Option<u32> { self.banked.spsr(self.mode()) }
