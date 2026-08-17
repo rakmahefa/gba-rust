@@ -10,7 +10,7 @@ pub use cfg::{analyze, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlow
 pub use codegen::{generate, RustModule};
 pub use decoder::{decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbOp, ROM_BASE};
 pub use function::{discover_functions, CallSite, CallTarget, Function, FunctionControlFlowGraph, FunctionId, FunctionKey, ReturnSite};
-pub use ir::{lower, IrInstruction, IrOp, Value};
+pub use ir::{lower, IrControlEffect, IrFlags, IrInstruction, IrMemoryEffect, IrMemoryKind, IrMemoryWidth, IrOp, Value};
 pub use optimization::{optimize_semantic_program, OptimizationChange, OptimizationKind, OptimizationReport};
 pub use semantic_ir::{build_semantic_program, validate_semantic_program, FlagEffect, MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram, SemanticTerminator};
 
