@@ -23,13 +23,13 @@ fn arm_adc_and_sbc_consume_carry_and_borrow() {
     rt.cpu.cpsr |= CPSR_C;
     rt.write_reg(0, 10);
     rt.execute_arm_instruction(0xE2A0_0001);
-    assert_eq!(rt.read_reg(0), 11);
+    assert_eq!(rt.read_reg(0), 12);
 
     rt.write_reg(1, 10);
     rt.write_reg(2, 4);
     rt.cpu.cpsr |= CPSR_C;
     rt.execute_arm_instruction(0xE0C1_2002 | (1 << 20));
-    assert_eq!(rt.read_reg(2), 7);
+    assert_eq!(rt.read_reg(2), 6);
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn arm_operand2_supports_rrx_and_register_shifts() {
     assert_ne!(rt.cpu.cpsr & CPSR_C, 0);
 
     rt.write_reg(1, 1);
-    rt.write_reg(2, 2);
+    rt.write_reg(3, 2);
     rt.execute_arm_instruction(0xE1A0_0311);
     assert_eq!(rt.read_reg(0), 4);
 }
@@ -57,9 +57,9 @@ fn arm_multiply_and_long_multiply_write_expected_parts() {
 
     rt.write_reg(1, u32::MAX);
     rt.write_reg(2, 2);
-    rt.execute_arm_instruction(0xE082_0391);
+    rt.execute_arm_instruction(0xE083_0291);
     assert_eq!(rt.read_reg(0), 0xffff_fffe);
-    assert_eq!(rt.read_reg(3), 0);
+    assert_eq!(rt.read_reg(3), 1);
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn arm_halfword_signed_loads_are_sign_extended() {
     rt.execute_arm_instruction(0xE1D1_00B0);
     assert_eq!(rt.read_reg(0), 0x0000_80ff);
     rt.write_reg(1, 0x0400_0020);
-    rt.execute_arm_instruction(0xE1D1_00D1);
+    rt.execute_arm_instruction(0xE1D1_00D0);
     assert_eq!(rt.read_reg(0), 0xffff_ff80);
 }
 
@@ -141,8 +141,9 @@ fn thumb_core_alu_and_stack_operations_match_architecture() {
 }
 
 #[test]
-fn thumb_high_register_move_to_pc_switches_control_state() {
+fn thumb_high_register_move_to_pc_preserves_thumb_state() {
     let mut rt = Runtime::new();
+    rt.set_thumb(true);
     rt.write_reg(0, 0x0800_0101);
     let result = rt.execute_thumb_instruction(0x4687).expect("MOV PC,R0 must produce a control transfer");
     assert_eq!(result, (0x0800_0100, true));
