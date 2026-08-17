@@ -54,23 +54,15 @@ fn emit_direct_branch(out: &mut String, program: &Program, target: u32, mode: Mo
     else { let _ = writeln!(out, "    if rt.condition_code({}) {{ return {name}(rt); }}", condition_code(condition)); }
 }
 
-fn emit_op(out: &mut String, program: &Program, ins_address: u32, ins_size: u8, mode: Mode, op: &IrOp) {
+fn emit_op(out: &mut String, program: &Program, ins_address: u32, ins_raw: u32, ins_size: u8, mode: Mode, op: &IrOp) {
     let _ = writeln!(out, "    rt.enter_instruction({ins_address:#010x}, {});", mode_bool(mode));
     match op {
         IrOp::Nop => {}
-        IrOp::Mov { dst, src, set_flags } => { let _ = writeln!(out, "    rt.mov({dst}, {}, {set_flags});", value(src)); }
-        IrOp::Add { dst, lhs, rhs, set_flags } => { let _ = writeln!(out, "    rt.add({dst}, rt.read_reg({lhs}), {}, {set_flags});", value(rhs)); }
-        IrOp::Sub { dst, lhs, rhs, set_flags } => { let _ = writeln!(out, "    rt.sub({dst}, rt.read_reg({lhs}), {}, {set_flags});", value(rhs)); }
-        IrOp::Cmp { lhs, rhs } => { let _ = writeln!(out, "    rt.compare(rt.read_reg({lhs}), {});", value(rhs)); }
-        IrOp::Load { dst, base, offset, byte } => {
-            let address = format!("rt.read_reg({base}).wrapping_add({offset}i32 as u32)");
-            if *byte { let _ = writeln!(out, "    rt.write_reg({dst}, rt.read8({address}) as u32);"); }
-            else { let _ = writeln!(out, "    rt.write_reg({dst}, rt.read32({address}));"); }
+        IrOp::Mov { .. } | IrOp::Add { .. } | IrOp::Sub { .. } | IrOp::Cmp { .. } | IrOp::Load { .. } | IrOp::Store { .. } | IrOp::ArmExtended { .. } => {
+            let _ = writeln!(out, "    rt.execute_arm_instruction({ins_raw:#010x});");
         }
-        IrOp::Store { src, base, offset, byte } => {
-            let address = format!("rt.read_reg({base}).wrapping_add({offset}i32 as u32)");
-            if *byte { let _ = writeln!(out, "    rt.write8({address}, rt.read_reg({src}) as u8);"); }
-            else { let _ = writeln!(out, "    rt.write32({address}, rt.read_reg({src}));"); }
+        IrOp::ThumbExtended { .. } => {
+            let _ = writeln!(out, "    rt.execute_thumb_instruction({ins_raw:#06x});");
         }
         IrOp::Branch { target, condition, link } => {
             emit_direct_branch(out, program, *target, mode, *condition, *link, ins_address, ins_size);
@@ -81,8 +73,6 @@ fn emit_op(out: &mut String, program: &Program, ins_address: u32, ins_size: u8, 
             let _ = writeln!(out, "    return rt.dispatch_exchange(rt.read_reg({register}));");
             return;
         }
-        IrOp::ArmExtended { .. } => emit_unimplemented(out, ins_address, 0, "ArmExtended"),
-        IrOp::ThumbExtended { .. } => emit_unimplemented(out, ins_address, 0, "ThumbExtended"),
         IrOp::Unknown { address, raw, mode } => emit_unimplemented(out, *address, *raw, match mode { Mode::Arm => "Arm", Mode::Thumb => "Thumb" }),
     }
     let _ = writeln!(out, "    rt.tick(1);");
@@ -99,7 +89,9 @@ fn emit_block(out: &mut String, program: &Program, semantic: &SemanticProgram, b
     let name = block_name(semantic_block.id, semantic_block.mode, semantic_block.address);
     let _ = writeln!(out, "#[inline(always)]");
     let _ = writeln!(out, "pub fn {name}(rt: &mut Runtime) -> ! {{");
-    for instruction in &semantic_block.instructions { for op in &instruction.ops { emit_op(out, program, instruction.address, instruction.size, semantic_block.mode, op); } }
+    for instruction in &semantic_block.instructions {
+        for op in &instruction.ops { emit_op(out, program, instruction.address, instruction.raw, instruction.size, semantic_block.mode, op); }
+    }
 
     match &semantic_block.terminator {
         SemanticTerminator::Return => { let _ = writeln!(out, "    return rt.dispatch_exchange(rt.read_reg(14));"); }
@@ -144,15 +136,14 @@ mod tests {
     use crate::decoder::{Mode, ROM_BASE};
 
     #[test]
-    fn emits_runtime_contract_calls() {
+    fn emits_raw_execution_contract_calls() {
         let rom = [0xE3A0_0001u32, 0xE280_0001u32].into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
         let program = crate::analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = crate::discover_functions(&program);
         let semantic = crate::build_semantic_program(&program, &functions).unwrap();
         let generated = generate_semantic(&program, &semantic, "entry");
-        assert!(generated.source.contains("rt.enter_instruction(0x08000000, false)"));
-        assert!(generated.source.contains("rt.mov(0, 0x1, false)"));
-        assert!(generated.source.contains("rt.add(0, rt.read_reg(0), 0x1, false)"));
+        assert!(generated.source.contains("rt.execute_arm_instruction(0xe3a00001)"));
+        assert!(generated.source.contains("rt.execute_arm_instruction(0xe2800001)"));
         assert!(generated.source.contains("rt.tick(1)"));
         assert!(!generated.source.contains("rt.cpu.r[0]"));
     }
