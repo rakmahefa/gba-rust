@@ -16,16 +16,10 @@ impl Value {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IrMemoryWidth {
-    Byte,
-    Word,
-}
+pub enum IrMemoryWidth { Byte, Word }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IrMemoryKind {
-    Read,
-    Write,
-}
+pub enum IrMemoryKind { Read, Write }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IrMemoryEffect {
@@ -63,35 +57,18 @@ impl IrFlags {
 
     pub const fn arithmetic_write(set_flags: bool) -> Self {
         if set_flags {
-            Self {
-                write_n: true,
-                write_z: true,
-                write_c: true,
-                write_v: true,
-                ..Self::default()
-            }
+            Self { write_n: true, write_z: true, write_c: true, write_v: true, ..Self::default() }
         } else {
             Self::default()
         }
     }
 
     pub const fn compare_write() -> Self {
-        Self {
-            write_n: true,
-            write_z: true,
-            write_c: true,
-            write_v: true,
-            ..Self::default()
-        }
+        Self { write_n: true, write_z: true, write_c: true, write_v: true, ..Self::default() }
     }
 
-    pub fn reads_any(&self) -> bool {
-        self.read_n || self.read_z || self.read_c || self.read_v
-    }
-
-    pub fn writes_any(&self) -> bool {
-        self.write_n || self.write_z || self.write_c || self.write_v
-    }
+    pub fn reads_any(&self) -> bool { self.read_n || self.read_z || self.read_c || self.read_v }
+    pub fn writes_any(&self) -> bool { self.write_n || self.write_z || self.write_c || self.write_v }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,50 +82,15 @@ pub enum IrControlEffect {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrOp {
     Nop,
-    Mov {
-        dst: u8,
-        src: Value,
-    },
-    Add {
-        dst: u8,
-        lhs: u8,
-        rhs: Value,
-    },
-    Sub {
-        dst: u8,
-        lhs: u8,
-        rhs: Value,
-    },
-    Cmp {
-        lhs: u8,
-        rhs: Value,
-    },
-    Load {
-        dst: u8,
-        base: u8,
-        offset: i32,
-        byte: bool,
-    },
-    Store {
-        src: u8,
-        base: u8,
-        offset: i32,
-        byte: bool,
-    },
-    Branch {
-        target: u32,
-        condition: Condition,
-        link: bool,
-    },
-    BranchExchange {
-        register: u8,
-        link: bool,
-    },
-    Unknown {
-        address: u32,
-        raw: u32,
-        mode: Mode,
-    },
+    Mov { dst: u8, src: Value },
+    Add { dst: u8, lhs: u8, rhs: Value },
+    Sub { dst: u8, lhs: u8, rhs: Value },
+    Cmp { lhs: u8, rhs: Value },
+    Load { dst: u8, base: u8, offset: i32, byte: bool },
+    Store { src: u8, base: u8, offset: i32, byte: bool },
+    Branch { target: u32, condition: Condition, link: bool },
+    BranchExchange { register: u8, link: bool },
+    Unknown { address: u32, raw: u32, mode: Mode },
 }
 
 impl IrOp {
@@ -158,16 +100,12 @@ impl IrOp {
             Self::Mov { src, .. } => src.register().into_iter().collect(),
             Self::Add { lhs, rhs, .. } | Self::Sub { lhs, rhs, .. } => {
                 let mut reads = vec![*lhs];
-                if let Some(register) = rhs.register() {
-                    reads.push(register);
-                }
+                if let Some(register) = rhs.register() { reads.push(register); }
                 reads
             }
             Self::Cmp { lhs, rhs } => {
                 let mut reads = vec![*lhs];
-                if let Some(register) = rhs.register() {
-                    reads.push(register);
-                }
+                if let Some(register) = rhs.register() { reads.push(register); }
                 reads
             }
             Self::Load { base, .. } => vec![*base],
@@ -193,12 +131,8 @@ impl IrOp {
             Self::Add { .. } | Self::Sub { .. } => IrFlags::default(),
             Self::Cmp { .. } => IrFlags::compare_write(),
             Self::Branch { condition, .. } => IrFlags::condition_read(*condition),
-            Self::Nop
-            | Self::Mov { .. }
-            | Self::Load { .. }
-            | Self::Store { .. }
-            | Self::BranchExchange { .. }
-            | Self::Unknown { .. } => IrFlags::default(),
+            Self::Nop | Self::Mov { .. } | Self::Load { .. } | Self::Store { .. }
+            | Self::BranchExchange { .. } | Self::Unknown { .. } => IrFlags::default(),
         }
     }
 
@@ -222,15 +156,8 @@ impl IrOp {
 
     pub fn control(&self) -> IrControlEffect {
         match self {
-            Self::Branch { target, condition, link } => IrControlEffect::Branch {
-                target: *target,
-                condition: *condition,
-                link: *link,
-            },
-            Self::BranchExchange { register, link } => IrControlEffect::BranchExchange {
-                register: *register,
-                link: *link,
-            },
+            Self::Branch { target, condition, link } => IrControlEffect::Branch { target: *target, condition: *condition, link: *link },
+            Self::BranchExchange { register, link } => IrControlEffect::BranchExchange { register: *register, link: *link },
             Self::Unknown { .. } => IrControlEffect::Unknown,
             _ => IrControlEffect::None,
         }
@@ -245,9 +172,7 @@ pub struct IrInstruction {
 }
 
 impl IrInstruction {
-    pub fn new(address: u32, size: u8, ops: Vec<IrOp>) -> Self {
-        Self { address, size, ops }
-    }
+    pub fn new(address: u32, size: u8, ops: Vec<IrOp>) -> Self { Self { address, size, ops } }
 
     pub fn reads(&self) -> Vec<u8> {
         let mut reads = self.ops.iter().flat_map(IrOp::reads).collect::<Vec<_>>();
@@ -278,12 +203,15 @@ impl IrInstruction {
         })
     }
 
-    pub fn memory(&self) -> Option<IrMemoryEffect> {
-        self.ops.iter().find_map(IrOp::memory)
-    }
+    pub fn memory(&self) -> Option<IrMemoryEffect> { self.ops.iter().find_map(IrOp::memory) }
 
     pub fn control(&self) -> IrControlEffect {
-        self.ops.iter().rev().map(IrOp::control).find(|effect| !matches!(effect, IrControlEffect::None)).unwrap_or(IrControlEffect::None)
+        self.ops
+            .iter()
+            .rev()
+            .map(IrOp::control)
+            .find(|effect| !matches!(effect, &IrControlEffect::None))
+            .unwrap_or(IrControlEffect::None)
     }
 }
 
@@ -327,11 +255,7 @@ mod tests {
 
     #[test]
     fn instruction_effects_are_derived_once() {
-        let instruction = IrInstruction::new(
-            0x0800_0000,
-            4,
-            vec![IrOp::Add { dst: 0, lhs: 1, rhs: Value::Reg(2) }],
-        );
+        let instruction = IrInstruction::new(0x0800_0000, 4, vec![IrOp::Add { dst: 0, lhs: 1, rhs: Value::Reg(2) }]);
         assert_eq!(instruction.reads(), vec![1, 2]);
         assert_eq!(instruction.writes(), vec![0]);
         assert_eq!(instruction.memory(), None);
@@ -340,11 +264,7 @@ mod tests {
 
     #[test]
     fn condition_flags_are_explicit() {
-        let instruction = IrInstruction::new(
-            0x0800_0000,
-            4,
-            vec![IrOp::Branch { target: 0x0800_0010, condition: Condition::Gt, link: false }],
-        );
+        let instruction = IrInstruction::new(0x0800_0000, 4, vec![IrOp::Branch { target: 0x0800_0010, condition: Condition::Gt, link: false }]);
         let flags = instruction.flags();
         assert!(flags.read_n && flags.read_v && flags.read_z);
         assert!(!flags.writes_any());
@@ -352,16 +272,7 @@ mod tests {
 
     #[test]
     fn memory_effect_keeps_width_and_base() {
-        let instruction = IrInstruction::new(
-            0x0800_0000,
-            4,
-            vec![IrOp::Load { dst: 0, base: 1, offset: 4, byte: false }],
-        );
-        assert_eq!(instruction.memory(), Some(IrMemoryEffect {
-            kind: IrMemoryKind::Read,
-            width: IrMemoryWidth::Word,
-            base: 1,
-            address_is_dynamic: true,
-        }));
+        let instruction = IrInstruction::new(0x0800_0000, 4, vec![IrOp::Load { dst: 0, base: 1, offset: 4, byte: false }]);
+        assert_eq!(instruction.memory(), Some(IrMemoryEffect { kind: IrMemoryKind::Read, width: IrMemoryWidth::Word, base: 1, address_is_dynamic: true }));
     }
 }
