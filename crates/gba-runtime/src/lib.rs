@@ -222,7 +222,6 @@ mod tests {
     #[test]
     fn adc_and_sbc_consume_the_current_carry_bit() {
         let mut runtime = Runtime::new();
-
         runtime.cpu.cpsr = CPSR_C;
         runtime.adc(0, 1, 1, true);
         assert_eq!(runtime.read_reg(0), 3);
@@ -246,4 +245,27 @@ mod tests {
         runtime.enter_instruction(0x0800_0100, false);
         assert_eq!(runtime.read_reg(REG_PC), 0x0800_0108);
         runtime.link_from_instruction(0x0800_0100, 4, false);
-        assert_eq!(runtime.read_reg(REG_LR), 0... truncated
+        assert_eq!(runtime.read_reg(REG_LR), 0x0800_0104);
+        runtime.enter_instruction(0x0800_0100, true);
+        assert_eq!(runtime.read_reg(REG_PC), 0x0800_0104);
+        runtime.link_from_instruction(0x0800_0100, 4, true);
+        assert_eq!(runtime.read_reg(REG_LR), 0x0800_0105);
+    }
+
+    #[test]
+    fn word_reads_apply_arm_unaligned_rotation() {
+        let mut runtime = Runtime::new();
+        runtime.write32(0x0400_0000, 0x4433_2211);
+        assert_eq!(runtime.read32(0x0400_0001), 0x1144_3322);
+        assert_eq!(runtime.read32(0x0400_0002), 0x2211_4433);
+    }
+
+    #[test]
+    fn exchange_updates_mode_and_aligned_pc() {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut runtime = Runtime::new();
+            runtime.dispatch_exchange(0x0800_0101)
+        }));
+        assert!(result.is_err());
+    }
+}
