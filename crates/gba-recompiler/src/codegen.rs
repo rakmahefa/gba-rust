@@ -174,7 +174,7 @@ mod tests {
         let functions = crate::discover_functions(&program);
         let semantic = crate::build_semantic_program(&program, &functions).unwrap();
         let generated = generate_semantic(&program, &semantic, "entry");
-        let condition_start = generated.source.find("if rt.condition_code(0)").expect("conditional BL must be guarded");
+        let condition_start = generated.source.find("if rt.condition_code(1)").expect("conditional BL must be guarded");
         let continuation = &generated.source[condition_start..];
         assert!(continuation.contains("rt.link_from_instruction"));
     }
