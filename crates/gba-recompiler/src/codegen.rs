@@ -8,7 +8,26 @@ use crate::semantic_ir::{SemanticBlock, SemanticProgram, SemanticTerminator};
 #[derive(Debug, Clone)]
 pub struct RustModule { pub source: String }
 
-fn condition_code(condition: Condition) -> u8 { condition as u8 }
+fn condition_code(condition: Condition) -> u8 {
+    match condition {
+        Condition::Eq => 0x0,
+        Condition::Ne => 0x1,
+        Condition::Cs => 0x2,
+        Condition::Cc => 0x3,
+        Condition::Mi => 0x4,
+        Condition::Pl => 0x5,
+        Condition::Vs => 0x6,
+        Condition::Vc => 0x7,
+        Condition::Hi => 0x8,
+        Condition::Ls => 0x9,
+        Condition::Ge => 0xA,
+        Condition::Lt => 0xB,
+        Condition::Gt => 0xC,
+        Condition::Le => 0xD,
+        Condition::Al => 0xE,
+    }
+}
+
 fn mode_suffix(mode: Mode) -> &'static str { match mode { Mode::Arm => "arm", Mode::Thumb => "thumb" } }
 fn mode_bool(mode: Mode) -> bool { matches!(mode, Mode::Thumb) }
 fn block_name(block_id: BlockId, mode: Mode, address: u32) -> String { format!("block_{}_{}_{address:08x}", block_id.0, mode_suffix(mode)) }
@@ -43,8 +62,11 @@ fn emit_op(out: &mut String, ins_address: u32, ins_raw: u32, ins_size: u8, mode:
     let _ = writeln!(out, "    rt.enter_instruction({ins_address:#010x}, {});", mode_bool(mode));
     match op {
         IrOp::Nop | IrOp::Mov { .. } | IrOp::Add { .. } | IrOp::Sub { .. } | IrOp::Cmp { .. } | IrOp::Load { .. } | IrOp::Store { .. } | IrOp::ArmExtended { .. } | IrOp::ThumbExtended { .. } => {
-            if mode == Mode::Arm { let _ = writeln!(out, "    if let Some((target, thumb)) = rt.execute_arm_instruction({ins_raw:#010x}) {{ return Ok(GeneratedBlockExit::continue_to(target, thumb)); }}"); }
-            else { let _ = writeln!(out, "    if let Some((target, thumb)) = rt.execute_thumb_instruction({ins_raw:#06x}) {{ return Ok(GeneratedBlockExit::continue_to(target, thumb)); }}"); }
+            if mode == Mode::Arm {
+                let _ = writeln!(out, "    if let Some((target, thumb)) = rt.execute_arm_instruction({ins_raw:#010x}) {{ return Ok(GeneratedBlockExit::continue_to(target, thumb)); }}");
+            } else {
+                let _ = writeln!(out, "    if let Some((target, thumb)) = rt.execute_thumb_instruction({ins_raw:#06x}) {{ return Ok(GeneratedBlockExit::continue_to(target, thumb)); }}");
+            }
         }
         IrOp::Branch { .. } | IrOp::BranchExchange { .. } => unreachable!("terminal control ops must be emitted by the semantic terminator"),
         IrOp::Unknown { address, raw, mode } => emit_unimplemented(out, *address, *raw, match mode { Mode::Arm => "Arm", Mode::Thumb => "Thumb" }),
@@ -73,8 +95,12 @@ fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Program) {
         SemanticTerminator::Branch { condition, target } => emit_direct_terminator(out, block, program, *target, block.mode, *condition, false, ins_address, ins_size),
         SemanticTerminator::Call { condition, target } => emit_direct_terminator(out, block, program, *target, block.mode, *condition, true, ins_address, ins_size),
         SemanticTerminator::Fallthrough => {
-            if let Some(successor) = block.successors.first().and_then(|id| program.cfg.blocks.get(id.0)) { let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({:#010x}, {}));", successor.key.address, mode_bool(successor.key.mode)); }
-            else { let halt = ins_address.wrapping_add(ins_size as u32); let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {}));", mode_bool(block.mode)); }
+            if let Some(successor) = block.successors.first().and_then(|id| program.cfg.blocks.get(id.0)) {
+                let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({:#010x}, {}));", successor.key.address, mode_bool(successor.key.mode));
+            } else {
+                let halt = ins_address.wrapping_add(ins_size as u32);
+                let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {}));", mode_bool(block.mode));
+            }
         }
         SemanticTerminator::Unknown => { let _ = writeln!(out, "    return Err(\"generated program reached an unknown terminator\");"); }
     }
@@ -113,7 +139,12 @@ fn emit_linked_predicate(out: &mut String, semantic: &SemanticProgram) {
     let _ = writeln!(out, "    matches!((address, thumb),");
     let mut first = true;
     let mut line = String::from("        ");
-    for function in &semantic.functions { for block in &function.blocks { if !first { line.push_str(" | "); } line.push_str(&format!("({:#010x}, {})", block.address, mode_bool(block.mode))); first = false; if line.len() > 100 { let _ = writeln!(out, "{}", line); line = String::from("        "); } } }
+    for function in &semantic.functions { for block in &function.blocks {
+        if !first { line.push_str(" | "); }
+        line.push_str(&format!("({:#010x}, {})", block.address, mode_bool(block.mode)));
+        first = false;
+        if line.len() > 100 { let _ = writeln!(out, "{}", line); line = String::from("        "); }
+    }}
     if line.trim().is_empty() { line = String::from("        _"); }
     let _ = writeln!(out, "{}", line);
     let _ = writeln!(out, "    )");
@@ -151,6 +182,7 @@ pub fn generate(program: &Program, module_name: &str) -> RustModule {
 mod tests {
     use super::*;
     use crate::decoder::{Mode, ROM_BASE};
+
     #[test]
     fn emits_iterative_execution_contract() {
         let rom = [0xE3A0_0001u32, 0xE280_0001u32].into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
