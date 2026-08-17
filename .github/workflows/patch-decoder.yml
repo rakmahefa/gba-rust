@@ -1,0 +1,70 @@
+name: Patch decoder
+on:
+  push:
+    branches:
+      - agent/arm-thumb-complete
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor == 'rakmahefa'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Patch decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/gba-recompiler/src/decoder.rs')
+          s = p.read_text()
+          old = '    else if (raw & 0x0E00_0000) == 0x0400_0000 {'
+          marker = '    } else {'
+          assert old in s
+          insert = '''    else if (raw & 0x0E00_0000) == 0x0C00_0000 {
+        ArmOp::Extended(ArmExtended::CoprocessorTransfer {
+            load: raw & (1 << 20) != 0,
+            cp: ((raw >> 8) & 0xF) as u8,
+            opcode1: ((raw >> 21) & 0x7) as u8,
+            crd: ((raw >> 12) & 0xF) as u8,
+            crn: ((raw >> 16) & 0xF) as u8,
+            crm: (raw & 0xF) as u8,
+            opcode2: ((raw >> 5) & 0x7) as u8,
+            long: raw & (1 << 22) != 0,
+        })
+    } else if (raw & 0x0F00_0010) == 0x0E00_0000 {
+        ArmOp::Extended(ArmExtended::CoprocessorData {
+            cp: ((raw >> 8) & 0xF) as u8,
+            opcode1: ((raw >> 20) & 0xF) as u8,
+            crd: ((raw >> 12) & 0xF) as u8,
+            crn: ((raw >> 16) & 0xF) as u8,
+            crm: (raw & 0xF) as u8,
+            opcode2: ((raw >> 5) & 0x7) as u8,
+        })
+    } else if (raw & 0x0F00_0010) == 0x0E00_0010 {
+        ArmOp::Extended(ArmExtended::CoprocessorRegisterTransfer {
+            to_arm: raw & (1 << 20) != 0,
+            cp: ((raw >> 8) & 0xF) as u8,
+            opcode1: ((raw >> 21) & 0x7) as u8,
+            rd: ((raw >> 12) & 0xF) as u8,
+            crn: ((raw >> 16) & 0xF) as u8,
+            crm: (raw & 0xF) as u8,
+            opcode2: ((raw >> 5) & 0x7) as u8,
+        })
+'''
+          s = s.replace(old, insert + old, 1)
+          s = s.replace('    } else if top == 0b11100 {', '    } else if (raw & 0xF800) == 0xE000 {', 1)
+          p.write_text(s)
+          PY
+          cargo fmt --all
+          cargo test --workspace
+          rm -f .github/workflows/patch-decoder.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/gba-recompiler/src/decoder.rs .github/workflows/patch-decoder.yml
+          git commit -m 'Fix remaining ARM and Thumb decoder families'
+          git push
