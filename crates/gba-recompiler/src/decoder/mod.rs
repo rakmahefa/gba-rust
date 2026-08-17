@@ -1,12 +1,14 @@
 mod arm;
+mod classification;
 mod common;
 mod memory;
+mod semantic;
 mod thumb;
 pub mod types;
 
-pub use arm::decode_arm;
+pub use classification::{classify_arm, classify_thumb, ArmClass, ThumbClass};
 pub use memory::{read_arm, read_thumb, read_thumb_bl, DecodeError, ROM_BASE};
-pub use thumb::{decode_thumb, decode_thumb_bl};
+pub use semantic::{decode_arm, decode_thumb, decode_thumb_bl};
 pub use types::{
     ArmDataOp, ArmExtended, ArmOp, BranchKind, Condition, Instruction, InstructionKind, Mode,
     Operand2, ThumbAluOp, ThumbExtended, ThumbOp,
@@ -92,6 +94,16 @@ mod tests {
                 "raw={raw:#06x}"
             );
         }
+    }
+
+    #[test]
+    fn public_decoder_api_exposes_classification_and_semantics() {
+        assert_eq!(classify_arm(0xE12F_FF11), ArmClass::BranchExchange);
+        assert_eq!(classify_thumb(0x4700), ThumbClass::BranchExchange);
+        assert_eq!(
+            decode_arm(ROM_BASE, 0xE12F_FF11).kind,
+            InstructionKind::Arm(ArmOp::BranchExchange { rm: 1, link: false })
+        );
     }
 
     #[test]
