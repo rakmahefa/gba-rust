@@ -23,7 +23,7 @@ fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
     let generated = root.join("src/generated.rs");
     let main_rs = root.join("src/main.rs");
     let cargo_toml = root.join("Cargo.toml");
-    let binary = root.join("target/debug/gba-specialized");
+    let binary = root.join("target/debug/gba_generated_specialized_test");
     fs::write(&generated, source).expect("generated source");
     let runtime_path = workspace_root().join("crates/gba-runtime");
     fs::write(
@@ -52,6 +52,7 @@ fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
         .status()
         .expect("cargo build");
     assert!(compile.success(), "generated Rust did not compile");
+    assert!(binary.is_file(), "cargo build succeeded but generated binary is missing at {}", binary.display());
 
     let output = Command::new(&binary).output().expect("generated binary");
     assert!(output.status.success(), "generated Rust failed:\n{}", String::from_utf8_lossy(&output.stderr));
