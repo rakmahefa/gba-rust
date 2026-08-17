@@ -146,6 +146,15 @@ impl Cpu {
     }
     pub fn spsr(&self) -> Option<u32> { self.banked.spsr(self.mode()) }
     pub fn set_spsr(&mut self, value: u32) -> bool { self.banked.set_spsr(self.mode(), value) }
+    pub fn restore_exception_state(&mut self, spsr: u32) {
+        let current_mode = self.mode();
+        self.banked.save_mode(current_mode, &self.r);
+        if current_mode == CpuMode::Fiq { self.r[8..13].copy_from_slice(&self.banked.fiq_r8_r12); }
+        self.cpsr = spsr;
+        let restored_mode = self.mode();
+        self.banked.load_mode(restored_mode, &mut self.r);
+        self.thumb = spsr & CPSR_T != 0;
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,13 +247,9 @@ impl Runtime {
     pub fn enter_instruction(&mut self, address: u32, thumb: bool) { self.cpu.set_thumb(thumb); self.cpu.r[REG_PC] = arm7tdmi::architectural_pc(address, thumb); }
     pub fn link_from_instruction(&mut self, address: u32, size: u8, thumb: bool) { self.cpu.r[REG_LR] = arm7tdmi::link_address(address, size, thumb); }
     pub fn condition_code(&self, code: u8) -> bool { arm7tdmi::condition_holds(self.cpu.cpsr, code) }
-    pub fn exception_return(&mut self) -> Option<(u32, bool)> {
+    pub fn exception_return(&mut self, target: u32) -> Option<(u32, bool)> {
         let spsr = self.cpu.spsr()?;
-        let target = self.read_reg(REG_LR);
-        self.cpu.cpsr = spsr;
-        self.cpu.thumb = spsr & CPSR_T != 0;
-        let mode = self.cpu.mode();
-        self.cpu.switch_mode(mode);
+        self.cpu.restore_exception_state(spsr);
         let aligned = target & if self.cpu.thumb { !1 } else { !3 };
         self.cpu.r[REG_PC] = aligned;
         Some((aligned, self.cpu.thumb))
@@ -252,8 +257,8 @@ impl Runtime {
     pub fn raise_exception(&mut self, kind: ExceptionKind) -> (u32, bool) {
         let old_cpsr = self.cpu.cpsr;
         let return_address = if self.cpu.thumb { self.read_reg(REG_PC).wrapping_sub(2) } else { self.read_reg(REG_PC).wrapping_sub(4) };
-        self.cpu.set_spsr(old_cpsr);
         self.cpu.switch_mode(kind.mode());
+        self.cpu.set_spsr(old_cpsr);
         self.cpu.cpsr |= kind.masks();
         self.cpu.set_thumb(false);
         self.cpu.r[REG_LR] = return_address;
@@ -299,5 +304,5 @@ mod tests {
     #[test]
     fn banked_modes_keep_distinct_stack_and_link_registers() { let mut runtime = Runtime::new(); runtime.write_reg(REG_SP, 0x1000); runtime.write_reg(REG_LR, 0x2000); runtime.switch_mode(CpuMode::Supervisor); runtime.write_reg(REG_SP, 0x3000); runtime.write_reg(REG_LR, 0x4000); runtime.switch_mode(CpuMode::System); assert_eq!(runtime.read_reg(REG_SP), 0x1000); assert_eq!(runtime.read_reg(REG_LR), 0x2000); runtime.switch_mode(CpuMode::Supervisor); assert_eq!(runtime.read_reg(REG_SP), 0x3000); assert_eq!(runtime.read_reg(REG_LR), 0x4000); }
     #[test]
-    fn swi_exception_saves_cpsr_and_enters_supervisor_vector() { let mut runtime = Runtime::new(); runtime.enter_instruction(0x0800_0100, false); let old = runtime.cpu.cpsr; let (vector, thumb) = runtime.raise_exception(ExceptionKind::SoftwareInterrupt); assert_eq!((vector, thumb), (0x08, false)); assert_eq!(runtime.mode(), CpuMode::Supervisor); assert_eq!(runtime.cpu.banked.spsr(CpuMode::Supervisor), Some(old)); assert_eq!(runtime.read_reg(REG_LR), 0x0800_0104); assert_eq!(runtime.read_reg(REG_PC), 0x08); }
+    fn swi_exception_saves_cpsr_and_restores_banks() { let mut runtime = Runtime::new(); runtime.enter_instruction(0x0800_0100, false); runtime.write_reg(REG_SP, 0x1000); runtime.write_reg(REG_LR, 0x2000); let old = runtime.cpu.cpsr; let (vector, thumb) = runtime.raise_exception(ExceptionKind::SoftwareInterrupt); assert_eq!((vector, thumb), (0x08, false)); assert_eq!(runtime.mode(), CpuMode::Supervisor); runtime.write_reg(REG_SP, 0x3000); runtime.write_reg(REG_LR, 0x4000); assert_eq!(runtime.cpu.banked.spsr(CpuMode::Supervisor), Some(old)); let result = runtime.exception_return(0x0800_0104).expect("exception return"); assert_eq!(result, (0x0800_0104, false)); assert_eq!(runtime.mode(), CpuMode::System); assert_eq!(runtime.read_reg(REG_SP), 0x1000); assert_eq!(runtime.read_reg(REG_LR), 0x2000); }
 }
