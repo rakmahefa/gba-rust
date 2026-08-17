@@ -8,7 +8,15 @@ use std::path::{Path, PathBuf};
 
 pub use arm7tdmi::{condition_holds as architectural_condition_holds, exchange_target, link_address, shift_immediate, shift_register, ShiftKind, ShiftResult};
 pub use arm7tdmi::Nzcv;
-pub use contract::{ArchitecturalState, RuntimeContract, RUNTIME_CONTRACT_VERSION};
+pub use contract::{
+    ArchitecturalState,
+    GeneratedBlockExit,
+    GeneratedExecutionExit,
+    GeneratedExecutionResult,
+    RuntimeContract,
+    GENERATED_TARGET_OUTSIDE_CFG,
+    RUNTIME_CONTRACT_VERSION,
+};
 
 pub const WIDTH: usize = 240;
 pub const HEIGHT: usize = 160;
