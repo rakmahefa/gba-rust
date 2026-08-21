@@ -20,7 +20,6 @@ jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -33,7 +32,7 @@ jobs:
           components: rustfmt
 
       - name: Check formatting
-        run: cargo fmt
+        run: cargo fmt --check
 
   test:
     name: cargo test
@@ -76,7 +75,6 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -92,4 +90,4 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets -- -D warnings
