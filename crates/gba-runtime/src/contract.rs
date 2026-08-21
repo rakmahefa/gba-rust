@@ -75,24 +75,27 @@ impl RuntimeContract for Runtime {
         fn align(address: u32, thumb: bool) -> u32 { address & if thumb { !1 } else { !3 } }
         let mut next = (align(address, thumb), thumb);
         let initial_cycles = self.cycles;
+        let mut steps = 0u64;
         loop {
-            let steps = self.cycles.wrapping_sub(initial_cycles);
             if let Some(limit) = max_steps { if steps >= limit {
                 self.cpu.set_thumb(next.1); self.cpu.r[REG_PC] = next.0;
                 return Ok(GeneratedExecutionResult { exit: GeneratedExecutionExit::StepLimitExceeded { address: next.0, thumb: next.1 }, steps, state: self.architectural_state() });
             }}
             self.cpu.set_thumb(next.1); self.cpu.r[REG_PC] = next.0;
+            let before_dispatch_cycles = self.cycles;
             let exit = dispatch(self, next.0, next.1)?;
+            let executed = self.cycles.wrapping_sub(before_dispatch_cycles).max(1);
+            steps = steps.wrapping_add(executed);
             match exit {
                 GeneratedBlockExit::Continue { address, thumb } => next = (align(address, thumb), thumb),
                 GeneratedBlockExit::Return { address, thumb } => {
                     let target = (align(address, thumb), thumb); self.cpu.set_thumb(target.1); self.cpu.r[REG_PC] = target.0;
                     if is_linked(target.0, target.1) { next = target; }
-                    else { return Ok(GeneratedExecutionResult { exit: GeneratedExecutionExit::Returned { address: target.0, thumb: target.1 }, steps: self.cycles.wrapping_sub(initial_cycles), state: self.architectural_state() }); }
+                    else { return Ok(GeneratedExecutionResult { exit: GeneratedExecutionExit::Returned { address: target.0, thumb: target.1 }, steps, state: self.architectural_state() }); }
                 }
                 GeneratedBlockExit::Halt { address, thumb } => {
                     let target = (align(address, thumb), thumb); self.cpu.set_thumb(target.1); self.cpu.r[REG_PC] = target.0;
-                    return Ok(GeneratedExecutionResult { exit: GeneratedExecutionExit::Halted { address: target.0, thumb: target.1 }, steps: self.cycles.wrapping_sub(initial_cycles), state: self.architectural_state() });
+                    return Ok(GeneratedExecutionResult { exit: GeneratedExecutionExit::Halted { address: target.0, thumb: target.1 }, steps, state: self.architectural_state() });
                 }
             }
         }
