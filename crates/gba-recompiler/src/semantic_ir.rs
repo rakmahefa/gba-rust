@@ -225,10 +225,23 @@ fn same_memory(a: Option<IrMemoryEffect>, b: Option<MemoryEffect>) -> bool {
         (Some(a), Some(b)) => {
             let width = memory_width(a.width);
             match a.kind {
-                IrMemoryKind::Read => b == MemoryEffect::Read { width, base: a.base },
-                IrMemoryKind::Write => b == MemoryEffect::Write { width, base: a.base },
+                IrMemoryKind::Read => {
+                    b == MemoryEffect::Read {
+                        width,
+                        base: a.base,
+                    }
+                }
+                IrMemoryKind::Write => {
+                    b == MemoryEffect::Write {
+                        width,
+                        base: a.base,
+                    }
+                }
                 IrMemoryKind::ReadWrite => {
-                    b == MemoryEffect::ReadWrite { width, base: a.base }
+                    b == MemoryEffect::ReadWrite {
+                        width,
+                        base: a.base,
+                    }
                 }
             }
         }
@@ -312,10 +325,15 @@ pub fn validate_semantic_program(
 
     let mut owned = HashMap::<BlockId, FunctionId>::new();
     for function in &semantic.functions {
-        if function.id.0 >= semantic.functions.len() || function.entry.0 >= program.cfg.blocks.len() {
+        if function.id.0 >= semantic.functions.len() || function.entry.0 >= program.cfg.blocks.len()
+        {
             return Err(format!("invalid semantic function {}", function.id.0));
         }
-        if !function.blocks.iter().any(|block| block.id == function.entry) {
+        if !function
+            .blocks
+            .iter()
+            .any(|block| block.id == function.entry)
+        {
             return Err(format!(
                 "function {} does not contain its entry block {}",
                 function.id.0, function.entry.0
@@ -440,7 +458,10 @@ mod tests {
         assert_eq!(block.instructions[0].writes, vec![0]);
         assert_eq!(block.instructions[1].reads, vec![0]);
         assert_eq!(block.instructions[1].writes, vec![0]);
-        assert_eq!(block.instructions[0].control_effect(), IrControlEffect::None);
+        assert_eq!(
+            block.instructions[0].control_effect(),
+            IrControlEffect::None
+        );
     }
 
     #[test]
@@ -497,10 +518,11 @@ mod tests {
     #[test]
     fn resolved_bx_lr_is_a_semantic_return_without_executable_successor() {
         let rom = arm_rom(&[
-            0xE59F_E000, // ldr lr, [pc]
+            0xE59F_E004, // ldr lr, [pc, #4]
             0xE12F_FF1E, // bx lr
-            0xE1A0_0000, // nop; literal pool alignment target
-            0x0800_0008,
+            0xE1A0_0000, // nop
+            0xE1A0_0000, // nop
+            0x0800_0010, // resolved LR target
             0xE1A0_0000,
         ]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
@@ -519,11 +541,12 @@ mod tests {
     #[test]
     fn resolved_indirect_branch_is_dynamic_without_executable_successor() {
         let rom = arm_rom(&[
-            0xE59F_3004, // ldr r3, [pc, #4]
+            0xE59F_3008, // ldr r3, [pc, #8]
             0xE12F_FF13, // bx r3
             0xE1A0_0000, // nop
             0xE1A0_0000, // nop
-            0x0800_0010,
+            0xE1A0_0000, // nop
+            0x0800_0014, // resolved r3 target
             0xE1A0_0000,
             0xE1A0_0000,
         ]);
@@ -536,7 +559,10 @@ mod tests {
             .flat_map(|function| function.blocks.iter())
             .find(|block| block.address == ROM_BASE + 4)
             .expect("resolved BX r3 block must be present");
-        assert_eq!(block.terminator, SemanticTerminator::IndirectBranch { register: 3 });
+        assert_eq!(
+            block.terminator,
+            SemanticTerminator::IndirectBranch { register: 3 }
+        );
         assert!(block.successors.is_empty());
     }
 
@@ -545,7 +571,9 @@ mod tests {
         let program = analyze(&arm_rom(&[0xE3A0_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let mut semantic = build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].instructions[0].reads.push(1);
+        semantic.functions[0].blocks[0].instructions[0]
+            .reads
+            .push(1);
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
         assert!(error.contains("instruction reads changed"));
     }
@@ -555,11 +583,13 @@ mod tests {
         let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let mut semantic = build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].instructions[0].ops.push(IrOp::Branch {
-            target: ROM_BASE,
-            condition: Condition::Al,
-            link: false,
-        });
+        semantic.functions[0].blocks[0].instructions[0]
+            .ops
+            .push(IrOp::Branch {
+                target: ROM_BASE,
+                condition: Condition::Al,
+                link: false,
+            });
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
         assert!(error.contains("instruction control effect changed"));
     }
