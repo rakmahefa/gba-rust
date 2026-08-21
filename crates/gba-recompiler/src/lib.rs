@@ -37,7 +37,8 @@ pub use optimization::{
 };
 pub use semantic_architecture::{
     ArchitecturalBlock, ArchitecturalInstruction, ArchitecturalProgram, ControlEffect,
-    ContractError, FlagEffects, InstructionKey, MemoryAccess, MemoryEffect, MemoryWidth,
+    ContractError, FlagEffects, InstructionKey, MemoryAccess, MemoryEffect as ArchitecturalMemoryEffect,
+    MemoryWidth as ArchitecturalMemoryWidth,
 };
 pub use semantic_ir::{
     build_semantic_program, validate_semantic_program, FlagEffect, MemoryEffect, MemoryWidth,
