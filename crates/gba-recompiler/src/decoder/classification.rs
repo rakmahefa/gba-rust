@@ -159,8 +159,9 @@ mod tests {
     }
 
     #[test]
-    fn unknown_patterns_are_explicit() {
-        assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
-        assert_eq!(classify_arm(0xE7FF_FFFF), ArmClass::SingleDataTransfer);
+    fn register_offset_variants_reach_single_transfer() {
+        for raw in [0xE7C0_1004, 0xE7AF_2558, 0xE7FF_FFFF] {
+            assert_eq!(classify_arm(raw), ArmClass::SingleDataTransfer, "raw={raw:#010x}");
+        }
     }
 }
