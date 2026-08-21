@@ -36,15 +36,11 @@ impl GeneratedBlockLinker {
     }
 
     pub fn link(&mut self, source: LinkedBlockKey, target: LinkedBlockKey) -> Result<&str, LinkError> {
-        if !self.blocks.contains_key(&source) {
-            return Err(LinkError::MissingTarget(source));
+        if !self.blocks.contains_key(&source) || !self.blocks.contains_key(&target) {
+            return Err(LinkError::MissingTarget(if self.blocks.contains_key(&source) { target } else { source }));
         }
-        let target_block = self
-            .blocks
-            .get(&target)
-            .ok_or(LinkError::MissingTarget(target))?;
         self.linked_edges.insert((source, target));
-        Ok(&target_block.symbol)
+        Ok(self.blocks.get(&target).expect("target was validated above").symbol.as_str())
     }
 
     pub fn resolve(&self, key: LinkedBlockKey) -> Option<&LinkedBlock> {
