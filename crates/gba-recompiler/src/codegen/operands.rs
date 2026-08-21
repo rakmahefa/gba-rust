@@ -1,8 +1,6 @@
 use std::fmt::Write;
 
-use crate::decoder::{Mode, Operand2};
-
-use super::common::{value_expr, mode_bool};
+use crate::decoder::Operand2;
 
 pub fn arm_operand2(out: &mut String, raw: u32) -> (String, String) {
     if raw & (1 << 25) != 0 {
@@ -64,14 +62,5 @@ pub fn structured_operand2(out: &mut String, operand: Operand2) -> (String, Stri
             );
             ("shifted.value".into(), "Some(shifted.carry)".into())
         }
-    }
-}
-
-#[allow(dead_code)]
-pub fn operand2_for_mode(out: &mut String, mode: Mode, raw: u32, operand: Operand2) -> (String, String) {
-    if matches!(mode, Mode::Arm) {
-        structured_operand2(out, operand)
-    } else {
-        (value_expr(&crate::ir::Value::Imm(raw)), "None".into())
     }
 }
