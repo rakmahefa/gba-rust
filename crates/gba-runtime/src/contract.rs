@@ -1,19 +1,34 @@
 use crate::{Runtime, REG_PC};
 
-pub const RUNTIME_CONTRACT_VERSION: u32 = 3;
+pub const RUNTIME_CONTRACT_VERSION: u32 = 4;
 pub const GENERATED_TARGET_OUTSIDE_CFG: &str =
     "generated target is outside the statically linked CFG";
+pub const GENERATED_TARGET_MISALIGNED: &str =
+    "generated target cannot be represented by the requested execution mode";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArchitecturalState {
-    pub registers: [u32; 16],
-    pub cpsr: u32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GeneratedBlockKey {
+    pub address: u32,
     pub thumb: bool,
-    pub cycles: u64,
 }
-impl ArchitecturalState {
-    pub fn pc(&self) -> u32 {
-        self.registers[REG_PC]
+impl GeneratedBlockKey {
+    pub const fn new(address: u32, thumb: bool) -> Self {
+        Self {
+            address: Self::align(address, thumb),
+            thumb,
+        }
+    }
+
+    pub const fn align(address: u32, thumb: bool) -> u32 {
+        address & if thumb { !1 } else { !3 }
+    }
+
+    pub const fn tuple(self) -> (u32, bool) {
+        (self.address, self.thumb)
+    }
+
+    pub const fn is_aligned(address: u32, thumb: bool) -> bool {
+        Self::align(address, thumb) == address
     }
 }
 
@@ -62,6 +77,19 @@ impl GeneratedExecutionResult {
             | GeneratedExecutionExit::Halted { address, thumb }
             | GeneratedExecutionExit::StepLimitExceeded { address, thumb } => (address, thumb),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArchitecturalState {
+    pub registers: [u32; 16],
+    pub cpsr: u32,
+    pub thumb: bool,
+    pub cycles: u64,
+}
+impl ArchitecturalState {
+    pub fn pc(&self) -> u32 {
+        self.registers[REG_PC]
     }
 }
 
@@ -158,48 +186,54 @@ impl RuntimeContract for Runtime {
         F: FnMut(&mut Runtime, u32, bool) -> Result<GeneratedBlockExit, &'static str>,
         L: Fn(u32, bool) -> bool,
     {
-        fn align(address: u32, thumb: bool) -> u32 {
-            address & if thumb { !1 } else { !3 }
-        }
-        let mut next = (align(address, thumb), thumb);
-        // let initial_cycles = self.cycles;
+        let mut next = GeneratedBlockKey::new(address, thumb);
         let mut steps = 0u64;
         loop {
             if let Some(limit) = max_steps {
                 if steps >= limit {
-                    self.cpu.set_thumb(next.1);
-                    self.cpu.r[REG_PC] = next.0;
+                    self.cpu.set_thumb(next.thumb);
+                    self.cpu.r[REG_PC] = next.address;
                     return Ok(GeneratedExecutionResult {
                         exit: GeneratedExecutionExit::StepLimitExceeded {
-                            address: next.0,
-                            thumb: next.1,
+                            address: next.address,
+                            thumb: next.thumb,
                         },
                         steps,
                         state: self.architectural_state(),
                     });
                 }
             }
-            self.cpu.set_thumb(next.1);
-            self.cpu.r[REG_PC] = next.0;
+
+            self.cpu.set_thumb(next.thumb);
+            self.cpu.r[REG_PC] = next.address;
             let before_dispatch_cycles = self.cycles;
-            let exit = dispatch(self, next.0, next.1)?;
+            let exit = dispatch(self, next.address, next.thumb)?;
             let executed = self.cycles.wrapping_sub(before_dispatch_cycles).max(1);
             steps = steps.wrapping_add(executed);
+
             match exit {
                 GeneratedBlockExit::Continue { address, thumb } => {
-                    next = (align(address, thumb), thumb)
+                    let target = GeneratedBlockKey::new(address, thumb);
+                    if target.address == address || GeneratedBlockKey::is_aligned(address, thumb) {
+                        next = target;
+                    } else {
+                        return Err(GENERATED_TARGET_MISALIGNED);
+                    }
                 }
                 GeneratedBlockExit::Return { address, thumb } => {
-                    let target = (align(address, thumb), thumb);
-                    self.cpu.set_thumb(target.1);
-                    self.cpu.r[REG_PC] = target.0;
-                    if is_linked(target.0, target.1) {
+                    let target = GeneratedBlockKey::new(address, thumb);
+                    if target.address != address && !GeneratedBlockKey::is_aligned(address, thumb) {
+                        return Err(GENERATED_TARGET_MISALIGNED);
+                    }
+                    self.cpu.set_thumb(target.thumb);
+                    self.cpu.r[REG_PC] = target.address;
+                    if is_linked(target.address, target.thumb) {
                         next = target;
                     } else {
                         return Ok(GeneratedExecutionResult {
                             exit: GeneratedExecutionExit::Returned {
-                                address: target.0,
-                                thumb: target.1,
+                                address: target.address,
+                                thumb: target.thumb,
                             },
                             steps,
                             state: self.architectural_state(),
@@ -207,13 +241,16 @@ impl RuntimeContract for Runtime {
                     }
                 }
                 GeneratedBlockExit::Halt { address, thumb } => {
-                    let target = (align(address, thumb), thumb);
-                    self.cpu.set_thumb(target.1);
-                    self.cpu.r[REG_PC] = target.0;
+                    let target = GeneratedBlockKey::new(address, thumb);
+                    if target.address != address && !GeneratedBlockKey::is_aligned(address, thumb) {
+                        return Err(GENERATED_TARGET_MISALIGNED);
+                    }
+                    self.cpu.set_thumb(target.thumb);
+                    self.cpu.r[REG_PC] = target.address;
                     return Ok(GeneratedExecutionResult {
                         exit: GeneratedExecutionExit::Halted {
-                            address: target.0,
-                            thumb: target.1,
+                            address: target.address,
+                            thumb: target.thumb,
                         },
                         steps,
                         state: self.architectural_state(),
