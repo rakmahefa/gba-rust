@@ -1,0 +1,55 @@
+name: Codegen diagnostics
+
+on:
+  push:
+    branches:
+      - refactor/modular-codegen
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Capture cargo check
+        shell: bash
+        run: |
+          set +e
+          cargo check --workspace --all-targets > /tmp/cargo-check.log 2>&1
+          echo $? > /tmp/cargo-check.exit
+      - name: Capture cargo test
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace --all-targets > /tmp/cargo-test.log 2>&1
+          echo $? > /tmp/cargo-test.exit
+      - name: Capture rustfmt
+        shell: bash
+        run: |
+          set +e
+          cargo fmt --all -- --check > /tmp/rustfmt.log 2>&1
+          echo $? > /tmp/rustfmt.exit
+      - name: Capture clippy
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets > /tmp/clippy.log 2>&1
+          echo $? > /tmp/clippy.exit
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: codegen-diagnostics
+          path: /tmp/*.log
