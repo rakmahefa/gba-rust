@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::cfg::Program;
 use crate::decoder::Mode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,12 +36,53 @@ impl GeneratedBlockLinker {
         Ok(())
     }
 
+    pub fn from_program(program: &Program) -> Result<Self, LinkError> {
+        let mut linker = Self::default();
+        for block in &program.cfg.blocks {
+            linker.insert(LinkedBlock {
+                key: LinkedBlockKey {
+                    address: block.key.address,
+                    mode: block.key.mode,
+                },
+                symbol: generated_block_symbol(block.id.0 as u32, block.key.address, block.key.mode),
+            })?;
+        }
+        for block in &program.cfg.blocks {
+            let source = LinkedBlockKey {
+                address: block.key.address,
+                mode: block.key.mode,
+            };
+            for successor in &block.successors {
+                let target_block = program
+                    .cfg
+                    .blocks
+                    .get(successor.0)
+                    .expect("CFG successor must reference a valid block");
+                let target = LinkedBlockKey {
+                    address: target_block.key.address,
+                    mode: target_block.key.mode,
+                };
+                linker.link(source, target)?;
+            }
+        }
+        Ok(linker)
+    }
+
     pub fn link(&mut self, source: LinkedBlockKey, target: LinkedBlockKey) -> Result<&str, LinkError> {
         if !self.blocks.contains_key(&source) || !self.blocks.contains_key(&target) {
-            return Err(LinkError::MissingTarget(if self.blocks.contains_key(&source) { target } else { source }));
+            return Err(LinkError::MissingTarget(if self.blocks.contains_key(&source) {
+                target
+            } else {
+                source
+            }));
         }
         self.linked_edges.insert((source, target));
-        Ok(self.blocks.get(&target).expect("target was validated above").symbol.as_str())
+        Ok(self
+            .blocks
+            .get(&target)
+            .expect("target was validated above")
+            .symbol
+            .as_str())
     }
 
     pub fn resolve(&self, key: LinkedBlockKey) -> Option<&LinkedBlock> {
@@ -74,6 +116,7 @@ pub fn generated_block_symbol(id: u32, address: u32, mode: Mode) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{analyze, Mode, ROM_BASE};
 
     #[test]
     fn links_only_known_targets() {
@@ -102,6 +145,19 @@ mod tests {
         assert_eq!(linker.link(source, target).unwrap(), "block_1_arm_08000004");
         assert_eq!(linker.linked_edge_count(), 1);
         assert!(linker.is_linked(target));
+    }
+
+    #[test]
+    fn builds_links_from_cfg_successors() {
+        let words = [0xEA00_0000u32, 0xE1A0_0000u32];
+        let mut rom = Vec::new();
+        for word in words {
+            rom.extend_from_slice(&word.to_le_bytes());
+        }
+        let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
+        let linker = GeneratedBlockLinker::from_program(&program).unwrap();
+        assert_eq!(linker.block_count(), program.cfg.blocks.len());
+        assert!(linker.linked_edge_count() >= 1);
     }
 
     #[test]
