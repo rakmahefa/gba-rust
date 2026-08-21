@@ -1,4 +1,8 @@
-use std::{env, fs, path::{Path, PathBuf}, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use gba_recompiler::{analyze, generate, Mode, ROM_BASE};
 use gba_runtime::{Cartridge, Runtime};
