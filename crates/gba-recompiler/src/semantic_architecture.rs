@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::decoder::Mode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InstructionKey {
     pub address: u32,
     pub mode: Mode,
