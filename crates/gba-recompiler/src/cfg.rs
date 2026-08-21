@@ -47,15 +47,11 @@ struct DiscoveredInstruction {
     successors: Vec<BlockKey>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum AbstractValue {
+    #[default]
     Unknown,
     Constant(u32),
-}
-impl Default for AbstractValue {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -151,7 +147,7 @@ fn transfer_instruction(rom: &[u8], instruction: Instruction, mut state: Abstrac
         InstructionKind::Arm(ArmOp::Sub { rd, rn, op2 }) => {
             state.write(rd, sub_values(state.read(rn), operand_value(state, op2)));
         }
-        InstructionKind::Arm(ArmOp::Load { rd, rn, offset, .. }) if rn == 15 => {
+        InstructionKind::Arm(ArmOp::Load { rd, rn: 15, offset, .. }) => {
             let address = add_signed(aligned_pc(instruction.address, Mode::Arm), offset);
             state.write(
                 rd,
@@ -212,9 +208,7 @@ fn transfer_instruction(rom: &[u8], instruction: Instruction, mut state: Abstrac
         InstructionKind::Arm(ArmOp::Extended(ArmExtended::Multiply { rd, .. })) => {
             state.write(rd, AbstractValue::Unknown);
         }
-        InstructionKind::Arm(ArmOp::Extended(ArmExtended::MultiplyLong {
-            rd_hi, rd_lo, ..
-        })) => {
+        InstructionKind::Arm(ArmOp::Extended(ArmExtended::MultiplyLong { rd_hi, rd_lo, .. })) => {
             state.write(rd_hi, AbstractValue::Unknown);
             state.write(rd_lo, AbstractValue::Unknown);
         }
@@ -287,11 +281,11 @@ fn transfer_instruction(rom: &[u8], instruction: Instruction, mut state: Abstrac
             state.write(rd, AbstractValue::Unknown);
         }
         InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::MoveShifted {
-            kind,
+            kind: 0,
             rd,
             rs,
             offset,
-        })) if kind == 0 => {
+        })) => {
             state.write(rd, match state.read(rs) {
                 AbstractValue::Constant(value) => AbstractValue::Constant(value << offset),
                 AbstractValue::Unknown => AbstractValue::Unknown,
@@ -729,8 +723,8 @@ mod tests {
         let bytes = arm_rom(&[
             0xE59F_0000, // ldr r0, [pc, #0] -> literal at address + 8
             0xE12F_FF10, // bx r0
-            target,      // literal value loaded into r0
-            0xE1A0_0000, // target instruction
+            target,
+            0xE1A0_0000,
         ]);
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
         assert!(program.cfg.blocks.iter().any(|block| {
