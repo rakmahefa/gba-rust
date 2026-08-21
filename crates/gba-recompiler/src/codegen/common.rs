@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::cfg::{BlockId};
+use crate::cfg::BlockId;
 use crate::decoder::{Condition, Mode};
 use crate::ir::Value;
 
@@ -55,13 +55,22 @@ pub fn emit_flags_from_logic(out: &mut String, value: &str, carry: &str) {
     } else {
         format!("{carry}.unwrap_or(old.c)")
     };
-    let _ = writeln!(out, "    rt.set_flags(gba_runtime::Nzcv::new(({value}) & 0x8000_0000u32 != 0, ({value}) == 0u32, {carry_expr}, old.v));");
+    let _ = writeln!(
+        out,
+        "    rt.set_flags(gba_runtime::Nzcv::new(({value}) & 0x8000_0000u32 != 0, ({value}) == 0u32, {carry_expr}, old.v));"
+    );
 }
 
 pub fn emit_cmp_add(out: &mut String, lhs: &str, rhs: &str) {
-    let _ = writeln!(out, "    let lhs_value = {lhs}; let rhs_value = {rhs}; let result = lhs_value.wrapping_add(rhs_value); let carry = result < lhs_value; let overflow = ((lhs_value ^ result) & (rhs_value ^ result) & 0x8000_0000u32) != 0; rt.set_flags(gba_runtime::Nzcv::new(result & 0x8000_0000u32 != 0, result == 0u32, carry, overflow));");
+    let _ = writeln!(
+        out,
+        "    let lhs_value = {lhs}; let rhs_value = {rhs}; let result = lhs_value.wrapping_add(rhs_value); let carry = result < lhs_value; let overflow = ((lhs_value ^ result) & (rhs_value ^ result) & 0x8000_0000u32) != 0; rt.set_flags(gba_runtime::Nzcv::new(result & 0x8000_0000u32 != 0, result == 0u32, carry, overflow));"
+    );
 }
 
 pub fn emit_cmp_sub(out: &mut String, lhs: &str, rhs: &str) {
-    let _ = writeln!(out, "    let lhs_value = {lhs}; let rhs_value = {rhs}; let result = lhs_value.wrapping_sub(rhs_value); let carry = lhs_value >= rhs_value; let overflow = ((lhs_value ^ rhs_value) & (lhs_value ^ result) & 0x8000_0000u32) != 0; rt.set_flags(gba_runtime::Nzcv::new(result & 0x8000_0000u32 != 0, result == 0u32, carry, overflow));
+    let _ = writeln!(
+        out,
+        "    let lhs_value = {lhs}; let rhs_value = {rhs}; let result = lhs_value.wrapping_sub(rhs_value); let carry = lhs_value >= rhs_value; let overflow = ((lhs_value ^ rhs_value) & (lhs_value ^ result) & 0x8000_0000u32) != 0; rt.set_flags(gba_runtime::Nzcv::new(result & 0x8000_0000u32 != 0, result == 0u32, carry, overflow));"
+    );
 }
