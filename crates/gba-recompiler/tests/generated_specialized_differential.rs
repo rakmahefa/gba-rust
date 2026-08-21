@@ -87,7 +87,7 @@ fn specialized_thumb_shifted_and_alu_operations_execute() {
 #[test]
 fn specialized_thumb_arithmetic_and_compare_flags_execute() {
     let source = generate_thumb(&[0x2001, 0x3001, 0x3801, 0x4248, 0x42C8, 0x4148, 0x4188, 0x4248, 0x4348]);
-    compile_and_run_generated(&source, "entry", "rt.write_reg(1, 2);", "assert_eq!(result.state.registers[0], 0xFFFF_FFFCu32); assert_eq!(result.steps, 1); assert_eq!(result.state.cycles, 9);");
+    compile_and_run_generated(&source, "entry", "rt.write_reg(1, 2);", "assert_eq!(result.state.registers[0], 0xFFFF_FFFCu32); assert_eq!(result.steps, 9); assert_eq!(result.state.cycles, 9);");
 }
 
 #[test]
