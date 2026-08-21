@@ -727,10 +727,10 @@ mod tests {
     fn resolves_arm_bx_from_pc_relative_literal() {
         let target = ROM_BASE + 12;
         let bytes = arm_rom(&[
-            0xE59F_0000,
-            0xE1A0_0000,
-            target,
-            0xE1A0_0000,
+            0xE59F_0000, // ldr r0, [pc, #0] -> literal at address + 8
+            0xE12F_FF10, // bx r0
+            target,      // literal value loaded into r0
+            0xE1A0_0000, // target instruction
         ]);
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
         assert!(program.cfg.blocks.iter().any(|block| {
