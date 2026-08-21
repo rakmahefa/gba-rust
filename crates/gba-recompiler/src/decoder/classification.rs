@@ -145,7 +145,22 @@ mod tests {
     fn arm_priority_preserves_special_instruction_families() {
         assert_eq!(classify_arm(0xE1A0_0000), ArmClass::Nop);
         assert_eq!(classify_arm(0xE12F_FF10), ArmClass::BranchExchange);
+        assert_eq!(classify_arm(0xE12F_FF31), ArmClass::BranchExchange);
         assert_eq!(classify_arm(0xEA00_0000), ArmClass::Branch);
         assert_eq!(classify_arm(0xEF00_0000), ArmClass::SoftwareInterrupt);
+        assert_eq!(classify_arm(0xE000_0000), ArmClass::DataProcessing);
+    }
+
+    #[test]
+    fn thumb_push_pop_are_disjoint() {
+        assert_eq!(classify_thumb(0xB400), ThumbClass::PushPop);
+        assert_eq!(classify_thumb(0xBC00), ThumbClass::PushPop);
+        assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
+    }
+
+    #[test]
+    fn unknown_patterns_are_explicit() {
+        assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
+        assert_eq!(classify_arm(0xE7FF_FFFF), ArmClass::SingleDataTransfer);
     }
 }
