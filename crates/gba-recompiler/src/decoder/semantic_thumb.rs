@@ -1,6 +1,8 @@
 use super::classification::ThumbClass;
 use super::common::{sign_extend, thumb_condition};
-use super::types::{Condition, Instruction, InstructionKind, Mode, ThumbAluOp, ThumbExtended, ThumbOp};
+use super::types::{
+    Condition, Instruction, InstructionKind, Mode, ThumbAluOp, ThumbExtended, ThumbOp,
+};
 
 pub fn decode(address: u32, raw: u16, class: ThumbClass) -> Instruction {
     let op = match class {
@@ -31,7 +33,9 @@ pub fn decode(address: u32, raw: u16, class: ThumbClass) -> Instruction {
             rn: 15,
             word_offset: (raw & 0xFF) as u8,
         },
-        ThumbClass::LoadStoreRegister | ThumbClass::LoadStoreSignHalf => decode_register_memory(raw, class),
+        ThumbClass::LoadStoreRegister | ThumbClass::LoadStoreSignHalf => {
+            decode_register_memory(raw, class)
+        }
         ThumbClass::LoadStoreImmediate => ThumbOp::Extended(ThumbExtended::LoadStoreImmediate {
             load: raw & (1 << 11) != 0,
             byte: raw & (1 << 12) != 0,
@@ -57,7 +61,7 @@ pub fn decode(address: u32, raw: u16, class: ThumbClass) -> Instruction {
         }),
         ThumbClass::AddSp => ThumbOp::Extended(ThumbExtended::AddSp {
             negative: raw & (1 << 7) != 0,
-            imm: ((raw & 0x7F) as u16) << 2,
+            imm: (raw & 0x7F) << 2,
         }),
         ThumbClass::PushPop => ThumbOp::Extended(ThumbExtended::PushPop {
             load: raw & (1 << 11) != 0,
@@ -223,13 +227,15 @@ mod tests {
     #[test]
     fn family_decoders_cover_major_thumb_classes() {
         for raw in [
-            0x0000, 0x1800, 0x2000, 0x3000, 0x4000, 0x4400, 0x4700,
-            0x4800, 0x5000, 0x6000, 0x8000, 0x9000, 0xA000, 0xB000,
-            0xB400, 0xC000, 0xD000, 0xDF00, 0xE000,
+            0x0000, 0x1800, 0x2000, 0x3000, 0x4000, 0x4400, 0x4700, 0x4800, 0x5000, 0x6000, 0x8000,
+            0x9000, 0xA000, 0xB000, 0xB400, 0xC000, 0xD000, 0xDF00, 0xE000,
         ] {
             let class = classify_thumb(raw);
             let instruction = decode(0x0800_0000, raw, class);
-            assert!(!matches!(instruction.kind, InstructionKind::Thumb(ThumbOp::Unknown)), "{raw:#06x}");
+            assert!(
+                !matches!(instruction.kind, InstructionKind::Thumb(ThumbOp::Unknown)),
+                "{raw:#06x}"
+            );
         }
     }
 }

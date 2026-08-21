@@ -3,13 +3,28 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use gba_recompiler::{analyze, build_semantic_program, discover_functions, generate_semantic, IrOp, Mode, ROM_BASE};
+use gba_recompiler::{
+    analyze, build_semantic_program, discover_functions, generate_semantic, IrOp, Mode, ROM_BASE,
+};
 
-fn arm_rom(words: &[u32]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
-fn thumb_rom(halfwords: &[u16]) -> Vec<u8> { halfwords.iter().flat_map(|word| word.to_le_bytes()).collect() }
+fn arm_rom(words: &[u32]) -> Vec<u8> {
+    words.iter().flat_map(|word| word.to_le_bytes()).collect()
+}
+fn thumb_rom(halfwords: &[u16]) -> Vec<u8> {
+    halfwords
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect()
+}
 
 fn compile_and_run_generated(source: &str, entry: &str, setup: &str, assertions: &str) {
-    let root = std::env::temp_dir().join(format!("gba-specialized-{}", SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos()));
+    let root = std::env::temp_dir().join(format!(
+        "gba-specialized-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
     fs::create_dir_all(root.join("src")).expect("temporary test directory");
     let generated_path = root.join("src/generated.rs");
     let wrapper_path = root.join("src/main.rs");
@@ -36,7 +51,13 @@ fn compile_and_run_generated(source: &str, entry: &str, setup: &str, assertions:
         .arg(&manifest_path)
         .output()
         .expect("cargo invocation");
-    assert!(output.status.success(), "generated Rust failed to compile or execute:\nstdout:\n{}\nstderr:\n{}\nsource:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr), source);
+    assert!(
+        output.status.success(),
+        "generated Rust failed to compile or execute:\nstdout:\n{}\nstderr:\n{}\nsource:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+        source
+    );
 
     let _ = binary_path;
     let _ = fs::remove_dir_all(root);
@@ -50,7 +71,8 @@ fn generate_arm(words: &[u32]) -> String {
 }
 
 fn generate_thumb(halfwords: &[u16]) -> String {
-    let program = analyze(&thumb_rom(halfwords), ROM_BASE, Mode::Thumb).expect("Thumb fixture analysis");
+    let program =
+        analyze(&thumb_rom(halfwords), ROM_BASE, Mode::Thumb).expect("Thumb fixture analysis");
     let functions = discover_functions(&program);
     let semantic = build_semantic_program(&program, &functions).expect("Thumb semantic lowering");
     generate_semantic(&program, &semantic, "entry").source
@@ -75,18 +97,27 @@ fn specialized_arm_data_processing_executes_against_architectural_expectations()
 #[test]
 fn specialized_arm_shift_and_multiply_execute_without_raw_dispatch() {
     let source = generate_arm(&[0xE3A0_0003, 0xE1A0_1080, 0xE000_0291]);
-    compile_and_run_generated(&source, "entry", "rt.write_reg(2, 4);", "assert_eq!(result.state.registers[1], 6); assert_eq!(result.state.registers[0], 24);");
+    compile_and_run_generated(
+        &source,
+        "entry",
+        "rt.write_reg(2, 4);",
+        "assert_eq!(result.state.registers[1], 6); assert_eq!(result.state.registers[0], 24);",
+    );
 }
 
 #[test]
 fn specialized_thumb_shifted_and_alu_operations_execute() {
-    let source = generate_thumb(&[0x2003, 0x2107, 0x0040, 0x4008, 0x4048, 0x4308, 0x4388, 0x43C8]);
+    let source = generate_thumb(&[
+        0x2003, 0x2107, 0x0040, 0x4008, 0x4048, 0x4308, 0x4388, 0x43C8,
+    ]);
     compile_and_run_generated(&source, "entry", "", "assert_eq!(result.state.registers[0], !7u32); assert!(result.state.cpsr & gba_runtime::CPSR_N != 0);");
 }
 
 #[test]
 fn specialized_thumb_arithmetic_and_compare_flags_execute() {
-    let source = generate_thumb(&[0x2001, 0x3001, 0x3801, 0x4248, 0x42C8, 0x4148, 0x4188, 0x4248, 0x4348]);
+    let source = generate_thumb(&[
+        0x2001, 0x3001, 0x3801, 0x4248, 0x42C8, 0x4148, 0x4188, 0x4248, 0x4348,
+    ]);
     compile_and_run_generated(&source, "entry", "rt.write_reg(1, 2);", "assert_eq!(result.state.registers[0], 0xFFFF_FFFCu32); assert_eq!(result.steps, 9); assert_eq!(result.state.cycles, 9);");
 }
 
@@ -97,15 +128,28 @@ fn specialized_memory_codegen_executes_load_store_roundtrip() {
         0xE5C0_1000, // strb r1, [r0]
         0xE5D0_2000, // ldrb r2, [r0]
     ]);
-    compile_and_run_generated(&source, "entry", "rt.write_reg(0, 0x0400_0004);", "assert_eq!(rt.read8(0x0400_0004), 42); assert_eq!(result.state.registers[2], 42);");
+    compile_and_run_generated(
+        &source,
+        "entry",
+        "rt.write_reg(0, 0x0400_0004);",
+        "assert_eq!(rt.read8(0x0400_0004), 42); assert_eq!(result.state.registers[2], 42);",
+    );
 }
 
 #[test]
 fn semantic_ir_rejects_codegen_contract_tampering_before_generation() {
-    let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).expect("analysis");
+    let program =
+        analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).expect("analysis");
     let functions = discover_functions(&program);
     let mut semantic = build_semantic_program(&program, &functions).expect("semantic");
-    semantic.functions[0].blocks[0].instructions[0].ops.push(IrOp::Branch { target: ROM_BASE, condition: gba_recompiler::Condition::Al, link: false });
-    let error = gba_recompiler::validate_semantic_program(&program, &functions, &semantic).expect_err("tampered semantic contract must fail");
+    semantic.functions[0].blocks[0].instructions[0]
+        .ops
+        .push(IrOp::Branch {
+            target: ROM_BASE,
+            condition: gba_recompiler::Condition::Al,
+            link: false,
+        });
+    let error = gba_recompiler::validate_semantic_program(&program, &functions, &semantic)
+        .expect_err("tampered semantic contract must fail");
     assert!(error.contains("instruction control effect changed"));
 }

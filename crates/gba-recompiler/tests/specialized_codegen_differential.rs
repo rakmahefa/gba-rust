@@ -3,11 +3,17 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use gba_recompiler::{analyze, build_semantic_program, discover_functions, generate_semantic, Mode, ROM_BASE};
+use gba_recompiler::{
+    analyze, build_semantic_program, discover_functions, generate_semantic, Mode, ROM_BASE,
+};
 use gba_runtime::{CPSR_C, CPSR_N, CPSR_V, CPSR_Z};
 
-fn arm_rom(words: &[u32]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
-fn thumb_rom(words: &[u16]) -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() }
+fn arm_rom(words: &[u32]) -> Vec<u8> {
+    words.iter().flat_map(|word| word.to_le_bytes()).collect()
+}
+fn thumb_rom(words: &[u16]) -> Vec<u8> {
+    words.iter().flat_map(|word| word.to_le_bytes()).collect()
+}
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -17,7 +23,10 @@ fn workspace_root() -> PathBuf {
 }
 
 fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
-    let id = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+    let id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
     let root = std::env::temp_dir().join(format!("gba-specialized-{id}"));
     fs::create_dir_all(root.join("src")).expect("temporary project");
     let generated = root.join("src/generated.rs");
@@ -52,10 +61,18 @@ fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
         .status()
         .expect("cargo build");
     assert!(compile.success(), "generated Rust did not compile");
-    assert!(binary.is_file(), "cargo build succeeded but generated binary is missing at {}", binary.display());
+    assert!(
+        binary.is_file(),
+        "cargo build succeeded but generated binary is missing at {}",
+        binary.display()
+    );
 
     let output = Command::new(&binary).output().expect("generated binary");
-    assert!(output.status.success(), "generated Rust failed:\n{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "generated Rust failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let values = String::from_utf8(output.stdout)
         .expect("UTF-8 output")
         .split_whitespace()
@@ -95,7 +112,10 @@ fn specialized_arm_arithmetic_matches_reference() {
     let source = generate_arm(&[0xE3A0_0001, 0xE280_1002, 0xE241_2001, 0xE251_3002]);
     let actual = execute_generated(&source, "");
     assert_eq!([actual[0], actual[1], actual[2]], [1, 3, 2]);
-    assert_eq!(actual[3] as u32 & (CPSR_N | CPSR_Z | CPSR_C | CPSR_V), CPSR_C);
+    assert_eq!(
+        actual[3] as u32 & (CPSR_N | CPSR_Z | CPSR_C | CPSR_V),
+        CPSR_C
+    );
     assert_eq!(actual[4], 4);
 }
 
@@ -131,10 +151,18 @@ fn specialized_thumb_alu_matches_reference() {
 
 #[test]
 fn semantic_contract_rejects_control_tampering() {
-    let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).expect("analysis");
+    let program =
+        analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).expect("analysis");
     let functions = discover_functions(&program);
     let mut semantic = build_semantic_program(&program, &functions).expect("semantic");
-    semantic.functions[0].blocks[0].instructions[0].ops.push(gba_recompiler::IrOp::Branch { target: ROM_BASE, condition: gba_recompiler::Condition::Al, link: false });
-    let error = gba_recompiler::validate_semantic_program(&program, &functions, &semantic).expect_err("tampering must fail");
+    semantic.functions[0].blocks[0].instructions[0]
+        .ops
+        .push(gba_recompiler::IrOp::Branch {
+            target: ROM_BASE,
+            condition: gba_recompiler::Condition::Al,
+            link: false,
+        });
+    let error = gba_recompiler::validate_semantic_program(&program, &functions, &semantic)
+        .expect_err("tampering must fail");
     assert!(error.contains("instruction control effect changed"));
 }

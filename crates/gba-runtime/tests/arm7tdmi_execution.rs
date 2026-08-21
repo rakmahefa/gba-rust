@@ -145,7 +145,9 @@ fn thumb_high_register_move_to_pc_preserves_thumb_state() {
     let mut rt = Runtime::new();
     rt.set_thumb(true);
     rt.write_reg(0, 0x0800_0101);
-    let result = rt.execute_thumb_instruction(0x4687).expect("MOV PC,R0 must produce a control transfer");
+    let result = rt
+        .execute_thumb_instruction(0x4687)
+        .expect("MOV PC,R0 must produce a control transfer");
     assert_eq!(result, (0x0800_0100, true));
     assert_eq!(rt.read_reg(REG_PC), 0x0800_0100);
     assert!(rt.cpu.thumb);

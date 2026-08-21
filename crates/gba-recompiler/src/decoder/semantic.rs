@@ -26,8 +26,10 @@ pub fn decode_thumb_from_rom(rom: &[u8], address: u32) -> Result<Instruction, De
 
 pub fn decode_thumb_bl_from_rom(rom: &[u8], address: u32) -> Result<Instruction, DecodeError> {
     let (first, second) = read_thumb_bl(rom, address)?;
-    if !matches!(classify_thumb(first), super::classification::ThumbClass::Branch)
-        || (second & 0xF800) != 0xF800
+    if !matches!(
+        classify_thumb(first),
+        super::classification::ThumbClass::Branch
+    ) || (second & 0xF800) != 0xF800
     {
         return Ok(decode_thumb(address, first));
     }

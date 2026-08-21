@@ -13,7 +13,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "static analysis: entry={:#x}, blocks={}, instructions={}",
         program.cfg.blocks[program.entry.0].key.address,
         program.cfg.blocks.len(),
-        program.cfg.blocks.iter().map(|b| b.instructions.len()).sum::<usize>()
+        program
+            .cfg
+            .blocks
+            .iter()
+            .map(|b| b.instructions.len())
+            .sum::<usize>()
     );
 
     let generated = generate(&program, "gba_entry");
