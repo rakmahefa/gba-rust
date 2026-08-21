@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::decoder::Mode;
 
@@ -9,21 +9,21 @@ pub struct InstructionKey {
     pub size: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MemoryWidth {
     Byte,
     Halfword,
     Word,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MemoryAccess {
     Read,
     Write,
     ReadWrite,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemoryEffect {
     pub access: MemoryAccess,
     pub width: MemoryWidth,
@@ -31,7 +31,7 @@ pub struct MemoryEffect {
     pub dynamic_address: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct FlagEffects {
     pub read_n: bool,
     pub read_z: bool,
@@ -43,7 +43,7 @@ pub struct FlagEffects {
     pub write_v: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ControlEffect {
     Fallthrough,
     Branch { target: u32, conditional: bool, link: bool },
@@ -56,8 +56,8 @@ pub enum ControlEffect {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchitecturalInstruction {
     pub key: InstructionKey,
-    pub reads: BTreeSet<u8>,
-    pub writes: BTreeSet<u8>,
+    pub reads: HashSet<u8>,
+    pub writes: HashSet<u8>,
     pub flags: FlagEffects,
     pub memory: Option<MemoryEffect>,
     pub control: ControlEffect,
@@ -68,7 +68,7 @@ pub struct ArchitecturalBlock {
     pub address: u32,
     pub mode: Mode,
     pub instructions: Vec<ArchitecturalInstruction>,
-    pub successors: BTreeSet<(u32, Mode)>,
+    pub successors: HashSet<(u32, Mode)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,12 +81,12 @@ pub enum ContractError {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ArchitecturalProgram {
-    pub blocks: BTreeMap<(u32, Mode), ArchitecturalBlock>,
+    pub blocks: HashMap<(u32, Mode), ArchitecturalBlock>,
 }
 
 impl ArchitecturalProgram {
     pub fn validate(&self) -> Result<(), ContractError> {
-        let mut instructions = BTreeSet::new();
+        let mut instructions = HashSet::new();
         for ((address, mode), block) in &self.blocks {
             if block.instructions.is_empty() {
                 return Err(ContractError::EmptyBlock(*address));
@@ -126,8 +126,8 @@ mod tests {
     fn instruction(address: u32, mode: Mode, size: u8) -> ArchitecturalInstruction {
         ArchitecturalInstruction {
             key: InstructionKey { address, mode, size },
-            reads: BTreeSet::new(),
-            writes: BTreeSet::new(),
+            reads: HashSet::new(),
+            writes: HashSet::new(),
             flags: FlagEffects::default(),
             memory: None,
             control: ControlEffect::Fallthrough,
@@ -146,7 +146,7 @@ mod tests {
                     instruction(0x0800_0000, Mode::Arm, 4),
                     instruction(0x0800_0004, Mode::Arm, 4),
                 ],
-                successors: BTreeSet::new(),
+                successors: HashSet::new(),
             },
         );
         assert!(program.validate().is_ok());
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn rejects_unknown_successor() {
         let mut program = ArchitecturalProgram::default();
-        let mut successors = BTreeSet::new();
+        let mut successors = HashSet::new();
         successors.insert((0x0800_0010, Mode::Thumb));
         program.blocks.insert(
             (0x0800_0000, Mode::Arm),
