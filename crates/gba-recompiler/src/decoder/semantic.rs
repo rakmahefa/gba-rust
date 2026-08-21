@@ -2,7 +2,7 @@ use super::classification::{classify_arm, classify_thumb};
 use super::memory::{read_arm, read_thumb, read_thumb_bl, DecodeError};
 use super::semantic_arm;
 use super::semantic_thumb;
-use super::types::{Instruction, InstructionKind, Mode, ThumbOp};
+use super::types::Instruction;
 
 pub fn decode_arm(address: u32, raw: u32) -> Instruction {
     semantic_arm::decode(address, raw, classify_arm(raw))
@@ -37,7 +37,7 @@ pub fn decode_thumb_bl_from_rom(rom: &[u8], address: u32) -> Result<Instruction,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decoder::types::{ArmExtended, ArmOp};
+    use crate::decoder::types::{ArmExtended, ArmOp, InstructionKind, Mode, ThumbOp};
 
     #[test]
     fn semantic_arm_path_keeps_extended_memory_ops() {
