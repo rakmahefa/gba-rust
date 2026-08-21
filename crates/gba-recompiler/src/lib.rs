@@ -5,6 +5,7 @@ pub mod decoder;
 pub mod execution;
 pub mod function;
 pub mod ir;
+pub mod linker;
 pub mod optimization;
 pub mod semantic_architecture;
 pub mod semantic_ir;
@@ -18,7 +19,7 @@ pub use cfg::{analyze, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlow
 pub use codegen::{generate, generate_semantic, RustModule};
 pub use decoder::{
     decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction,
-    InstructionKind, Mode, ThumbOp, ROM_BASE,
+    InstructionKind, Mode, ROM_BASE, ThumbOp,
 };
 pub use execution::{
     add_flags, branch_target, condition_holds, sub_flags, Nzcv, CPSR_C, CPSR_N, CPSR_T, CPSR_V,
@@ -32,6 +33,7 @@ pub use ir::{
     lower, IrControlEffect, IrFlags, IrInstruction, IrMemoryEffect, IrMemoryKind, IrMemoryWidth,
     IrOp, Value,
 };
+pub use linker::{generated_block_symbol, GeneratedBlockLinker, LinkError, LinkedBlock, LinkedBlockKey};
 pub use optimization::{
     optimize_semantic_program, OptimizationChange, OptimizationKind, OptimizationReport,
 };
