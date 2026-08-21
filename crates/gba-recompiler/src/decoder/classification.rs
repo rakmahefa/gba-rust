@@ -20,9 +20,8 @@ const MULTIPLY_LONG_MASK: u32 = 0x0F80_00F0;
 const MULTIPLY_LONG_PATTERN: u32 = 0x0080_0090;
 const BLOCK_TRANSFER_MASK: u32 = 0x0E00_0000;
 const BLOCK_TRANSFER_PATTERN: u32 = 0x0800_0000;
-// Single data transfer uses the ARM "01" class in bits 27:26. Bit 25 is the I
-// bit and must remain unconstrained so both immediate and register-offset
-// forms reach the same semantic decoder.
+// Bits [27:26] select the single-data-transfer class. Bit I (25) is the
+// addressing-mode selector, so it must remain unconstrained here.
 const SINGLE_TRANSFER_MASK: u32 = 0x0C00_0000;
 const SINGLE_TRANSFER_PATTERN: u32 = 0x0400_0000;
 const HALFWORD_MASK: u32 = 0x0E00_0090;
@@ -90,9 +89,7 @@ pub fn classify_arm(raw: u32) -> ArmClass {
     if raw == 0xE1A0_0000 {
         return ArmClass::Nop;
     }
-    if arm_matches(raw, BX_LINK_MASK, BX_LINK_PATTERN)
-        || arm_matches(raw, BX_MASK, BX_PATTERN)
-    {
+    if arm_matches(raw, BX_LINK_MASK, BX_LINK_PATTERN) || arm_matches(raw, BX_MASK, BX_PATTERN) {
         return ArmClass::BranchExchange;
     }
     if arm_matches(raw, SWP_MASK, SWP_PATTERN) && raw & (1 << 25) == 0 {
@@ -219,9 +216,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn arm_single_transfer_class_accepts_both_offset_encodings() {
+        assert_eq!(classify_arm(0xE5C0_1004), ArmClass::SingleDataTransfer);
+        assert_eq!(classify_arm(0xE7C0_1004), ArmClass::SingleDataTransfer);
+        assert_eq!(classify_arm(0xE7AF_2558), ArmClass::SingleDataTransfer);
+    }
+
+    #[test]
     fn arm_priority_preserves_special_instruction_families() {
         assert_eq!(classify_arm(0xE1A0_0000), ArmClass::Nop);
-        assert_eq!(classify_arm(0xE7C0_1004), ArmClass::SingleDataTransfer);
-        assert_eq!(classify_arm(0xE5C0_1004), ArmClass::SingleDataTransfer);
+        assert_eq!(classify_arm(0xE12F_FF10), ArmClass::BranchExchange);
+        assert_eq!(classify_arm(0xE12F_FF31), ArmClass::BranchExchange);
+        assert_eq!(classify_arm(0xEA00_0000), ArmClass::Branch);
+        assert_eq!(classify_arm(0xEF00_0000), ArmClass::SoftwareInterrupt);
+        assert_eq!(classify_arm(0xE000_0000), ArmClass::DataProcessing);
+    }
+
+    #[test]
+    fn thumb_push_pop_are_disjoint() {
+        assert_eq!(classify_thumb(0xB400), ThumbClass::PushPop);
+        assert_eq!(classify_thumb(0xBC00), ThumbClass::PushPop);
+        assert_eq!(classify_thumb(0xBE00), ThumbClass::Unknown);
+    }
+
+    #[test]
+    fn register_offset_variants_reach_single_transfer() {
+        for raw in [0xE7C0_1004, 0xE7AF_2558, 0xE7FF_FFFF] {
+            assert_eq!(
+                classify_arm(raw),
+                ArmClass::SingleDataTransfer,
+                "raw={raw:#010x}"
+            );
+        }
     }
 }

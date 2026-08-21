@@ -6,12 +6,20 @@ pub(super) fn sign_extend(value: u32, bits: u8) -> i32 {
 }
 
 pub(super) fn arm_matches(raw: u32, mask: u32, pattern: u32) -> bool {
-    debug_assert_eq!(pattern & !mask, 0, "pattern {pattern:#010x} escapes mask {mask:#010x}");
+    debug_assert_eq!(
+        pattern & !mask,
+        0,
+        "pattern {pattern:#010x} escapes mask {mask:#010x}"
+    );
     raw & mask == pattern
 }
 
 pub(super) fn thumb_matches(raw: u16, mask: u16, pattern: u16) -> bool {
-    debug_assert_eq!(pattern & !mask, 0, "pattern {pattern:#06x} escapes mask {mask:#06x}");
+    debug_assert_eq!(
+        pattern & !mask,
+        0,
+        "pattern {pattern:#06x} escapes mask {mask:#06x}"
+    );
     raw & mask == pattern
 }
 
@@ -44,7 +52,11 @@ pub(super) fn arm_operand2(raw: u32) -> Operand2 {
         let by_register = raw & (1 << 4) != 0;
         Operand2::Reg {
             rm: (raw & 0xF) as u8,
-            shift: if by_register { 0 } else { ((raw >> 7) & 0x1F) as u8 },
+            shift: if by_register {
+                0
+            } else {
+                ((raw >> 7) & 0x1F) as u8
+            },
             shift_kind: ((raw >> 5) & 0x3) as u8,
             by_register,
             shift_register: ((raw >> 8) & 0xF) as u8,
@@ -85,6 +97,15 @@ mod tests {
     #[test]
     fn decodes_all_operand2_shift_fields() {
         let raw = (0b10 << 5) | (1 << 4) | (7 << 8) | 3;
-        assert_eq!(arm_operand2(raw), Operand2::Reg { rm: 3, shift: 0, shift_kind: 2, by_register: true, shift_register: 7 });
+        assert_eq!(
+            arm_operand2(raw),
+            Operand2::Reg {
+                rm: 3,
+                shift: 0,
+                shift_kind: 2,
+                by_register: true,
+                shift_register: 7
+            }
+        );
     }
 }

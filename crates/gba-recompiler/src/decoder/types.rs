@@ -191,14 +191,45 @@ pub enum ArmExtended {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArmOp {
     Nop,
-    Mov { rd: u8, op2: Operand2 },
-    Add { rd: u8, rn: u8, op2: Operand2 },
-    Sub { rd: u8, rn: u8, op2: Operand2 },
-    Cmp { rn: u8, op2: Operand2 },
-    Load { rd: u8, rn: u8, offset: i32, byte: bool },
-    Store { rd: u8, rn: u8, offset: i32, byte: bool },
-    Branch { target: u32, condition: Condition, link: bool },
-    BranchExchange { rm: u8, link: bool },
+    Mov {
+        rd: u8,
+        op2: Operand2,
+    },
+    Add {
+        rd: u8,
+        rn: u8,
+        op2: Operand2,
+    },
+    Sub {
+        rd: u8,
+        rn: u8,
+        op2: Operand2,
+    },
+    Cmp {
+        rn: u8,
+        op2: Operand2,
+    },
+    Load {
+        rd: u8,
+        rn: u8,
+        offset: i32,
+        byte: bool,
+    },
+    Store {
+        rd: u8,
+        rn: u8,
+        offset: i32,
+        byte: bool,
+    },
+    Branch {
+        target: u32,
+        condition: Condition,
+        link: bool,
+    },
+    BranchExchange {
+        rm: u8,
+        link: bool,
+    },
     Extended(ArmExtended),
     Unknown,
 }
@@ -225,22 +256,91 @@ pub enum ThumbAluOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThumbExtended {
-    MoveShifted { kind: u8, rd: u8, rs: u8, offset: u8 },
-    AddSubRegister { sub: bool, rd: u8, rs: u8, rn: u8 },
-    AddSubImmediate { sub: bool, rd: u8, rs: u8, imm: u8 },
-    Alu { op: ThumbAluOp, rd: u8, rs: u8 },
-    HighRegister { op: u8, rd: u8, rs: u8 },
-    PcRelativeLoad { rd: u8, word_offset: u8 },
-    LoadStoreRegister { load: bool, byte: bool, rd: u8, rb: u8, ro: u8 },
-    LoadStoreSignHalf { kind: u8, rd: u8, rb: u8, ro: u8 },
-    LoadStoreImmediate { load: bool, byte: bool, rd: u8, rb: u8, offset: u8 },
-    LoadStoreHalfword { load: bool, rd: u8, rb: u8, offset: u8 },
-    SpRelativeLoadStore { load: bool, rd: u8, offset: u8 },
-    Address { rd: u8, use_sp: bool, word_offset: u8 },
-    AddSp { negative: bool, imm: u16 },
-    PushPop { load: bool, registers: u8, extra_lr_pc: bool },
-    MultipleLoadStore { load: bool, rb: u8, register_list: u8 },
-    SoftwareInterrupt { comment: u8 },
+    MoveShifted {
+        kind: u8,
+        rd: u8,
+        rs: u8,
+        offset: u8,
+    },
+    AddSubRegister {
+        sub: bool,
+        rd: u8,
+        rs: u8,
+        rn: u8,
+    },
+    AddSubImmediate {
+        sub: bool,
+        rd: u8,
+        rs: u8,
+        imm: u8,
+    },
+    Alu {
+        op: ThumbAluOp,
+        rd: u8,
+        rs: u8,
+    },
+    HighRegister {
+        op: u8,
+        rd: u8,
+        rs: u8,
+    },
+    PcRelativeLoad {
+        rd: u8,
+        word_offset: u8,
+    },
+    LoadStoreRegister {
+        load: bool,
+        byte: bool,
+        rd: u8,
+        rb: u8,
+        ro: u8,
+    },
+    LoadStoreSignHalf {
+        kind: u8,
+        rd: u8,
+        rb: u8,
+        ro: u8,
+    },
+    LoadStoreImmediate {
+        load: bool,
+        byte: bool,
+        rd: u8,
+        rb: u8,
+        offset: u8,
+    },
+    LoadStoreHalfword {
+        load: bool,
+        rd: u8,
+        rb: u8,
+        offset: u8,
+    },
+    SpRelativeLoadStore {
+        load: bool,
+        rd: u8,
+        offset: u8,
+    },
+    Address {
+        rd: u8,
+        use_sp: bool,
+        word_offset: u8,
+    },
+    AddSp {
+        negative: bool,
+        imm: u16,
+    },
+    PushPop {
+        load: bool,
+        registers: u8,
+        extra_lr_pc: bool,
+    },
+    MultipleLoadStore {
+        load: bool,
+        rb: u8,
+        register_list: u8,
+    },
+    SoftwareInterrupt {
+        comment: u8,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

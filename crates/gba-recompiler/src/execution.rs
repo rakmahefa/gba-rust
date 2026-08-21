@@ -16,8 +16,11 @@ pub const CPSR_C: u32 = 1 << 29;
 pub const CPSR_V: u32 = 1 << 28;
 pub const CPSR_T: u32 = 1 << 5;
 
+pub use architecture::{
+    add_with_carry, architectural_pc, exchange_target, link_address, rotate_unaligned_word,
+    shift_immediate, shift_register, sub_with_borrow,
+};
 pub use architecture::{Nzcv, NzcvMask, ShiftResult, ShiftType};
-pub use architecture::{add_with_carry, architectural_pc, exchange_target, link_address, rotate_unaligned_word, shift_immediate, shift_register, sub_with_borrow};
 
 pub fn add_flags(lhs: u32, rhs: u32, result: u32) -> Nzcv {
     let c = (lhs as u64 + rhs as u64) > u32::MAX as u64;
@@ -41,7 +44,9 @@ pub fn condition_holds(cpsr: u32, condition: Condition) -> bool {
     architecture::condition_holds(nzcv, condition)
 }
 
-pub fn branch_target(raw_target: u32, mode: Mode) -> u32 { architecture::branch_target(raw_target, mode) }
+pub fn branch_target(raw_target: u32, mode: Mode) -> u32 {
+    architecture::branch_target(raw_target, mode)
+}
 
 #[cfg(test)]
 mod tests {

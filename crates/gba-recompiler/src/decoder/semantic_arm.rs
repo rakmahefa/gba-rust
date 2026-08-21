@@ -4,8 +4,6 @@ use super::types::{ArmDataOp, ArmExtended, ArmOp, Instruction, InstructionKind, 
 
 const BX_LINK_MASK: u32 = 0x0FFF_FFF0;
 const BX_LINK_PATTERN: u32 = 0x012F_FF30;
-const BX_MASK: u32 = 0x0FFF_FFF0;
-const BX_PATTERN: u32 = 0x012F_FF10;
 
 pub fn decode(address: u32, raw: u32, class: ArmClass) -> Instruction {
     let op = match class {
@@ -119,7 +117,20 @@ fn decode_single_transfer(raw: u32) -> ArmOp {
     let pre_index = raw & (1 << 24) != 0;
     let up = raw & (1 << 23) != 0;
     let write_back = raw & (1 << 21) != 0;
-    let offset = arm_operand2(raw);
+    let offset = if raw & (1 << 25) == 0 {
+        Operand2::Imm(raw & 0x0FFF)
+    } else {
+        // Single-data-transfer I=1 is *not* the data-processing Operand2
+        // immediate selector. It encodes a register offset with an immediate
+        // shift: Rm plus shift_imm/shift_type, with bit 4 fixed to zero.
+        Operand2::Reg {
+            rm: (raw & 0xF) as u8,
+            shift: ((raw >> 7) & 0x1F) as u8,
+            shift_kind: ((raw >> 5) & 0x3) as u8,
+            by_register: false,
+            shift_register: 0,
+        }
+    };
 
     if !pre_index && !write_back {
         if let Operand2::Imm(value) = offset {
@@ -168,7 +179,6 @@ fn decode_halfword_transfer(raw: u32) -> ArmOp {
         raw & 0xF
     };
     let magnitude = if up { offset as i32 } else { -(offset as i32) };
-
     ArmOp::Extended(ArmExtended::HalfwordTransfer {
         load,
         signed,
@@ -187,7 +197,6 @@ fn decode_data_processing(raw: u32) -> ArmOp {
     let rd = ((raw >> 12) & 0xF) as u8;
     let rn = ((raw >> 16) & 0xF) as u8;
     let op2 = arm_operand2(raw);
-
     match opcode {
         0xD => ArmOp::Mov { rd, op2 },
         0x4 => ArmOp::Add { rd, rn, op2 },
@@ -226,15 +235,17 @@ fn arm_data_op(opcode: u8) -> ArmDataOp {
 
 fn decode_coprocessor(raw: u32, class: ArmClass) -> ArmOp {
     match class {
-        ArmClass::CoprocessorRegisterTransfer => ArmOp::Extended(ArmExtended::CoprocessorRegisterTransfer {
-            to_arm: raw & (1 << 20) != 0,
-            cp: ((raw >> 8) & 0xF) as u8,
-            opcode1: ((raw >> 21) & 7) as u8,
-            rd: ((raw >> 12) & 0xF) as u8,
-            crn: ((raw >> 16) & 0xF) as u8,
-            crm: (raw & 0xF) as u8,
-            opcode2: ((raw >> 5) & 7) as u8,
-        }),
+        ArmClass::CoprocessorRegisterTransfer => {
+            ArmOp::Extended(ArmExtended::CoprocessorRegisterTransfer {
+                to_arm: raw & (1 << 20) != 0,
+                cp: ((raw >> 8) & 0xF) as u8,
+                opcode1: ((raw >> 21) & 7) as u8,
+                rd: ((raw >> 12) & 0xF) as u8,
+                crn: ((raw >> 16) & 0xF) as u8,
+                crm: (raw & 0xF) as u8,
+                opcode2: ((raw >> 5) & 7) as u8,
+            })
+        }
         ArmClass::CoprocessorTransfer => ArmOp::Extended(ArmExtended::CoprocessorTransfer {
             load: raw & (1 << 20) != 0,
             cp: ((raw >> 8) & 0xF) as u8,
@@ -251,7 +262,7 @@ fn decode_coprocessor(raw: u32, class: ArmClass) -> ArmOp {
             crd: ((raw >> 12) & 0xF) as u8,
             crn: ((raw >> 16) & 0xF) as u8,
             crm: (raw & 0xF) as u8,
-            opcode2: ((raw >> 5) & 0x7) as u8,
+            opcode2: ((raw >> 5) & 7) as u8,
         }),
         _ => ArmOp::Unknown,
     }
@@ -281,6 +292,43 @@ mod tests {
                 !matches!(instruction.kind, InstructionKind::Arm(ArmOp::Unknown)),
                 "{raw:#010x}"
             );
+        }
+    }
+
+    #[test]
+    fn single_data_transfer_immediate_offset_is_not_decoded_as_shifted_register() {
+        let raw = 0xE5C0_1004;
+        let class = classify_arm(raw);
+        let instruction = decode(0x0800_0000, raw, class);
+        match instruction.kind {
+            InstructionKind::Arm(ArmOp::Extended(ArmExtended::SingleDataTransfer {
+                offset,
+                ..
+            })) => assert_eq!(offset, Operand2::Imm(4)),
+            other => panic!("unexpected decode: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_data_transfer_register_offset_keeps_barrel_shifter_semantics() {
+        let raw = 0xE7C0_1004;
+        let class = classify_arm(raw);
+        let instruction = decode(0x0800_0000, raw, class);
+        match instruction.kind {
+            InstructionKind::Arm(ArmOp::Extended(ArmExtended::SingleDataTransfer {
+                offset,
+                ..
+            })) => assert!(matches!(
+                offset,
+                Operand2::Reg {
+                    rm: 4,
+                    shift: 0,
+                    shift_kind: 0,
+                    by_register: false,
+                    ..
+                }
+            )),
+            other => panic!("unexpected decode: {other:?}"),
         }
     }
 }

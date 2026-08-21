@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use gba_recompiler::{analyze, discover_functions, generate, Mode, ROM_BASE};
+use gba_recompiler::{analyze, discover_functions, Mode, ROM_BASE};
 use gba_runtime::{
     ArchitecturalState, GeneratedBlockExit, GeneratedExecutionExit, Runtime, RuntimeContract,
     CPSR_C, CPSR_N, CPSR_V, CPSR_Z,
@@ -124,7 +124,10 @@ impl ReferenceState {
 
     fn execute_linear(&mut self, words: &[u32]) {
         for &word in words {
-            assert!(self.apply_arm(word).is_none(), "linear fixture must not branch");
+            assert!(
+                self.apply_arm(word).is_none(),
+                "linear fixture must not branch"
+            );
         }
         self.regs[15] = ROM_BASE + words.len() as u32 * 4;
     }
@@ -168,7 +171,9 @@ fn execute_linear_with_runtime(words: &[u32]) -> (Runtime, gba_runtime::Generate
                 let next = RuntimeContract::execute_arm_instruction(rt, words[index]);
                 rt.tick(1);
                 match next {
-                    Some((target, next_thumb)) => Ok(GeneratedBlockExit::continue_to(target, next_thumb)),
+                    Some((target, next_thumb)) => {
+                        Ok(GeneratedBlockExit::continue_to(target, next_thumb))
+                    }
                     None => {
                         let next_address = address.wrapping_add(4);
                         if index + 1 == words.len() {
@@ -192,8 +197,8 @@ fn generated_execution_matches_independent_reference_for_linear_arm_fixture() {
     let words = fixture_words(include_str!("fixtures/linear_arm.hex"));
     let program = analyze(&arm_rom(&words), ROM_BASE, Mode::Arm).expect("fixture analysis");
     let functions = discover_functions(&program);
-    let semantic = gba_recompiler::build_semantic_program(&program, &functions)
-        .expect("semantic fixture");
+    let semantic =
+        gba_recompiler::build_semantic_program(&program, &functions).expect("semantic fixture");
     let generated = gba_recompiler::generate_semantic(&program, &semantic, "fixture_entry");
 
     assert!(generated.source.contains("run_generated_contract"));
@@ -228,7 +233,9 @@ fn generated_execution_matches_memory_effects_in_rom_fixture() {
     let generated = gba_recompiler::generate_semantic(&program, &semantic, "memory_fixture");
 
     assert!(generated.source.contains("fn dispatch_block"));
-    assert!(generated.source.contains("rt.write32(address & !3, rt.read_reg(0));"));
+    assert!(generated
+        .source
+        .contains("rt.write32(address & !3, rt.read_reg(0));"));
     assert!(generated.source.contains("rt.read32(address)"));
     assert!(!generated.source.contains("execute_arm_instruction"));
     assert!(!generated.source.contains("execute_thumb_instruction"));
@@ -243,6 +250,10 @@ fn generated_execution_matches_memory_effects_in_rom_fixture() {
     assert!(result.state.cpsr & CPSR_Z != 0);
 
     for (&address, &expected) in &reference.memory {
-        assert_eq!(runtime.read8(address), expected, "memory mismatch at {address:#x}");
+        assert_eq!(
+            runtime.read8(address),
+            expected,
+            "memory mismatch at {address:#x}"
+        );
     }
 }

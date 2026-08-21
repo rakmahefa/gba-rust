@@ -8,15 +8,36 @@ pub mod ir;
 pub mod optimization;
 pub mod semantic_ir;
 
-pub use architecture::{add_with_carry, architectural_pc, condition_holds as architectural_condition_holds, exchange_target, link_address, rotate_unaligned_word, shift_immediate, shift_register, NzcvMask, ShiftResult, ShiftType};
+pub use architecture::{
+    add_with_carry, architectural_pc, condition_holds as architectural_condition_holds,
+    exchange_target, link_address, rotate_unaligned_word, shift_immediate, shift_register,
+    NzcvMask, ShiftResult, ShiftType,
+};
 pub use cfg::{analyze, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
 pub use codegen::{generate, generate_semantic, RustModule};
-pub use decoder::{decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbOp, ROM_BASE};
-pub use execution::{add_flags, branch_target, condition_holds, sub_flags, Nzcv, CPSR_C, CPSR_N, CPSR_T, CPSR_V, CPSR_Z, REG_COUNT, REG_LR, REG_PC, REG_SP};
-pub use function::{discover_functions, CallSite, CallTarget, Function, FunctionControlFlowGraph, FunctionId, FunctionKey, ReturnSite};
-pub use ir::{lower, IrControlEffect, IrFlags, IrInstruction, IrMemoryEffect, IrMemoryKind, IrMemoryWidth, IrOp, Value};
-pub use optimization::{optimize_semantic_program, OptimizationChange, OptimizationKind, OptimizationReport};
-pub use semantic_ir::{build_semantic_program, validate_semantic_program, FlagEffect, MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram, SemanticTerminator};
+pub use decoder::{
+    decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction,
+    InstructionKind, Mode, ThumbOp, ROM_BASE,
+};
+pub use execution::{
+    add_flags, branch_target, condition_holds, sub_flags, Nzcv, CPSR_C, CPSR_N, CPSR_T, CPSR_V,
+    CPSR_Z, REG_COUNT, REG_LR, REG_PC, REG_SP,
+};
+pub use function::{
+    discover_functions, CallSite, CallTarget, Function, FunctionControlFlowGraph, FunctionId,
+    FunctionKey, ReturnSite,
+};
+pub use ir::{
+    lower, IrControlEffect, IrFlags, IrInstruction, IrMemoryEffect, IrMemoryKind, IrMemoryWidth,
+    IrOp, Value,
+};
+pub use optimization::{
+    optimize_semantic_program, OptimizationChange, OptimizationKind, OptimizationReport,
+};
+pub use semantic_ir::{
+    build_semantic_program, validate_semantic_program, FlagEffect, MemoryEffect, MemoryWidth,
+    SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram, SemanticTerminator,
+};
 
 #[cfg(test)]
 mod tests {
@@ -35,7 +56,10 @@ mod tests {
         assert_eq!(semantic.functions.len(), 1);
         let (optimized, report) = optimize_semantic_program(&semantic);
         assert!(report.changed());
-        assert_eq!(optimized.functions[0].blocks[0].instructions.len(), semantic.functions[0].blocks[0].instructions.len());
+        assert_eq!(
+            optimized.functions[0].blocks[0].instructions.len(),
+            semantic.functions[0].blocks[0].instructions.len()
+        );
         let module = generate_semantic(&program, &optimized, "entry");
         assert!(module.source.contains("rt.enter_instruction"));
         assert!(module.source.contains("rt.mov(0"));
