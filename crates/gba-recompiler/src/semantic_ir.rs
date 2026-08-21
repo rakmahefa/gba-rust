@@ -518,12 +518,9 @@ mod tests {
     #[test]
     fn resolved_bx_lr_is_a_semantic_return_without_executable_successor() {
         let rom = arm_rom(&[
-            0xE59F_E004, // ldr lr, [pc, #4]
+            0xE59F_E000, // ldr lr, [pc]
             0xE12F_FF1E, // bx lr
-            0xE1A0_0000, // nop
-            0xE1A0_0000, // nop
-            0x0800_0010, // resolved LR target
-            0xE1A0_0000,
+            0x0800_0008, // resolved LR target / literal pool
         ]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
@@ -541,14 +538,9 @@ mod tests {
     #[test]
     fn resolved_indirect_branch_is_dynamic_without_executable_successor() {
         let rom = arm_rom(&[
-            0xE59F_3008, // ldr r3, [pc, #8]
+            0xE59F_3000, // ldr r3, [pc]
             0xE12F_FF13, // bx r3
-            0xE1A0_0000, // nop
-            0xE1A0_0000, // nop
-            0xE1A0_0000, // nop
-            0x0800_0014, // resolved r3 target
-            0xE1A0_0000,
-            0xE1A0_0000,
+            0x0800_0008, // resolved r3 target / literal pool
         ]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
