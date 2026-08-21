@@ -240,10 +240,7 @@ fn transfer_instruction(rom: &[u8], instruction: Instruction, mut state: Abstrac
         InstructionKind::Thumb(ThumbOp::SubImm { rd, rn, imm }) => {
             state.write(rd, sub_values(state.read(rn), AbstractValue::Constant(imm as u32)));
         }
-        InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::PcRelativeLoad {
-            rd,
-            word_offset,
-        })) => {
+        InstructionKind::Thumb(ThumbOp::LoadImm { rd, rn: 15, word_offset }) => {
             let address = aligned_pc(instruction.address, Mode::Thumb).wrapping_add(word_offset as u32 * 4);
             state.write(
                 rd,
@@ -251,6 +248,9 @@ fn transfer_instruction(rom: &[u8], instruction: Instruction, mut state: Abstrac
                     .map(AbstractValue::Constant)
                     .unwrap_or(AbstractValue::Unknown),
             );
+        }
+        InstructionKind::Thumb(ThumbOp::LoadImm { rd, .. }) => {
+            state.write(rd, AbstractValue::Unknown);
         }
         InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::Address {
             rd,
@@ -265,8 +265,6 @@ fn transfer_instruction(rom: &[u8], instruction: Instruction, mut state: Abstrac
                 ),
             );
         }
-        InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::PcRelativeLoad { .. }))
-        | InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::Address { use_sp: true, .. })) => {}
         InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::LoadStoreRegister {
             load: true, rd, ..
         }))
@@ -325,12 +323,10 @@ fn transfer_instruction(rom: &[u8], instruction: Instruction, mut state: Abstrac
             };
             state.write(rd, value);
         }
-        InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::HighRegister { op, rd, rs }))
-            if op == 0 => {
+        InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::HighRegister { op: 2, rd, rs })) => {
             state.write(rd, state.read(rs));
         }
-        InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::HighRegister { op, rd, .. }))
-            if op == 1 || op == 2 || op == 3 => {
+        InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::HighRegister { rd, .. })) => {
             state.write(rd, AbstractValue::Unknown);
         }
         _ => {}
@@ -732,11 +728,9 @@ mod tests {
         let target = ROM_BASE + 8;
         let bytes = arm_rom(&[0xE59F_0000, target, 0xE1A0_0000]);
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
-        assert!(program
-            .cfg
-            .blocks
-            .iter()
-            .any(|block| block.key == BlockKey { address: target, mode: Mode::Arm }));
+        assert!(program.cfg.blocks.iter().any(|block| {
+            block.key == BlockKey { address: target, mode: Mode::Arm }
+        }));
     }
 
     #[test]
@@ -746,11 +740,9 @@ mod tests {
         bytes.extend_from_slice(&target.to_le_bytes());
         bytes.extend_from_slice(&0x46C0u16.to_le_bytes());
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
-        assert!(program
-            .cfg
-            .blocks
-            .iter()
-            .any(|block| block.key == BlockKey { address: target, mode: Mode::Arm }));
+        assert!(program.cfg.blocks.iter().any(|block| {
+            block.key == BlockKey { address: target, mode: Mode::Arm }
+        }));
     }
 
     #[test]
