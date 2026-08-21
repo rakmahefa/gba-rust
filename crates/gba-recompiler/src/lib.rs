@@ -6,6 +6,7 @@ pub mod execution;
 pub mod function;
 pub mod ir;
 pub mod optimization;
+pub mod semantic_architecture;
 pub mod semantic_ir;
 
 pub use architecture::{
@@ -33,6 +34,10 @@ pub use ir::{
 };
 pub use optimization::{
     optimize_semantic_program, OptimizationChange, OptimizationKind, OptimizationReport,
+};
+pub use semantic_architecture::{
+    ArchitecturalBlock, ArchitecturalInstruction, ArchitecturalProgram, ControlEffect,
+    ContractError, FlagEffects, InstructionKey, MemoryAccess, MemoryEffect, MemoryWidth,
 };
 pub use semantic_ir::{
     build_semantic_program, validate_semantic_program, FlagEffect, MemoryEffect, MemoryWidth,
