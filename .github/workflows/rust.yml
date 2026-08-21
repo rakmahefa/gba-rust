@@ -93,3 +93,47 @@ jobs:
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets
+
+  diagnostics:
+    name: codegen diagnostics
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Capture check
+        shell: bash
+        run: |
+          cargo check --workspace --all-targets > /tmp/cargo-check.log 2>&1 || true
+
+      - name: Capture test
+        shell: bash
+        run: |
+          cargo test --workspace --all-targets > /tmp/cargo-test.log 2>&1 || true
+
+      - name: Capture rustfmt
+        shell: bash
+        run: |
+          cargo fmt --all -- --check > /tmp/rustfmt.log 2>&1 || true
+
+      - name: Capture clippy
+        shell: bash
+        run: |
+          cargo clippy --workspace --all-targets > /tmp/clippy.log 2>&1 || true
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: codegen-diagnostics
+          path: /tmp/*.log
