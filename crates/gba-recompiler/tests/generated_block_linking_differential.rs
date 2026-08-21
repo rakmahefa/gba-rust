@@ -3,33 +3,39 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use gba_recompiler::{analyze, build_semantic_program, discover_functions, generate_semantic, Mode, ROM_BASE};
+use gba_recompiler::{
+    analyze, build_semantic_program, discover_functions, generate_semantic, Mode, ROM_BASE,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ReferenceResult {
     r0: u32,
     r1: u32,
-    steps: u64,
+    blocks: u64,
+    cycles: u64,
     pc: u32,
 }
 
 fn reference_loop() -> ReferenceResult {
     let mut r0 = 0u32;
-    let mut steps = 0u64;
+    let mut blocks = 0u64;
+    let mut cycles = 0u64;
 
-    steps += 1; // mov r0, #0
+    blocks += 1; // block 0: mov r0, #0
+    cycles += 1;
     for _ in 0..3 {
-        steps += 1; // add r0, r0, #1
+        blocks += 1; // block 1: add/cmp/bne
+        cycles += 3;
         r0 = r0.wrapping_add(1);
-        steps += 1; // cmp r0, #3
-        steps += 1; // bne loop
     }
-    steps += 1; // mov r1, #42
+    blocks += 1; // block 2: mov r1, #42
+    cycles += 1;
 
     ReferenceResult {
         r0,
         r1: 42,
-        steps,
+        blocks,
+        cycles,
         pc: ROM_BASE + 20,
     }
 }
@@ -54,7 +60,7 @@ fn compile_and_run_generated(source: &str, assertions: &str) {
     fs::write(
         &wrapper_path,
         format!(
-            "mod generated {{ include!(r#\"{}\"#); }}\nfn main() {{ let mut rt = gba_runtime::Runtime::new(); let result = generated::entry(&mut rt).expect(\"generated execution\"); {} }}\n",
+            "mod generated {{ include!(r#\"{}\"#); }}\nfn main() {{ let mut rt = gba_runtime::Runtime::new(); let result = generated::entry_with_limit(&mut rt, 100).expect(\"generated execution\"); {} }}\n",
             generated_path.display(),
             assertions
         ),
@@ -114,8 +120,8 @@ fn generated_arm_loop_matches_independent_reference_and_dispatches_backwards_edg
             "assert_eq!(result.state.registers[0], {}); assert_eq!(result.state.registers[1], {}); assert_eq!(result.steps, {}); assert_eq!(result.state.cycles, {}); assert_eq!(result.state.pc(), {:#010x}); assert_eq!(result.exit, gba_runtime::GeneratedExecutionExit::Halted {{ address: {:#010x}, thumb: false }});",
             reference.r0,
             reference.r1,
-            reference.steps,
-            reference.steps,
+            reference.blocks,
+            reference.cycles,
             reference.pc,
             reference.pc,
         ),

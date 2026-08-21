@@ -206,25 +206,25 @@ impl RuntimeContract for Runtime {
 
             self.cpu.set_thumb(next.thumb);
             self.cpu.r[REG_PC] = next.address;
-            let before_dispatch_cycles = self.cycles;
             let exit = dispatch(self, next.address, next.thumb)?;
-            let executed = self.cycles.wrapping_sub(before_dispatch_cycles).max(1);
-            steps = steps.wrapping_add(executed);
+            steps = steps.saturating_add(1);
 
             match exit {
                 GeneratedBlockExit::Continue { address, thumb } => {
-                    let target = GeneratedBlockKey::new(address, thumb);
-                    if target.address == address || GeneratedBlockKey::is_aligned(address, thumb) {
-                        next = target;
-                    } else {
+                    if !GeneratedBlockKey::is_aligned(address, thumb) {
                         return Err(GENERATED_TARGET_MISALIGNED);
                     }
+                    let target = GeneratedBlockKey::new(address, thumb);
+                    if !is_linked(target.address, target.thumb) {
+                        return Err(GENERATED_TARGET_OUTSIDE_CFG);
+                    }
+                    next = target;
                 }
                 GeneratedBlockExit::Return { address, thumb } => {
-                    let target = GeneratedBlockKey::new(address, thumb);
-                    if target.address != address && !GeneratedBlockKey::is_aligned(address, thumb) {
+                    if !GeneratedBlockKey::is_aligned(address, thumb) {
                         return Err(GENERATED_TARGET_MISALIGNED);
                     }
+                    let target = GeneratedBlockKey::new(address, thumb);
                     self.cpu.set_thumb(target.thumb);
                     self.cpu.r[REG_PC] = target.address;
                     if is_linked(target.address, target.thumb) {
@@ -241,10 +241,10 @@ impl RuntimeContract for Runtime {
                     }
                 }
                 GeneratedBlockExit::Halt { address, thumb } => {
-                    let target = GeneratedBlockKey::new(address, thumb);
-                    if target.address != address && !GeneratedBlockKey::is_aligned(address, thumb) {
+                    if !GeneratedBlockKey::is_aligned(address, thumb) {
                         return Err(GENERATED_TARGET_MISALIGNED);
                     }
+                    let target = GeneratedBlockKey::new(address, thumb);
                     self.cpu.set_thumb(target.thumb);
                     self.cpu.r[REG_PC] = target.address;
                     return Ok(GeneratedExecutionResult {

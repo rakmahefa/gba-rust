@@ -116,7 +116,7 @@ fn specialized_arm_arithmetic_matches_reference() {
         actual[3] as u32 & (CPSR_N | CPSR_Z | CPSR_C | CPSR_V),
         CPSR_C
     );
-    assert_eq!(actual[4], 4);
+    assert_eq!(actual[4], 1);
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn specialized_arm_memory_and_multiply_match_reference() {
     assert_eq!(actual[0], 42 * 42);
     assert_eq!(actual[1], 42);
     assert_eq!(actual[2], 42);
-    assert_eq!(actual[4], 4);
+    assert_eq!(actual[4], 1);
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn specialized_thumb_alu_matches_reference() {
     assert_eq!(actual[0] as u32, !7u32);
     assert_eq!(actual[1], 7);
     assert_ne!(actual[3] as u32 & CPSR_N, 0);
-    assert_eq!(actual[4], 7);
+    assert_eq!(actual[4], 1);
 }
 
 #[test]
