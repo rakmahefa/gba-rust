@@ -725,8 +725,13 @@ mod tests {
 
     #[test]
     fn resolves_arm_bx_from_pc_relative_literal() {
-        let target = ROM_BASE + 8;
-        let bytes = arm_rom(&[0xE59F_0000, target, 0xE1A0_0000]);
+        let target = ROM_BASE + 12;
+        let bytes = arm_rom(&[
+            0xE59F_0000,
+            0xE1A0_0000,
+            target,
+            0xE1A0_0000,
+        ]);
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
         assert!(program.cfg.blocks.iter().any(|block| {
             block.key == BlockKey { address: target, mode: Mode::Arm }
@@ -738,7 +743,7 @@ mod tests {
         let target = ROM_BASE + 8;
         let mut bytes = vec![0x00, 0x48, 0x00, 0x47];
         bytes.extend_from_slice(&target.to_le_bytes());
-        bytes.extend_from_slice(&0x46C0u16.to_le_bytes());
+        bytes.extend_from_slice(&0xE1A0_0000u32.to_le_bytes());
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
         assert!(program.cfg.blocks.iter().any(|block| {
             block.key == BlockKey { address: target, mode: Mode::Arm }
