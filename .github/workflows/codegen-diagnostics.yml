@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - refactor/modular-codegen
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -29,25 +32,21 @@ jobs:
         run: |
           set +e
           cargo check --workspace --all-targets > /tmp/cargo-check.log 2>&1
-          echo $? > /tmp/cargo-check.exit
       - name: Capture cargo test
         shell: bash
         run: |
           set +e
           cargo test --workspace --all-targets > /tmp/cargo-test.log 2>&1
-          echo $? > /tmp/cargo-test.exit
       - name: Capture rustfmt
         shell: bash
         run: |
           set +e
           cargo fmt --all -- --check > /tmp/rustfmt.log 2>&1
-          echo $? > /tmp/rustfmt.exit
       - name: Capture clippy
         shell: bash
         run: |
           set +e
           cargo clippy --workspace --all-targets > /tmp/clippy.log 2>&1
-          echo $? > /tmp/clippy.exit
       - name: Upload diagnostics
         uses: actions/upload-artifact@v4
         with:
