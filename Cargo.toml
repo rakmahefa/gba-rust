@@ -4,6 +4,7 @@ members = [
     "crates/gba-runtime",
     "crates/gba-recompiler",
     "crates/gba-cli",
+    "crates/gba-bus",
 ]
 
 [workspace.package]
