@@ -89,7 +89,7 @@ fn generated_return_to_linked_block_is_resumed_instead_of_terminating() {
                 }
                 (0x0800_0004, false) => {
                     rt.write_reg(0, rt.read_reg(0) + 1);
-                    Ok(GeneratedBlockExit::return_to(0x0200_0001, true))
+                    Ok(GeneratedBlockExit::return_to(0x0200_0000, true))
                 }
                 _ => Err(gba_runtime::GENERATED_TARGET_OUTSIDE_CFG),
             },

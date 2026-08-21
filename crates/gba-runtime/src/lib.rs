@@ -12,8 +12,9 @@ pub use arm7tdmi::{
     shift_immediate, shift_register, ShiftKind, ShiftResult,
 };
 pub use contract::{
-    ArchitecturalState, GeneratedBlockExit, GeneratedExecutionExit, GeneratedExecutionResult,
-    RuntimeContract, GENERATED_TARGET_OUTSIDE_CFG, RUNTIME_CONTRACT_VERSION,
+    ArchitecturalState, GeneratedBlockExit, GeneratedBlockKey, GeneratedExecutionExit,
+    GeneratedExecutionResult, RuntimeContract, GENERATED_TARGET_MISALIGNED,
+    GENERATED_TARGET_OUTSIDE_CFG, RUNTIME_CONTRACT_VERSION,
 };
 
 pub const WIDTH: usize = 240;
