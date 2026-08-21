@@ -1,8 +1,10 @@
 use crate::{Runtime, REG_PC};
 
-pub const RUNTIME_CONTRACT_VERSION: u32 = 4;
+pub const RUNTIME_CONTRACT_VERSION: u32 = 5;
 pub const GENERATED_TARGET_OUTSIDE_CFG: &str =
-    "generated target is outside the statically linked CFG";
+    "generated direct target is outside the statically linked CFG";
+pub const GENERATED_TARGET_DYNAMIC_UNRESOLVED: &str =
+    "generated indirect target is unresolved or outside the statically linked CFG";
 pub const GENERATED_TARGET_MISALIGNED: &str =
     "generated target cannot be represented by the requested execution mode";
 
@@ -18,15 +20,12 @@ impl GeneratedBlockKey {
             thumb,
         }
     }
-
     pub const fn align(address: u32, thumb: bool) -> u32 {
         address & if thumb { !1 } else { !3 }
     }
-
     pub const fn tuple(self) -> (u32, bool) {
         (self.address, self.thumb)
     }
-
     pub const fn is_aligned(address: u32, thumb: bool) -> bool {
         Self::align(address, thumb) == address
     }
@@ -35,12 +34,16 @@ impl GeneratedBlockKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedBlockExit {
     Continue { address: u32, thumb: bool },
+    Dynamic { address: u32, thumb: bool },
     Return { address: u32, thumb: bool },
     Halt { address: u32, thumb: bool },
 }
 impl GeneratedBlockExit {
     pub const fn continue_to(address: u32, thumb: bool) -> Self {
         Self::Continue { address, thumb }
+    }
+    pub const fn dynamic_to(address: u32, thumb: bool) -> Self {
+        Self::Dynamic { address, thumb }
     }
     pub const fn return_to(address: u32, thumb: bool) -> Self {
         Self::Return { address, thumb }
@@ -51,6 +54,7 @@ impl GeneratedBlockExit {
     pub const fn target(self) -> (u32, bool) {
         match self {
             Self::Continue { address, thumb }
+            | Self::Dynamic { address, thumb }
             | Self::Return { address, thumb }
             | Self::Halt { address, thumb } => (address, thumb),
         }
@@ -209,22 +213,30 @@ impl RuntimeContract for Runtime {
             let exit = dispatch(self, next.address, next.thumb)?;
             steps = steps.saturating_add(1);
 
+            let checked = |address: u32, thumb: bool| -> Result<GeneratedBlockKey, &'static str> {
+                if !GeneratedBlockKey::is_aligned(address, thumb) {
+                    return Err(GENERATED_TARGET_MISALIGNED);
+                }
+                Ok(GeneratedBlockKey::new(address, thumb))
+            };
+
             match exit {
                 GeneratedBlockExit::Continue { address, thumb } => {
-                    if !GeneratedBlockKey::is_aligned(address, thumb) {
-                        return Err(GENERATED_TARGET_MISALIGNED);
-                    }
-                    let target = GeneratedBlockKey::new(address, thumb);
+                    let target = checked(address, thumb)?;
                     if !is_linked(target.address, target.thumb) {
                         return Err(GENERATED_TARGET_OUTSIDE_CFG);
                     }
                     next = target;
                 }
-                GeneratedBlockExit::Return { address, thumb } => {
-                    if !GeneratedBlockKey::is_aligned(address, thumb) {
-                        return Err(GENERATED_TARGET_MISALIGNED);
+                GeneratedBlockExit::Dynamic { address, thumb } => {
+                    let target = checked(address, thumb)?;
+                    if !is_linked(target.address, target.thumb) {
+                        return Err(GENERATED_TARGET_DYNAMIC_UNRESOLVED);
                     }
-                    let target = GeneratedBlockKey::new(address, thumb);
+                    next = target;
+                }
+                GeneratedBlockExit::Return { address, thumb } => {
+                    let target = checked(address, thumb)?;
                     self.cpu.set_thumb(target.thumb);
                     self.cpu.r[REG_PC] = target.address;
                     if is_linked(target.address, target.thumb) {
@@ -241,10 +253,7 @@ impl RuntimeContract for Runtime {
                     }
                 }
                 GeneratedBlockExit::Halt { address, thumb } => {
-                    if !GeneratedBlockKey::is_aligned(address, thumb) {
-                        return Err(GENERATED_TARGET_MISALIGNED);
-                    }
-                    let target = GeneratedBlockKey::new(address, thumb);
+                    let target = checked(address, thumb)?;
                     self.cpu.set_thumb(target.thumb);
                     self.cpu.r[REG_PC] = target.address;
                     return Ok(GeneratedExecutionResult {

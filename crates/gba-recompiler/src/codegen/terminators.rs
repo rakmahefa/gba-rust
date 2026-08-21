@@ -57,13 +57,17 @@ pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Progra
             let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg(14)); return Ok(GeneratedBlockExit::return_to(target, thumb));");
         }
         SemanticTerminator::IndirectBranch { register } => {
-            let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::continue_to(target, thumb));");
+            let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));");
         }
         SemanticTerminator::IndirectCall { register, .. } => {
-            let _ = writeln!(out, "    rt.link_from_instruction({address:#010x}, {size}, {}); let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::continue_to(target, thumb));", mode_bool(block.mode));
+            let _ = writeln!(out, "    rt.link_from_instruction({address:#010x}, {size}, {}); let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));", mode_bool(block.mode));
         }
-        SemanticTerminator::Branch { condition, target } => emit_direct_terminator(out, block, program, target, condition, false),
-        SemanticTerminator::Call { condition, target } => emit_direct_terminator(out, block, program, target, condition, true),
+        SemanticTerminator::Branch { condition, target } => {
+            emit_direct_terminator(out, block, program, target, condition, false)
+        }
+        SemanticTerminator::Call { condition, target } => {
+            emit_direct_terminator(out, block, program, target, condition, true)
+        }
         SemanticTerminator::Fallthrough => {
             if let Some(successor) = block.successors.first().and_then(|id| program.cfg.blocks.get(id.0)) {
                 let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({:#010x}, {}));", successor.key.address, mode_bool(successor.key.mode));
