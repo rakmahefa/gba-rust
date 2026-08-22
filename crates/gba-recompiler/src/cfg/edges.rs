@@ -1,4 +1,7 @@
-use crate::decoder::{ArmExtended, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbExtended, ThumbOp};
+use crate::decoder::{
+    ArmExtended, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode,
+    ThumbExtended, ThumbOp,
+};
 
 use super::abstract_state::{resolved_exchange_target, AbstractState};
 use super::model::BlockKey;
