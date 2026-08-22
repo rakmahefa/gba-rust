@@ -15,6 +15,8 @@ const PALETTE_LEN: usize = 0x400;
 const VRAM_LEN: usize = 0x18000;
 const OAM_LEN: usize = 0x400;
 const KEYINPUT_DEFAULT: u16 = 0x03ff;
+const KEYINPUT_HIGH: u32 = KEYINPUT + 1;
+const WAITCNT_HIGH: u32 = WAITCNT + 1;
 
 #[derive(Debug, Default)]
 pub struct Runtime {
@@ -269,13 +271,13 @@ impl Runtime {
             0x0400_0004 => self.dispstat as u8,
             0x0400_0005 => (self.dispstat >> 8) as u8,
             KEYINPUT => self.keyinput as u8,
-            KEYINPUT + 1 => (self.keyinput >> 8) as u8,
+            KEYINPUT_HIGH => (self.keyinput >> 8) as u8,
             IE => self.interrupts.ie as u8,
-            IE + 1 => (self.interrupts.ie >> 8) as u8,
+            0x0400_0201 => (self.interrupts.ie >> 8) as u8,
             IF => self.interrupts.iflags as u8,
-            IF + 1 => (self.interrupts.iflags >> 8) as u8,
+            0x0400_0203 => (self.interrupts.iflags >> 8) as u8,
             WAITCNT => self.waitcnt as u8,
-            WAITCNT + 1 => (self.waitcnt >> 8) as u8,
+            WAITCNT_HIGH => (self.waitcnt >> 8) as u8,
             IME => u8::from(self.interrupts.ime),
             0x0400_0300 => self.postflg,
             HALTCNT => 0,
@@ -340,13 +342,18 @@ impl Runtime {
         match address {
             0x0400_0004 => self.dispstat = (self.dispstat & 0xff00) | value as u16,
             0x0400_0005 => self.dispstat = (self.dispstat & 0x00ff) | ((value as u16) << 8),
-            KEYINPUT | (KEYINPUT + 1) => {}
+            KEYINPUT => {}
+            KEYINPUT_HIGH => {}
             IE => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
-            IE + 1 => self.interrupts.ie = (self.interrupts.ie & 0x00ff) | ((value as u16) << 8),
+            0x0400_0201 => {
+                self.interrupts.ie = (self.interrupts.ie & 0x00ff) | ((value as u16) << 8)
+            }
             IF => self.interrupts.acknowledge(value as u16),
-            IF + 1 => self.interrupts.acknowledge((value as u16) << 8),
+            0x0400_0203 => self.interrupts.acknowledge((value as u16) << 8),
             WAITCNT => self.waitcnt = (self.waitcnt & 0xff00) | value as u16,
-            WAITCNT + 1 => self.waitcnt = (self.waitcnt & 0x00ff) | ((value as u16) << 8),
+            WAITCNT_HIGH => {
+                self.waitcnt = (self.waitcnt & 0x00ff) | ((value as u16) << 8)
+            }
             IME => {
                 self.interrupts.ime = value & 1 != 0;
                 if self.interrupts.ime {
@@ -580,7 +587,11 @@ mod tests {
         let mut runtime = Runtime::new();
         let result = runtime.run_generated(0x0800_0000, false, Some(10_000), |rt, address, thumb| {
             rt.tick(1);
-            if rt.cycles == 10_000 { Err("done") } else { Ok((address, thumb)) }
+            if rt.cycles == 10_000 {
+                Err("done")
+            } else {
+                Ok((address, thumb))
+            }
         });
         assert_eq!(result, Err("done"));
         assert_eq!(runtime.cycles, 10_000);
