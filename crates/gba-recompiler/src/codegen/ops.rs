@@ -8,9 +8,9 @@ use super::common::{emit_cmp_sub, emit_flags_from_logic, value_expr};
 use super::operands::arm_operand2;
 use super::thumb::emit_thumb_extended;
 
-fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
+fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) -> bool {
     match op {
-        IrOp::Nop => {}
+        IrOp::Nop => true,
         IrOp::Mov {
             dst,
             src,
@@ -25,6 +25,7 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
             if *set_flags {
                 emit_flags_from_logic(out, &rhs, &carry);
             }
+            true
         }
         IrOp::Add {
             dst,
@@ -41,6 +42,7 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
                 out,
                 "    rt.add({dst}, rt.read_reg({lhs}), {rhs}, {set_flags});"
             );
+            true
         }
         IrOp::Sub {
             dst,
@@ -57,6 +59,7 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
                 out,
                 "    rt.sub({dst}, rt.read_reg({lhs}), {rhs}, {set_flags});"
             );
+            true
         }
         IrOp::Cmp { lhs, rhs } => {
             let rhs = if mode == Mode::Arm {
@@ -65,6 +68,7 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
                 value_expr(rhs)
             };
             emit_cmp_sub(out, &format!("rt.read_reg({lhs})"), &rhs);
+            true
         }
         IrOp::Load {
             dst,
@@ -86,6 +90,7 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
             } else {
                 let _ = writeln!(out, "    rt.write_reg({dst}, rt.read32(address));");
             }
+            true
         }
         IrOp::Store {
             src,
@@ -102,15 +107,23 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
             } else {
                 let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({src}));");
             }
+            true
         }
-        IrOp::Branch { .. } | IrOp::BranchExchange { .. } => {}
-        IrOp::ArmExtended { op } => emit_arm_extended(out, *op),
-        IrOp::ThumbExtended { op } => emit_thumb_extended(out, *op),
+        IrOp::Branch { .. } | IrOp::BranchExchange { .. } => true,
+        IrOp::ArmExtended { op } => {
+            emit_arm_extended(out, *op);
+            true
+        }
+        IrOp::ThumbExtended { op } => {
+            emit_thumb_extended(out, *op);
+            true
+        }
         IrOp::Unknown { address, raw, mode } => {
             let _ = writeln!(
                 out,
                 "    return Err(format!(\"unsupported instruction in specialized codegen: pc={{:#010x}} mode={{:?}} raw={{:#010x}}\", {address:#010x}, {mode:?}, {raw:#010x}).leak());"
             );
+            false
         }
     }
 }
@@ -133,20 +146,26 @@ pub fn emit_op(out: &mut String, ins_address: u32, ins_raw: u32, mode: Mode, op:
         matches!(mode, Mode::Thumb)
     );
     if !is_software_interrupt(op) {
-        if mode == Mode::Arm {
+        let emitted = if mode == Mode::Arm {
             let condition = (ins_raw >> 28) & 0xf;
             if condition != 0xe {
                 let _ = writeln!(out, "    if rt.condition_code({condition}) {{");
-                emit_inner_op(out, ins_raw, mode, op);
+                let emitted = emit_inner_op(out, ins_raw, mode, op);
                 let _ = writeln!(out, "    }}");
+                emitted
             } else {
-                emit_inner_op(out, ins_raw, mode, op);
+                emit_inner_op(out, ins_raw, mode, op)
             }
         } else {
-            emit_inner_op(out, ins_raw, mode, op);
+            emit_inner_op(out, ins_raw, mode, op)
+        };
+
+        if emitted {
+            let _ = writeln!(out, "    rt.tick(1);");
         }
+    } else {
+        let _ = writeln!(out, "    rt.tick(1);");
     }
-    let _ = writeln!(out, "    rt.tick(1);");
 }
 
 #[cfg(test)]
@@ -209,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_instruction_emits_structured_diagnostic() {
+    fn unknown_instruction_emits_structured_diagnostic_without_unreachable_tick() {
         let mut out = String::new();
         emit_op(
             &mut out,
@@ -226,6 +245,6 @@ mod tests {
         assert!(out.contains("0x08001234"));
         assert!(out.contains("0xe7ffff00"));
         assert!(out.contains("mode=Arm"));
-        assert!(out.contains("rt.tick(1)"));
+        assert_eq!(out.matches("rt.tick(1);").count(), 0);
     }
 }
