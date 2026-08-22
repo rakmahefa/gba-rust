@@ -7,7 +7,7 @@ use super::common::{emit_cmp_add, emit_cmp_sub, emit_flags_from_logic};
 pub fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
     match op {
         ThumbExtended::MoveShifted { kind, rd, rs, offset } => {
-            let shift_kind = match kind { 0 => "ShiftKind::Lsl", 1 => "ShiftKind::Lsr", _ => "ShiftKind::Asr" };
+            let shift_kind = match kind { 0 => "gba_runtime::ShiftKind::Lsl", 1 => "gba_runtime::ShiftKind::Lsr", _ => "gba_runtime::ShiftKind::Asr" };
             let _ = writeln!(out, "    let shifted = rt.shift(rt.read_reg({rs}), {shift_kind}, {offset}, false); rt.write_reg({rd}, shifted.value);");
             emit_flags_from_logic(out, "shifted.value", "Some(shifted.carry)");
         }
@@ -35,7 +35,7 @@ pub fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
                 ThumbAluOp::Cmn => emit_cmp_add(out, &lhs, &rhs),
                 ThumbAluOp::Tst => { let _ = writeln!(out, "    let value = {lhs} & {rhs};"); emit_flags_from_logic(out, "value", "None"); }
                 ThumbAluOp::Lsl | ThumbAluOp::Lsr | ThumbAluOp::Asr | ThumbAluOp::Ror => {
-                    let kind = match op { ThumbAluOp::Lsl => "ShiftKind::Lsl", ThumbAluOp::Lsr => "ShiftKind::Lsr", ThumbAluOp::Asr => "ShiftKind::Asr", ThumbAluOp::Ror => "ShiftKind::Ror", _ => unreachable!() };
+                    let kind = match op { ThumbAluOp::Lsl => "gba_runtime::ShiftKind::Lsl", ThumbAluOp::Lsr => "gba_runtime::ShiftKind::Lsr", ThumbAluOp::Asr => "gba_runtime::ShiftKind::Asr", ThumbAluOp::Ror => "gba_runtime::ShiftKind::Ror", _ => unreachable!() };
                     let _ = writeln!(out, "    let shifted = rt.shift({lhs}, {kind}, ({rhs} & 0xff) as u8, true); rt.write_reg({rd}, shifted.value);");
                     emit_flags_from_logic(out, "shifted.value", "Some(shifted.carry)");
                 }
