@@ -27,6 +27,15 @@ impl Runtime {
         BiosSwi::from_number(number).map(|swi| self.bios_swi(swi))
     }
 
+    pub fn execute_bios_swi_comment(
+        &mut self,
+        comment: u32,
+        thumb: bool,
+    ) -> Result<BiosResult, &'static str> {
+        self.bios_swi_number(comment, thumb)
+            .ok_or("generated BIOS SWI number is not implemented")
+    }
+
     pub fn request_interrupt(&mut self, mask: u16) {
         self.interrupts.request(mask);
         self.wake_from_interrupt(mask);
