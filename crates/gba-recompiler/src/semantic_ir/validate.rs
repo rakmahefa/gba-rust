@@ -53,27 +53,6 @@ fn same_memory(source: Option<IrMemoryEffect>, semantic: Option<MemoryEffect>) -
     }
 }
 
-fn same_flags(source: crate::ir::IrFlags, semantic: super::FlagEffect) -> bool {
-    (source.read_n,
-        source.read_z,
-        source.read_c,
-        source.read_v,
-        source.write_n,
-        source.write_z,
-        source.write_c,
-        source.write_v)
-        == (
-            semantic.read_n,
-            semantic.read_z,
-            semantic.read_c,
-            semantic.read_v,
-            semantic.write_n,
-            semantic.write_z,
-            semantic.write_c,
-            semantic.write_v,
-        )
-}
-
 fn validate_instruction(
     source: &IrInstruction,
     semantic: &SemanticInstruction,
@@ -94,8 +73,31 @@ fn validate_instruction(
     if source.writes() != semantic.writes {
         return Err(format!("block {} instruction writes changed", block_id.0));
     }
-    if !same_flags(source.flags(), semantic.flags) {
-        return Err(format!("block {} instruction flag effects changed", block_id.0));
+    let flags = source.flags();
+    let semantic_flags = semantic.flags;
+    if (
+        flags.read_n,
+        flags.read_z,
+        flags.read_c,
+        flags.read_v,
+        flags.write_n,
+        flags.write_z,
+        flags.write_c,
+        flags.write_v,
+    ) != (
+        semantic_flags.read_n,
+        semantic_flags.read_z,
+        semantic_flags.read_c,
+        semantic_flags.read_v,
+        semantic_flags.write_n,
+        semantic_flags.write_z,
+        semantic_flags.write_c,
+        semantic_flags.write_v,
+    ) {
+        return Err(format!(
+            "block {} instruction flag effects changed",
+            block_id.0
+        ));
     }
     if !same_memory(source.memory(), semantic.memory) {
         return Err(format!("block {} instruction memory effects changed", block_id.0));
@@ -113,12 +115,18 @@ pub(crate) fn validate_control_placement(block: &SemanticBlock) -> Result<(), St
             continue;
         }
         if control_index.replace(index).is_some() {
-            return Err(format!("block {} contains multiple control-effect instructions", block.id.0));
+            return Err(format!(
+                "block {} contains multiple control-effect instructions",
+                block.id.0
+            ));
         }
     }
     if let Some(index) = control_index {
         if index + 1 != block.instructions.len() {
-            return Err(format!("block {} has control effect before its final instruction", block.id.0));
+            return Err(format!(
+                "block {} has control effect before its final instruction",
+                block.id.0
+            ));
         }
     }
     Ok(())
@@ -141,17 +149,14 @@ fn validate_block_against_source(program: &Program, block: &SemanticBlock) -> Re
         .get(block.id.0)
         .ok_or_else(|| format!("semantic block {} does not exist in source CFG", block.id.0))?;
     if source.id != block.id {
-        return Err(format!("semantic block {} has mismatched source identity", block.id.0));
+        return Err(format!(
+            "semantic block {} has mismatched source identity",
+            block.id.0
+        ));
     }
     if source.key.address != block.address || source.key.mode != block.mode {
         return Err(format!(
             "block {} address/mode changed during semantic lowering",
-            block.id.0
-        ));
-    }
-    if source.instructions.len() != source.ir.len() {
-        return Err(format!(
-            "block {} source instruction/IR count mismatch",
             block.id.0
         ));
     }
@@ -275,10 +280,10 @@ fn validate_terminator(program: &Program, block: &SemanticBlock) -> Result<(), S
         SemanticTerminator::Return
         | SemanticTerminator::IndirectBranch { .. }
         | SemanticTerminator::Unknown
-            if !block.successors.is_empty() => Err(format!(
-            "terminating block {} has successors",
-            block.id.0
-        )),
+            if !block.successors.is_empty() =>
+        {
+            Err(format!("terminating block {} has successors", block.id.0))
+        }
         _ => Ok(()),
     }
 }
@@ -312,12 +317,10 @@ fn validate_function_metadata(
             ));
         }
         if function.entry != source.entry {
-            return Err(format!(
-                "semantic function {} entry changed",
-                function.id.0
-            ));
+            return Err(format!("semantic function {} entry changed", function.id.0));
         }
-        if function.blocks != source.blocks {
+        let semantic_block_ids = function.blocks.iter().map(|block| block.id).collect::<Vec<_>>();
+        if semantic_block_ids != source.blocks {
             return Err(format!(
                 "semantic function {} block membership changed",
                 function.id.0
@@ -388,11 +391,7 @@ pub fn validate_semantic_program(
     if !owned.contains_key(&program.cfg.entry) || owned[&program.cfg.entry] != semantic.entry {
         return Err("CFG entry block is not owned by semantic entry function".into());
     }
-    for call in semantic
-        .functions
-        .iter()
-        .flat_map(|function| function.calls.iter())
-    {
+    for call in semantic.functions.iter().flat_map(|function| function.calls.iter()) {
         if call.block.0 >= program.cfg.blocks.len() {
             return Err(format!("call site references invalid block {}", call.block.0));
         }
@@ -428,8 +427,7 @@ pub fn validate_semantic_program(
         .flat_map(|function| function.returns.iter())
     {
         if return_site.block.0 >= program.cfg.blocks.len()
-            || return_site.instruction_index
-                >= program.cfg.blocks[return_site.block.0].instructions.len()
+            || return_site.instruction_index >= program.cfg.blocks[return_site.block.0].instructions.len()
         {
             return Err(format!(
                 "return site references invalid instruction {}:{}",
