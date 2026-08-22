@@ -188,7 +188,8 @@ pub fn execute_swi(
                 ewram.fill(0);
             }
             if flags & 2 != 0 {
-                iwram[..0x7e00.min(iwram.len())].fill(0);
+                let reset_len = 0x7e00.min(iwram.len());
+                iwram[..reset_len].fill(0);
             }
             if flags & 4 != 0 {
                 palette.fill(0);
