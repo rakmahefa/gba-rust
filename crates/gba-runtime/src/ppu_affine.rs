@@ -151,6 +151,7 @@ impl AffineRegs {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_affine_bg(
     framebuffer: &mut [u32],
     row: usize,
@@ -198,6 +199,7 @@ fn render_affine_bg(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_text_bg(
     framebuffer: &mut [u32],
     row: usize,
@@ -348,7 +350,7 @@ mod tests {
         put_u16(&mut io, BG2PD, 0x0100);
         palette[2] = 0x1f;
         vram[0] = 1;
-        vram[0x4000] = 1;
+        vram[64] = 1;
         ppu.render_affine_mode_scanline(BG2_ENABLE | 1, 0, &vram, &palette, &io);
         assert_eq!(ppu.framebuffer[0], 0xffff_0000);
     }
@@ -366,7 +368,7 @@ mod tests {
         put_u16(&mut io, BG2PD, 0x0100);
         palette[2] = 0x1f;
         vram[1] = 1;
-        vram[0x4000 + 64] = 1;
+        vram[128] = 1;
         ppu.render_affine_mode_scanline(BG2_ENABLE | 1, 0, &vram, &palette, &io);
         assert_eq!(ppu.framebuffer[8], 0xffff_0000);
     }
