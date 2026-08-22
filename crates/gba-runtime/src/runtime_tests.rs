@@ -175,13 +175,66 @@ fn halt_and_stop_mmio_change_runtime_power_state() {
 #[test]
 fn bios_swi_updates_runtime_power_and_memory() {
     let mut runtime = Runtime::new();
+    runtime.enter_instruction(0x0800_0100, false);
     runtime.iwram[0x0100] = 0xaa;
     runtime.cpu.r[0] = 2;
     let result = runtime.bios_swi(BiosSwi::RegisterRamReset);
     assert_eq!(result, BiosResult::RETURNED);
     assert_eq!(runtime.iwram[0x0100], 0);
+    assert_eq!(runtime.mode(), CpuMode::System);
+    assert_eq!(runtime.read_reg(REG_PC), 0x0800_0104);
+
+    runtime.enter_instruction(0x0800_0200, false);
     runtime.bios_swi(BiosSwi::Halt);
     assert_eq!(runtime.power, PowerState::Halted);
+    assert_eq!(runtime.mode(), CpuMode::Supervisor);
+    assert_eq!(runtime.read_reg(REG_PC), 0x08);
+    assert_eq!(runtime.cpu.spsr(), Some(CpuMode::System as u32));
+}
+
+#[test]
+fn thumb_bios_swi_restores_thumb_state_and_next_instruction() {
+    let mut runtime = Runtime::new();
+    runtime.enter_instruction(0x0800_0100, true);
+    let result = runtime.bios_swi(BiosSwi::RegisterRamReset);
+    assert_eq!(result, BiosResult::RETURNED);
+    assert_eq!(runtime.mode(), CpuMode::System);
+    assert!(runtime.cpu.thumb);
+    assert_eq!(runtime.read_reg(REG_PC), 0x0800_0102);
+}
+
+#[test]
+fn pending_irq_enters_irq_mode_and_can_be_returned_through_the_contract() {
+    let mut runtime = Runtime::new();
+    runtime.enter_instruction(0x0800_0300, false);
+    runtime.bios_swi(BiosSwi::Halt);
+    runtime.write16(IE, IRQ_VBLANK);
+    runtime.write16(IME, 1);
+
+    assert_eq!(runtime.deliver_pending_interrupt(), Some((0x18, false)));
+    assert_eq!(runtime.mode(), CpuMode::Irq);
+    assert_eq!(runtime.power, PowerState::Running);
+    assert_eq!(runtime.cpu.spsr(), Some(CpuMode::Supervisor as u32));
+
+    let result = runtime
+        .return_from_exception(runtime.read_reg(REG_LR))
+        .expect("IRQ handler must be able to return");
+    assert_eq!(result, (0x08, false));
+    assert_eq!(runtime.mode(), CpuMode::Supervisor);
+    assert_eq!(runtime.power, PowerState::Running);
+}
+
+#[test]
+fn stopped_runtime_does_not_deliver_pending_interrupts() {
+    let mut runtime = Runtime::new();
+    runtime.write8(HALTCNT, 0x80);
+    runtime.write16(IE, IRQ_VBLANK);
+    runtime.write16(IME, 1);
+    runtime.interrupts.request(IRQ_VBLANK);
+
+    assert_eq!(runtime.deliver_pending_interrupt(), None);
+    assert_eq!(runtime.mode(), CpuMode::System);
+    assert_eq!(runtime.power, PowerState::Stopped);
 }
 
 #[test]
