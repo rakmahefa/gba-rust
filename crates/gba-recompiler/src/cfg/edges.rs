@@ -1,4 +1,4 @@
-use crate::decoder::{ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbOp};
+use crate::decoder::{ArmExtended, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbExtended, ThumbOp};
 
 use super::abstract_state::{resolved_exchange_target, AbstractState};
 use super::model::BlockKey;
@@ -15,6 +15,22 @@ pub(super) fn next_key(instruction: Instruction) -> BlockKey {
 pub(super) fn in_rom(rom: &[u8], address: u32) -> bool {
     address >= crate::decoder::ROM_BASE
         && address - crate::decoder::ROM_BASE < rom.len() as u32
+}
+
+/// Whether an instruction is architecturally a basic-block control boundary.
+pub(super) fn is_control_boundary(instruction: Instruction) -> bool {
+    matches!(
+        instruction.kind,
+        InstructionKind::Arm(ArmOp::Branch { .. })
+            | InstructionKind::Arm(ArmOp::BranchExchange { .. })
+            | InstructionKind::Arm(ArmOp::Extended(ArmExtended::SoftwareInterrupt { .. }))
+            | InstructionKind::Thumb(ThumbOp::Branch { .. })
+            | InstructionKind::Thumb(ThumbOp::BranchLink { .. })
+            | InstructionKind::Thumb(ThumbOp::BranchExchange { .. })
+            | InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::SoftwareInterrupt { .. }))
+            | InstructionKind::Arm(ArmOp::Unknown)
+            | InstructionKind::Thumb(ThumbOp::Unknown)
+    )
 }
 
 pub(super) fn instruction_successors(
@@ -49,6 +65,13 @@ pub(super) fn instruction_successors(
                 successors.push(next);
             }
             successors
+        }
+        InstructionKind::Arm(ArmOp::Extended(ArmExtended::SoftwareInterrupt { .. }))
+        | InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::SoftwareInterrupt { .. })) => {
+            // SWI enters the supervisor exception path but has an architectural
+            // return continuation. Keep that continuation in the CFG while
+            // forcing a block boundary at the SWI instruction itself.
+            vec![next]
         }
         InstructionKind::Thumb(ThumbOp::Branch { target, condition }) => {
             let mut successors = vec![BlockKey {
@@ -99,6 +122,7 @@ pub(super) fn is_fallthrough(
     successors.len() == 1
         && successors[0] == next_key(instruction)
         && !is_call(instruction)
+        && !is_control_boundary(instruction)
 }
 
 pub(super) fn decode_at(
