@@ -1,5 +1,5 @@
-use super::arm7tdmi;
-use super::bios::{HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT};
+use crate::arm7tdmi;
+use crate::bios::{HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT, PowerState};
 use super::Runtime;
 
 const KEYINPUT_HIGH: u32 = KEYINPUT + 1;
@@ -125,9 +125,9 @@ impl Runtime {
             0x0400_0300 => self.postflg = value & 1,
             HALTCNT => {
                 self.power = if value & 0x80 != 0 {
-                    super::bios::PowerState::Stopped
+                    PowerState::Stopped
                 } else {
-                    super::bios::PowerState::Halted
+                    PowerState::Halted
                 };
             }
             _ => {
