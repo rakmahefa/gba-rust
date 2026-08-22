@@ -59,8 +59,21 @@ fn emit_direct_terminator(
         let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb}));");
         return;
     }
-    let _ = writeln!(out, "    if rt.condition_code({}) {{ return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb})); }}", condition_code(condition));
-    if let Some((address, next_mode)) = fallthrough_target(block, program, target) {
+    let fallthrough = fallthrough_target(block, program, target);
+    let _ = writeln!(
+        out,
+        "    let branch_taken = rt.condition_code({});"
+        ,
+        condition_code(condition)
+    );
+    let _ = writeln!(
+        out,
+        "    if std::env::var(\"GBA_GENERATED_TRACE\").is_ok() {{ eprintln!(\"[generated-branch] source={address:#010x}/{mode:?} condition={:?} nzcv={{:?}} taken={{}} target={target:#010x} fallthrough={:?}\", rt.nzcv(), branch_taken); }}",
+        condition,
+        fallthrough
+    );
+    let _ = writeln!(out, "    if branch_taken {{ return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb})); }}");
+    if let Some((address, next_mode)) = fallthrough {
         let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({address:#010x}, {}));", mode_bool(next_mode));
     } else {
         let halt = address.wrapping_add(size as u32);
@@ -173,5 +186,19 @@ mod tests {
         assert!(generated.contains("rt.link_from_instruction"));
         assert!(generated.contains("GeneratedBlockExit::continue_to"));
         assert!(!generated.contains("GeneratedBlockExit::dynamic_to"));
+    }
+
+    #[test]
+    fn conditional_branch_emits_runtime_decision_trace() {
+        let rom = arm_rom(&[0x0A00_0000, 0xE1A0_0000, 0xE1A0_0000]);
+        let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let block = &semantic.functions[0].blocks[0];
+        let mut generated = String::new();
+        emit_terminator(&mut generated, block, &program);
+        assert!(generated.contains("let branch_taken = rt.condition_code(10);"));
+        assert!(generated.contains("[generated-branch]"));
+        assert!(generated.contains("branch_taken"));
     }
 }
