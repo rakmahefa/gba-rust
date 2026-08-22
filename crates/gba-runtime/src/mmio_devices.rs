@@ -1,8 +1,8 @@
 //! Peripheral MMIO contracts layered on the core register definitions.
 //!
-//! This module is deliberately declarative. DMA and timer implementations can
-//! consume these descriptors without duplicating widths, access policies, or
-//! architectural writable masks.
+//! This module is deliberately declarative. DMA, timer and PPU implementations
+//! can consume these descriptors without duplicating widths, access policies,
+//! or architectural writable masks.
 
 use crate::mmio::{MmioAccess, MmioRegister, MmioWidth};
 
@@ -12,6 +12,16 @@ pub const DMA3_COUNT_MASK: u16 = 0xffff;
 pub const DMA_CONTROL_MASK: u16 = 0xf7e0;
 pub const DMA3_CONTROL_MASK: u16 = 0xffe0;
 pub const TIMER_CONTROL_MASK: u16 = 0x00c7;
+
+pub const BG_TEXT_CONTROL_MASK: u16 = 0xdfcf;
+pub const BG_AFFINE_CONTROL_MASK: u16 = 0xffcf;
+pub const BG_SCROLL_MASK: u16 = 0x03ff;
+pub const WINDOW_COORDINATE_MASK: u16 = 0xffff;
+pub const WINDOW_CONTROL_MASK: u16 = 0x3f3f;
+pub const MOSAIC_MASK: u16 = 0xffff;
+pub const BLEND_CONTROL_MASK: u16 = 0x3fcf;
+pub const BLEND_ALPHA_MASK: u16 = 0x1f1f;
+pub const BLEND_Y_MASK: u16 = 0x001f;
 
 const fn dma_address(address: u32) -> MmioRegister {
     MmioRegister::new(address, MmioWidth::Word, MmioAccess::WriteOnly, DMA_ADDRESS_MASK)
@@ -31,6 +41,18 @@ const fn timer_data(address: u32) -> MmioRegister {
 
 const fn timer_control(address: u32) -> MmioRegister {
     MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::ReadWrite, TIMER_CONTROL_MASK as u32)
+}
+
+const fn ppu_control(address: u32, mask: u16) -> MmioRegister {
+    MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::ReadWrite, mask as u32)
+}
+
+const fn ppu_write_only(address: u32, mask: u16) -> MmioRegister {
+    MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::WriteOnly, mask as u32)
+}
+
+const fn ppu_word(address: u32) -> MmioRegister {
+    MmioRegister::new(address, MmioWidth::Word, MmioAccess::ReadWrite, u32::MAX)
 }
 
 pub const DMA0SAD: MmioRegister = dma_address(0x0400_00b0);
@@ -62,6 +84,44 @@ pub const TIMER2CNT_H: MmioRegister = timer_control(0x0400_010a);
 pub const TIMER3CNT_L: MmioRegister = timer_data(0x0400_010c);
 pub const TIMER3CNT_H: MmioRegister = timer_control(0x0400_010e);
 
+pub const BG0CNT: MmioRegister = ppu_control(0x0400_0008, BG_TEXT_CONTROL_MASK);
+pub const BG1CNT: MmioRegister = ppu_control(0x0400_000a, BG_TEXT_CONTROL_MASK);
+pub const BG2CNT: MmioRegister = ppu_control(0x0400_000c, BG_AFFINE_CONTROL_MASK);
+pub const BG3CNT: MmioRegister = ppu_control(0x0400_000e, BG_AFFINE_CONTROL_MASK);
+
+pub const BG0HOFS: MmioRegister = ppu_write_only(0x0400_0010, BG_SCROLL_MASK);
+pub const BG0VOFS: MmioRegister = ppu_write_only(0x0400_0012, BG_SCROLL_MASK);
+pub const BG1HOFS: MmioRegister = ppu_write_only(0x0400_0014, BG_SCROLL_MASK);
+pub const BG1VOFS: MmioRegister = ppu_write_only(0x0400_0016, BG_SCROLL_MASK);
+pub const BG2HOFS: MmioRegister = ppu_write_only(0x0400_0018, BG_SCROLL_MASK);
+pub const BG2VOFS: MmioRegister = ppu_write_only(0x0400_001a, BG_SCROLL_MASK);
+pub const BG3HOFS: MmioRegister = ppu_write_only(0x0400_001c, BG_SCROLL_MASK);
+pub const BG3VOFS: MmioRegister = ppu_write_only(0x0400_001e, BG_SCROLL_MASK);
+
+pub const BG2PA: MmioRegister = ppu_control(0x0400_0020, u16::MAX);
+pub const BG2PB: MmioRegister = ppu_control(0x0400_0022, u16::MAX);
+pub const BG2PC: MmioRegister = ppu_control(0x0400_0024, u16::MAX);
+pub const BG2PD: MmioRegister = ppu_control(0x0400_0026, u16::MAX);
+pub const BG2X: MmioRegister = ppu_word(0x0400_0028);
+pub const BG2Y: MmioRegister = ppu_word(0x0400_002c);
+pub const BG3PA: MmioRegister = ppu_control(0x0400_0030, u16::MAX);
+pub const BG3PB: MmioRegister = ppu_control(0x0400_0032, u16::MAX);
+pub const BG3PC: MmioRegister = ppu_control(0x0400_0034, u16::MAX);
+pub const BG3PD: MmioRegister = ppu_control(0x0400_0036, u16::MAX);
+pub const BG3X: MmioRegister = ppu_word(0x0400_0038);
+pub const BG3Y: MmioRegister = ppu_word(0x0400_003c);
+
+pub const WIN0H: MmioRegister = ppu_write_only(0x0400_0040, WINDOW_COORDINATE_MASK);
+pub const WIN1H: MmioRegister = ppu_write_only(0x0400_0042, WINDOW_COORDINATE_MASK);
+pub const WIN0V: MmioRegister = ppu_write_only(0x0400_0044, WINDOW_COORDINATE_MASK);
+pub const WIN1V: MmioRegister = ppu_write_only(0x0400_0046, WINDOW_COORDINATE_MASK);
+pub const WININ: MmioRegister = ppu_control(0x0400_0048, WINDOW_CONTROL_MASK);
+pub const WINOUT: MmioRegister = ppu_control(0x0400_004a, WINDOW_CONTROL_MASK);
+pub const MOSAIC: MmioRegister = ppu_write_only(0x0400_004c, MOSAIC_MASK);
+pub const BLDCNT: MmioRegister = ppu_control(0x0400_0050, BLEND_CONTROL_MASK);
+pub const BLDALPHA: MmioRegister = ppu_write_only(0x0400_0052, BLEND_ALPHA_MASK);
+pub const BLDY: MmioRegister = ppu_write_only(0x0400_0054, BLEND_Y_MASK);
+
 #[inline]
 pub const fn register(address: u32) -> Option<MmioRegister> {
     match address {
@@ -89,6 +149,40 @@ pub const fn register(address: u32) -> Option<MmioRegister> {
         0x0400_010a | 0x0400_010b => Some(TIMER2CNT_H),
         0x0400_010c | 0x0400_010d => Some(TIMER3CNT_L),
         0x0400_010e | 0x0400_010f => Some(TIMER3CNT_H),
+        0x0400_0008 | 0x0400_0009 => Some(BG0CNT),
+        0x0400_000a | 0x0400_000b => Some(BG1CNT),
+        0x0400_000c | 0x0400_000d => Some(BG2CNT),
+        0x0400_000e | 0x0400_000f => Some(BG3CNT),
+        0x0400_0010 | 0x0400_0011 => Some(BG0HOFS),
+        0x0400_0012 | 0x0400_0013 => Some(BG0VOFS),
+        0x0400_0014 | 0x0400_0015 => Some(BG1HOFS),
+        0x0400_0016 | 0x0400_0017 => Some(BG1VOFS),
+        0x0400_0018 | 0x0400_0019 => Some(BG2HOFS),
+        0x0400_001a | 0x0400_001b => Some(BG2VOFS),
+        0x0400_001c | 0x0400_001d => Some(BG3HOFS),
+        0x0400_001e | 0x0400_001f => Some(BG3VOFS),
+        0x0400_0020 | 0x0400_0021 => Some(BG2PA),
+        0x0400_0022 | 0x0400_0023 => Some(BG2PB),
+        0x0400_0024 | 0x0400_0025 => Some(BG2PC),
+        0x0400_0026 | 0x0400_0027 => Some(BG2PD),
+        0x0400_0028..=0x0400_002b => Some(BG2X),
+        0x0400_002c..=0x0400_002f => Some(BG2Y),
+        0x0400_0030 | 0x0400_0031 => Some(BG3PA),
+        0x0400_0032 | 0x0400_0033 => Some(BG3PB),
+        0x0400_0034 | 0x0400_0035 => Some(BG3PC),
+        0x0400_0036 | 0x0400_0037 => Some(BG3PD),
+        0x0400_0038..=0x0400_003b => Some(BG3X),
+        0x0400_003c..=0x0400_003f => Some(BG3Y),
+        0x0400_0040 | 0x0400_0041 => Some(WIN0H),
+        0x0400_0042 | 0x0400_0043 => Some(WIN1H),
+        0x0400_0044 | 0x0400_0045 => Some(WIN0V),
+        0x0400_0046 | 0x0400_0047 => Some(WIN1V),
+        0x0400_0048 | 0x0400_0049 => Some(WININ),
+        0x0400_004a | 0x0400_004b => Some(WINOUT),
+        0x0400_004c | 0x0400_004d => Some(MOSAIC),
+        0x0400_0050 | 0x0400_0051 => Some(BLDCNT),
+        0x0400_0052 | 0x0400_0053 => Some(BLDALPHA),
+        0x0400_0054 | 0x0400_0055 => Some(BLDY),
         _ => None,
     }
 }
@@ -114,10 +208,26 @@ mod tests {
     }
 
     #[test]
+    fn ppu_contract_matches_gba_display_register_layout() {
+        assert_eq!(BG0CNT.address, 0x0400_0008);
+        assert_eq!(BG0CNT.writable_mask, BG_TEXT_CONTROL_MASK as u32);
+        assert_eq!(BG2CNT.writable_mask, BG_AFFINE_CONTROL_MASK as u32);
+        assert_eq!(BG0HOFS.access, MmioAccess::WriteOnly);
+        assert_eq!(BG2X.width, MmioWidth::Word);
+        assert_eq!(WININ.writable_mask, WINDOW_CONTROL_MASK as u32);
+        assert_eq!(BLDCNT.writable_mask, BLEND_CONTROL_MASK as u32);
+        assert_eq!(BLDALPHA.writable_mask, BLEND_ALPHA_MASK as u32);
+        assert_eq!(BLDY.writable_mask, BLEND_Y_MASK as u32);
+    }
+
+    #[test]
     fn byte_addresses_resolve_to_their_parent_register() {
         assert_eq!(register(0x0400_00b3), Some(DMA0SAD));
         assert_eq!(register(0x0400_00ba), Some(DMA0CNT_H));
         assert_eq!(register(0x0400_010f), Some(TIMER3CNT_H));
+        assert_eq!(register(0x0400_0009), Some(BG0CNT));
+        assert_eq!(register(0x0400_004b), Some(WINOUT));
+        assert_eq!(register(0x0400_0055), Some(BLDY));
         assert!(register(0x0400_0110).is_none());
     }
 }
