@@ -6,9 +6,6 @@ use crate::cpu::REG_PC;
 impl Runtime {
     pub fn step_recompiled(&mut self, cycles: u32) {
         self.cycles = self.cycles.wrapping_add(cycles as u64);
-        if self.power != PowerState::Stopped {
-            self.service_interrupts();
-        }
     }
 
     pub fn tick(&mut self, cycles: u32) {
@@ -71,6 +68,7 @@ impl Runtime {
             }
             if self.power == PowerState::Halted {
                 self.step_recompiled(1);
+                self.service_interrupts();
                 if self.power == PowerState::Halted {
                     return Err("runtime is halted");
                 }
