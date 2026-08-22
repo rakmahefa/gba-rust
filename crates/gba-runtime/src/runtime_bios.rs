@@ -1,4 +1,4 @@
-use super::bios::{
+use crate::bios::{
     execute_swi as execute_bios_swi, service_pending_irq, BiosMemory, BiosResult, BiosSwi,
     PowerState, IRQ_VBLANK,
 };
@@ -23,7 +23,7 @@ impl Runtime {
     }
 
     pub fn bios_swi_number(&mut self, raw: u32, thumb: bool) -> Option<BiosResult> {
-        let number = super::bios::swi_number(raw, thumb);
+        let number = crate::bios::swi_number(raw, thumb);
         BiosSwi::from_number(number).map(|swi| self.bios_swi(swi))
     }
 
