@@ -63,7 +63,8 @@ impl Runtime {
     }
 
     pub fn deliver_pending_interrupt(&mut self) -> Option<(u32, bool)> {
-        self.service_interrupts().then(|| (self.cpu.r[REG_PC], self.cpu.thumb))
+        self.service_interrupts()
+            .then_some((self.cpu.r[REG_PC], self.cpu.thumb))
     }
 
     pub fn wake_from_interrupt(&mut self, mask: u16) {
