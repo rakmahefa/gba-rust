@@ -16,21 +16,24 @@ The current `main` includes:
 
 - ARM and original GBA Thumb (ARMv4T) decoding;
 - reachable CFG recovery with ARM/Thumb-aware addresses;
-- dedicated CFG discovery, edge construction, abstract-state analysis, partitioning and hardening modules;
+- dedicated CFG discovery, edge construction, abstract-state analysis, partitioning and hardening;
 - basic-block partitioning and function discovery;
 - typed IR and semantic IR with structural validation;
 - explicit register, flag, memory and control-flow effects;
 - conservative effect-aware optimization;
 - deterministic Rust code generation;
 - an explicit ARM7TDMI architectural runtime model;
-- deterministic generated-block execution contracts with halt, exception and step-limit behavior;
+- deterministic generated-block execution with halt, exception and step-limit behavior;
 - architectural regression fixtures and differential generated-execution validation;
 - BIOS SWI/exception execution foundations;
 - architectural exception entry/return and reentrant IRQ execution;
 - BIOS exception-graph analysis and real BIOS exception-vector execution tests;
-- cartridge save foundations for SRAM, Flash and EEPROM variants.
+- GBA bus/memory classification foundations;
+- timing-scheduler foundations for PPU, DMA and IRQ boundaries;
+- SRAM, Flash and EEPROM save-device foundations;
+- Phase 7 real-ROM execution and hardware-boundary validation.
 
-The project is **not yet a complete playable GBA implementation**. The main remaining work is broader instruction coverage, complete generated-block dispatch/linking, larger real-ROM execution coverage, and the remaining GBA hardware contract: the full memory map and memory-mapped I/O, DMA, timers, interrupt scheduling, keypad, PPU, APU and complete cartridge timing/protocol behavior.
+The project is **not yet a complete playable GBA implementation**. The compiler pipeline is substantially established, so the next major effort is hardware fidelity and larger real-ROM coverage: complete MMIO behavior, DMA execution, timers, PPU rendering, keypad/input, APU, cartridge timing/protocol behavior and a robust generated-block dispatch/linking path.
 
 ## Architecture
 
@@ -59,9 +62,9 @@ The project is **not yet a complete playable GBA implementation**. The main rema
                  |                           |
                  | ARM7TDMI state           |
                  | Exception / BIOS model   |
-                 | Memory / cartridge       |
-                 | Hardware-facing APIs     |
-                 | Timing / execution       |
+                 | Bus / memory map         |
+                 | Cartridge / saves        |
+                 | Timing / hardware        |
                  +-------------+-------------+
                                |
                                v
@@ -71,7 +74,7 @@ The project is **not yet a complete playable GBA implementation**. The main rema
 The layers deliberately have different responsibilities:
 
 - **`gba-recompiler`** analyzes ROM code and produces CFGs, IR, semantic representations and generated Rust.
-- **Generated Rust** represents the statically recovered program logic and emits explicit execution-boundary transitions.
+- **Generated Rust** represents statically recovered program logic and emits explicit execution-boundary transitions.
 - **`gba-runtime`** provides CPU state, exception handling, memory, cartridge and hardware-facing services consumed by generated code.
 - **`gba-cli`** is the development harness for ROM analysis, generated-source emission and runtime bootstrapping.
 - **`gba-core`** contains lower-level CPU/bus/cartridge foundations and is currently outside the root workspace.
@@ -93,7 +96,7 @@ crates/
     └── ROM analysis and generated-source development harness
 ```
 
-Additional prototype crates remain in the repository but outside the root workspace:
+Additional prototype crates remain outside the root workspace:
 
 ```text
 crates/
@@ -115,24 +118,13 @@ GBA CPUs use **ARM state and the original ARMv4T Thumb instruction set**. This p
 
 ### 2. Discover reachable code
 
-Analysis starts from an explicit ROM entry address and execution mode. Statically known successors are followed while preserving the ARM/Thumb mode in the CFG key.
-
-```text
-entry
-  |
-  +-- sequential successor
-  +-- conditional branch target
-  +-- unconditional branch target
-  +-- statically known exchange/call target
-```
+Analysis starts from an explicit ROM entry address and execution mode. Statically known successors are followed while preserving ARM/Thumb mode in the CFG key.
 
 Unknown instructions and unresolved dynamic targets constrain static discovery instead of inventing unsafe successors.
 
 ### 3. Build and harden the CFG
 
 CFG leaders come from the entry point and control-flow targets. Blocks retain their execution mode and stop at control-flow boundaries.
-
-The CFG implementation is split into focused responsibilities:
 
 ```text
 cfg/
@@ -145,17 +137,7 @@ cfg/
 └── mod.rs
 ```
 
-Each basic block carries:
-
-- a stable `BlockId`;
-- an address and ARM/Thumb mode;
-- decoded instructions;
-- lowered IR instructions;
-- statically known successors.
-
-Validation protects invariants such as instruction ownership, address continuity, block identity and successor references.
-
-The CFG analysis also uses conservative abstract register information where useful. Statically known values can resolve some indirect control-flow targets, including ARM/Thumb exchange cases, while unresolved targets remain unknown instead of being guessed.
+Validation protects invariants such as instruction ownership, address continuity, block identity and successor references. Conservative abstract register information can resolve some indirect targets, including ARM/Thumb exchange cases.
 
 ### 4. Recover functions
 
@@ -168,53 +150,23 @@ Function analysis records:
 - return continuations;
 - unresolved indirect call/branch cases.
 
-The recovered structure is consumed by semantic analysis and code generation.
-
 ### 5. Lower to typed IR
 
-The typed IR keeps architectural operations explicit instead of leaking decoder-specific representations into later stages.
-
-Representative operations include:
-
-- `Mov`;
-- arithmetic and logical operations;
-- `Cmp`;
-- `Load` / `Store`;
-- branches and exchange operations;
-- `Nop`;
-- `Unknown`.
+The typed IR keeps architectural operations explicit. Representative operations include `Mov`, arithmetic/logical operations, `Cmp`, `Load`, `Store`, branches, exchange operations, `Nop` and `Unknown`.
 
 IR instructions expose architectural effects such as register reads/writes, memory access width/kind, flags and control flow.
 
 ### 6. Build semantic IR
 
-The semantic layer makes control flow and side effects explicit. Semantic blocks can terminate with:
+The semantic layer makes control flow and side effects explicit. Semantic blocks can terminate with fallthrough, conditional branch, direct/indirect call, return, indirect branch, exception or unknown behavior.
 
-- fallthrough;
-- conditional branch;
-- direct call;
-- indirect call;
-- return;
-- indirect branch;
-- exception;
-- unknown.
-
-Semantic validation protects block ownership, instruction identity, successor validity, call continuations and consistency between recovered functions and semantic blocks.
-
-Memory-effect propagation is hardened for the represented extended ARM and Thumb memory operations because optimization safety depends on accurate reads, writes and architectural effects.
+Structural validation protects block ownership, instruction identity, successor validity, call continuations and consistency between recovered functions and semantic blocks.
 
 ### 7. Optimize conservatively
 
-The optimizer favors transformations justified by the modeled semantics, including:
+The optimizer currently favors transformations justified by the modeled semantics, including identity-move elimination, `Add 0` / `Sub 0` normalization, local constant propagation and local constant folding.
 
-- identity-move elimination to `Nop`;
-- `Add 0` / `Sub 0` normalization;
-- local constant propagation;
-- local constant folding.
-
-Optimization is effect-aware. Register, flag, memory and control-flow effects constrain transformations so correctness remains the priority.
-
-More aggressive dead-code elimination and global optimization are deferred until the remaining architectural effects are precise enough to prove safety.
+Optimization is effect-aware: register, flag, memory and control-flow effects constrain transformations so correctness remains the priority.
 
 ### 8. Generate Rust
 
@@ -224,43 +176,34 @@ Generated Rust is currently a **development and execution artifact**, not a pack
 
 ### 9. Execute generated blocks deterministically
 
-The runtime exposes a deterministic generated-execution contract with explicit block exits, halt behavior, step limits and exception boundaries.
-
-Normal control flow follows statically linked or validated CFG targets. Exceptions cross the same generated/runtime boundary rather than mutating CPU state in the middle of a generated instruction.
-
-The intended execution shape is:
+The runtime exposes explicit generated-block exits and boundaries for normal control flow, exceptions, halts and step limits.
 
 ```text
-ROM fixture
-    |
-    v
-Static analysis
-    |
-    +-- CFG / functions
-    +-- semantic IR
-    +-- generated Rust
-             |
-             v
-     Generated block A
-             |
-             v
-      runtime boundary
-             |
-       +-----+-----+
-       |           |
-       v           v
-   block B      exception
-       |           |
-       |           v
-       |      exception entry
-       |           |
-       +-----<-----+
-             |
-             v
-     CPU / CPSR / memory
+ROM
+ |
+ v
+static analysis
+ |
+ +-- CFG / functions
+ +-- semantic IR
+ +-- generated Rust
+          |
+          v
+    generated block
+          |
+          v
+    runtime boundary
+       /       \
+      /         \
+ normal       exception
+  transition     |
+      |          v
+      |      exception entry
+      |          |
+      +----<-----+
 ```
 
-The current regression layer covers representative ARM execution paths, memory effects, branch/loop behavior, ARM/Thumb state transitions, IRQ entry/return and real BIOS exception-vector execution. The next expansion is broader multi-block generated execution and larger real-ROM control-flow regions.
+The compiler/runtime boundary validates target alignment and linked-CFG membership rather than silently dispatching arbitrary addresses.
 
 ## ARM7TDMI execution model
 
@@ -278,36 +221,31 @@ Current foundations include:
 - ARM shift edge cases and ROR behavior;
 - add/subtract carry and borrow semantics;
 - ARM unaligned word rotation behavior;
-- exception entry and restoration foundations.
+- architectural exception entry and restoration.
 
-Architectural primitives remain independently testable where practical, keeping runtime correctness separate from the recompiler crate.
+Architectural primitives remain independently testable where practical, keeping runtime correctness separate from recompiler logic.
 
 ## BIOS and exception execution
 
-The runtime now models BIOS-triggered exception behavior as an architectural execution boundary rather than as an unrelated helper call.
+BIOS-triggered exceptions are modeled as an architectural execution boundary instead of an unrelated helper call.
 
 ### SWI boundary
 
 For generated BIOS SWIs:
 
 1. the runtime enters Supervisor mode;
-2. the appropriate exception state is captured in the architectural CPU state;
-3. the modeled BIOS service executes against the runtime state;
+2. exception state is captured in the architectural CPU state;
+3. the modeled BIOS service executes against runtime state;
 4. returning SWIs restore the caller's CPSR and banked registers;
-5. non-returning services such as HALT/STOP retain the expected privileged execution state.
+5. non-returning services such as HALT/STOP retain the expected privileged state.
+
+Generated BIOS services now include regression coverage for memory-transfer SWIs such as `CpuSet` and `CpuFastSet`.
 
 ### IRQ boundary
 
 Generated execution observes pending enabled IRQs at a **block boundary**. The dispatcher establishes the architectural PC for that boundary and then reuses the runtime exception-entry contract.
 
-This preserves:
-
-- the interrupted resume point;
-- CPSR state;
-- banked IRQ registers;
-- Supervisor/privileged execution context where applicable.
-
-The IRQ does not mutate CPU mode in the middle of a generated instruction.
+This preserves the interrupted resume point, CPSR state and banked IRQ registers without mutating CPU mode in the middle of a generated instruction.
 
 ### Exception returns
 
@@ -317,111 +255,104 @@ Ordinary `BX LR`/function returns remain separate from architectural exception r
 
 ### Reentrant exceptions
 
-Nested exception entry is supported by the same boundary model. An IRQ taken while privileged can capture the current mode's state, use IRQ banked registers and later restore the interrupted context through the architectural exception-return primitive.
+Nested exception entry reuses the same boundary model. An IRQ taken while privileged can capture the current mode state, use IRQ banked registers and later restore the interrupted context through the architectural exception-return primitive.
 
 ### BIOS exception graph
 
-The recompiler exposes BIOS exception-graph analysis so exception vectors, handler structure and return sites can participate in static analysis instead of being treated as opaque addresses.
+The recompiler exposes BIOS exception-graph analysis so exception vectors, handlers and return sites can participate in static analysis. Real BIOS exception vectors are exercised through generated code in regression fixtures.
 
-A real BIOS exception vector is now exercised through generated code as a regression path. The graph and execution contract remain deliberately conservative when a target cannot be represented by the generated CFG.
+## Bus and memory contract
 
-## Runtime
+The runtime uses a single address classifier before device-specific semantics. This establishes a canonical physical address mapping that generated CPU access, DMA and future timing-aware devices can share.
 
-`gba-runtime` is the hardware-facing boundary consumed by generated code.
+Current address-space foundations include:
 
-Current foundations include:
+- BIOS `0x00000000-0x00003FFF`;
+- EWRAM `0x02000000-0x02FFFFFF`, mirrored over 256 KiB;
+- IWRAM `0x03000000-0x03FFFFFF`, mirrored over 32 KiB;
+- MMIO `0x04000000-0x040003FF` as an explicit device boundary;
+- palette RAM `0x05000000-0x05FFFFFF`, mirrored over 1 KiB;
+- VRAM `0x06000000-0x06FFFFFF` with GBA-specific mirroring;
+- OAM `0x07000000-0x07FFFFFF`, mirrored over 1 KiB;
+- Game Pak ROM windows `0x08000000-0x0DFFFFFF`;
+- SRAM/Flash `0x0E000000-0x0FFFFFFF`.
 
-- ARM7TDMI register and status state;
-- banked registers and exception-state support;
-- BIOS/SWI execution foundations;
-- exception entry/return support;
-- 240x160 framebuffer storage and frame counter;
-- APU state foundation;
-- cartridge ROM storage;
-- byte and little-endian 32-bit memory access;
-- ARM unaligned-word behavior;
-- simple I/O backing storage;
-- cartridge save access;
-- cycle/tick accounting;
-- condition-code and execution support;
-- generated-code dispatch, halt, exception and unsupported-instruction hooks.
+Device semantics remain separate from address classification. Timing, waitstates, DMA arbitration and complete MMIO behavior are layered on top of this contract.
 
-### Runtime limitations
+## Timing and scheduler
 
-The runtime is still a foundation rather than a complete GBA hardware implementation. Major remaining areas include:
+`gba-runtime::TimingScheduler` is the single monotonic machine clock for time-driven hardware.
 
-- complete GBA memory map and memory-mapped I/O register semantics;
-- complete ARM7TDMI pipeline/timing behavior;
-- remaining architectural corner cases and instruction coverage;
-- full PPU/video modes, sprites and windows;
-- complete APU channels and audio output;
-- DMA;
-- timers;
-- interrupt scheduling beyond the current generated IRQ boundary contract;
-- keypad/input behavior;
-- complete cartridge protocol/timing behavior;
-- complete generated block dispatch/linking and fast-path linking;
-- a full deterministic real-ROM execution loop.
+Generated CPU execution advances the scheduler through runtime cycle advancement. Events are deterministic and ordered by cycle, insertion sequence and event kind.
 
-The immediate hardware goal is therefore not to implement every device at once, but to establish a correct bus/memory contract that generated code can rely on.
+Current scheduler foundations cover:
 
-## Cartridge saves
+- PPU HBlank boundaries;
+- scanline and VBlank transitions;
+- DMA completion boundaries;
+- explicit IRQ sampling boundaries;
+- continuous timer advancement between hardware boundaries.
+
+The architecture deliberately separates:
+
+1. time progression;
+2. hardware side effects;
+3. architectural CPU transitions.
+
+This keeps asynchronous hardware deterministic while preserving block-boundary exception semantics.
+
+## Cartridge and saves
 
 Battery-backed storage belongs to the cartridge model. It is **not an emulator savestate**.
 
-Supported save-device foundations are:
+Supported save-device foundations include SRAM, Flash and EEPROM variants.
+
+Persistence uses `<game>.sav`, with `<game>.sav.bak` retained when possible. Writes are dirty-tracked and flushed atomically. Save-type detection and matching-size save reuse are part of the cartridge layer.
+
+## CLI and real-ROM validation
+
+The development CLI is used for ROM analysis, generated-source emission and runtime bootstrapping.
+
+A real-ROM regression path is available through `GBA_REAL_ROM` and validates the complete development boundary:
 
 ```text
-SRAM    32 KiB
-Flash   64 KiB
-Flash   128 KiB
-EEPROM  512 B
-EEPROM  8 KiB
+real .gba ROM
+    |
+    v
+cartridge mapping
+    |
+    v
+static CFG analysis
+    |
+    v
+generated Rust
+    |
+    v
+runtime cartridge preflight
+    |
+    v
+compiled temporary generated runner
+    |
+    v
+deterministic generated execution
 ```
 
-Persistence follows this model:
+The validation checks cartridge reads, entry-state assumptions, generated-code compilation, architectural PC alignment and the final generated-execution exit.
 
-```text
-Generated game code
-       |
-       v
- Cartridge save device
-       |
-       v
-    SaveRam
-       |
-       +-- saves/<game>.sav
-       +-- saves/<game>.sav.bak
-```
-
-Save handling includes ROM-based save-type detection, dirty tracking, matching-size save reuse, temporary-file replacement and preservation of the previous save when possible.
-
-Save files remain outside the ROM so the source cartridge image stays immutable.
-
-## CLI
-
-The development CLI accepts an optional ROM path. Without an argument it uses the development FireRed ROM path:
+Example:
 
 ```bash
-cargo run -p gba-cli --release
+GBA_REAL_ROM=/path/to/game.gba \
+  cargo test -p gba-cli --test real_rom_execution -- --nocapture
 ```
 
-With an explicit ROM:
+The real-ROM test is intentionally opt-in so public CI does not depend on distributing copyrighted commercial ROM images.
 
-```bash
-cargo run -p gba-cli --release -- \
-  "roms/1636 - Pokemon Fire Red (U)(Squirrels).gba"
-```
+## Development ROMs
 
-The CLI currently:
+Development/test ROM inputs may exist under `roms/`, including FireRed and Emerald images used for local analysis.
 
-1. reads the ROM;
-2. starts static analysis at `0x0800_0000` in ARM mode;
-3. reports the recovered entry, block count and instruction count;
-4. emits generated Rust to `target/gba_generated.rs`;
-5. initializes the runtime and loads the ROM into a `Cartridge` using `saves/` for persistence.
-
-The CLI is a development harness; it does **not yet launch a complete playable generated ROM**.
+Use ROMs only when you have the legal right to use them. The project does not distribute commercial game ROMs.
 
 ## Frontend prototype
 
@@ -429,187 +360,194 @@ The CLI is a development harness; it does **not yet launch a complete playable g
 
 Its intended role is to provide a native analysis/debugging surface without coupling UI concerns to the recompiler core.
 
-## Test ROMs
-
-Development/test ROMs currently present under `roms/` include:
-
-- `1636 - Pokemon Fire Red (U)(Squirrels).gba`;
-- `1986 - Pokemon Emerald (U)(TrashMan).gba`.
-
-These are development inputs. Use of ROMs should comply with applicable copyright and ownership rules.
-
-## Development
-
-Prerequisites:
-
-- Rust stable toolchain;
-- Cargo.
-
-Recommended local validation:
-
-```bash
-cargo fmt --check
-cargo test --workspace --all-targets
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-```
-
-GitHub Actions mirrors these validation stages through separate formatting, test, check and Clippy jobs. Keep all four clean before merging architectural changes.
-
 ## Validation strategy
 
-Validation is intentionally cross-stage: individual modules can be correct while disagreeing at their boundaries, so the project tests the chain progressively.
+Validation is intentionally cross-stage because modules can be individually correct while disagreeing at their boundaries.
 
-Current and planned validation layers are:
+Current layers include:
 
 1. ARM7TDMI architectural primitive tests;
 2. decoder and CFG regression fixtures;
 3. semantic IR structural/effect validation;
 4. semantic-to-codegen integration tests;
-5. generated-execution fixtures with deterministic CPU/CPSR/memory state;
-6. exception/IRQ regression fixtures;
-7. differential tests against independent reference semantics for selected instructions;
+5. deterministic generated-execution fixtures;
+6. exception and IRQ regression fixtures;
+7. differential tests for selected instruction semantics;
 8. BIOS exception-vector execution fixtures;
-9. ROM-level regression fixtures for real GBA programs;
-10. deterministic performance benchmarks for generated native code and runtime hot paths.
+9. real-ROM CFG/runtime boundary validation when a ROM is supplied.
 
-Generated-execution differential fixtures and the BIOS exception-vector path are now established regression layers rather than future-only goals.
+The preferred development progression is:
 
-## Optimization strategy
+```text
+unit semantics
+    ↓
+synthetic ROM fixtures
+    ↓
+generated execution
+    ↓
+BIOS/exception execution
+    ↓
+real-ROM CFG validation
+    ↓
+real-ROM execution
+    ↓
+stable game boot
+```
 
-Optimization is staged behind correctness:
+## CI
 
-1. expand correct ARM/Thumb decoding;
-2. strengthen CFG and function recovery on real GBA control flow;
-3. make typed/semantic side-effect modeling precise;
-4. complete deterministic generated-block execution coverage;
-5. formalize the bus/memory contract used by generated code;
-6. extend constant propagation/folding across valid control-flow regions;
-7. specialize safe memory accesses;
-8. add basic-block dispatch, linking and branch-target specialization;
-9. rely on Rust/LLVM for native-level optimization;
-10. add runtime fast paths for hot hardware operations.
+GitHub Actions currently validates the workspace with:
 
-The guiding principle is to perform as much work as possible at **compile time** whenever the ROM makes the information statically recoverable.
+```bash
+cargo fmt
+cargo test --workspace --all-targets
+cargo check --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Real-ROM execution remains opt-in because CI cannot assume access to commercial ROM images.
 
 ## Roadmap
 
-### Recompiler
+The project is transitioning from **compiler architecture completion** toward **hardware fidelity and real-ROM execution coverage**.
 
-- [x] Rust workspace and layer separation.
-- [x] ARM/Thumb decoder foundation.
-- [x] Reachable CFG recovery.
-- [x] ARM/Thumb-aware block partitioning.
-- [x] CFG module decomposition and control-flow hardening.
-- [x] Typed IR foundation.
-- [x] Function discovery foundation.
-- [x] Semantic IR and structural validation.
-- [x] Memory-effect hardening for represented instruction classes.
-- [x] Effect-aware conservative optimization foundation.
-- [x] Deterministic Rust code generation.
-- [x] Generated-execution contract.
-- [x] Differential validation fixtures for representative execution paths.
-- [x] BIOS exception-graph analysis.
-- [x] Real BIOS exception-vector execution fixture.
-- [ ] Broaden ARM/Thumb instruction coverage and reference fixtures.
-- [ ] Complete generated multi-block dispatch/linking.
-- [ ] Execute larger real-ROM control-flow regions deterministically.
-- [ ] Add native block specialization and hot-path optimization.
+### Phase 7 — Real-ROM execution and hardware boundary validation
 
-### Runtime
+**Status: complete on `main`.**
 
-- [x] ARM7TDMI architectural state foundation.
-- [x] Banked registers and exception-state foundations.
-- [x] CPSR/SPSR and condition-code support.
-- [x] ARM/Thumb exchange foundations.
-- [x] BIOS/SWI exception-entry foundations.
-- [x] IRQ boundary and architectural exception-return foundations.
-- [x] Cartridge ROM and save-device foundations.
-- [x] Basic memory and cycle/tick services.
-- [ ] Complete GBA memory map and memory-mapped I/O.
-- [ ] Complete DMA and timers.
-- [ ] Complete interrupt scheduling.
-- [ ] Complete keypad/input behavior.
-- [ ] Complete PPU/video implementation.
-- [ ] Complete APU/audio implementation.
-- [ ] Complete cartridge protocol/timing behavior.
-- [ ] Complete integration with a full real-ROM execution loop.
+The phase established:
 
-### Tooling / frontend
+- real-ROM cartridge mapping at `0x08000000`;
+- real-ROM CFG analysis;
+- generated Rust emission from a real ROM;
+- runtime cartridge preflight;
+- temporary generated-runner compilation and execution;
+- architectural PC-alignment checks;
+- generated-execution exit validation.
 
-- [x] CLI analysis and generated-source harness.
-- [x] `gba-core` prototype.
-- [x] `gba-egui` prototype.
-- [ ] Integrate frontend crates into the workspace when their APIs stabilize.
-- [ ] Add interactive CFG/IR/runtime inspection.
-- [ ] Add deterministic ROM regression dashboards.
+### Phase 8 — Hardware fidelity and real-ROM coverage
 
-## Immediate next phase
+**Status: next major phase.**
 
-The next architectural phase is **generated block dispatch and multi-block execution**, not another BIOS-only milestone.
+The priority is no longer adding another large compiler abstraction. The dominant risk is now the generated-code/runtime/hardware boundary.
 
-```text
-Static analysis
-      |
-      v
-Generated blocks
-      |
-      v
-Validated block targets
-      |
-      v
-Deterministic dispatcher
-      |
-      v
-Multi-block execution
-      |
-      v
-Bus / memory contract
-      |
-      v
-DMA + timers + IRQ scheduling
-      |
-      v
-PPU / APU / keypad
-      |
-      v
-Large real-ROM execution
-      |
-      v
-Native specialization / optimization
-```
+#### 8.1 Memory and MMIO correctness
 
-The immediate goals are:
+- complete the GBA memory-map contract;
+- implement register-level MMIO semantics incrementally;
+- add read/write side-effect tests;
+- validate wait-state-sensitive regions where required;
+- preserve a single canonical bus decoder for CPU and DMA.
 
-1. complete generated-block dispatch and linked CFG transitions;
-2. expand deterministic execution across larger real-ROM regions;
-3. establish the complete CPU-to-bus memory contract;
-4. then add hardware devices in dependency order.
+#### 8.2 DMA
 
-This keeps the project focused on **execution correctness before hardware breadth and optimization**.
+- implement channel configuration and transfer semantics;
+- model source/destination address control;
+- model repeat and timing modes;
+- connect transfer completion to scheduler events and IRQ requests;
+- add deterministic DMA-vs-CPU regression fixtures.
 
-## Architectural priorities
+#### 8.3 Timers and interrupt sources
 
-The current priority order is:
+- complete timer register behavior;
+- validate cascading timers;
+- align overflow timing with the central scheduler;
+- expand IRQ-source behavior;
+- validate IRQ sampling and exception entry against real generated execution.
+
+#### 8.4 PPU execution contract
+
+- implement display modes 0-5 incrementally;
+- complete HBlank/VBlank/VCOUNT behavior;
+- add OAM/sprite and window semantics;
+- build deterministic scanline/frame regression fixtures;
+- keep rendering correctness separate from CPU exception transitions.
+
+#### 8.5 Keypad/input and remaining MMIO
+
+- implement `KEYINPUT` behavior;
+- implement relevant interrupt behavior;
+- complete remaining high-value MMIO devices required by real ROM startup and main loops.
+
+#### 8.6 Cartridge protocol and timing
+
+- complete SRAM/Flash command protocols;
+- complete EEPROM serial protocol behavior;
+- model relevant timing restrictions;
+- expand save detection and persistence fixtures.
+
+#### 8.7 Generated dispatch/linking hardening
+
+- formalize block-key and alignment invariants;
+- expand linked-block validation;
+- reduce fallback exits for statically resolvable targets;
+- introduce safe block chaining where correctness is proven;
+- add stress fixtures for ARM/Thumb transitions, loops and indirect branches.
+
+#### 8.8 Real-ROM execution coverage
+
+Use legal local ROM fixtures to expand validation from entry-point analysis to stable execution regions:
 
 ```text
-1. Execution correctness
-2. Generated multi-block dispatch
-3. CPU / bus / memory correctness
-4. Interrupt and timing integration
-5. GBA hardware completeness
-6. Native specialization and optimization
+ROM entry
+   ↓
+authorized boot code
+   ↓
+BIOS interactions
+   ↓
+memory initialization
+   ↓
+IRQ/timer setup
+   ↓
+VBlank/main loop
+   ↓
+stable generated execution
 ```
 
-The project deliberately avoids broad optimization or full-device implementation while the generated execution boundary and hardware contract are still evolving.
+The first concrete milestone is **stable real-ROM execution**, not yet full gameplay rendering/audio.
 
-## Project principles
+### Phase 9 — Playable GBA runtime
 
-1. **Static first** — recover and specialize everything the ROM makes statically knowable.
-2. **Semantic correctness before optimization** — never optimize away an architectural effect that is not modeled.
-3. **Explicit boundaries** — decoder, analysis, generated code and runtime remain independently testable.
-4. **Deterministic execution** — generated execution and regression fixtures should produce reproducible state and control flow.
-5. **Conservative uncertainty** — unresolved indirect behavior should remain explicit instead of being guessed.
-6. **Compile-time specialization** — move work from runtime to analysis whenever the ROM makes it safe to do so.
-7. **Hardware as a contract** — generated code depends on explicit runtime services rather than hidden emulator state.
-8. **Real ROMs as validation** — synthetic fixtures prove local semantics; real BIOS and cartridge code validate the recovered system as a whole.
+After Phase 8 establishes reliable hardware boundaries:
+
+- complete PPU rendering;
+- complete APU/audio output;
+- keypad/input integration;
+- complete cartridge timing;
+- broader instruction coverage;
+- robust generated-block linking;
+- deterministic save/load behavior;
+- frontend integration.
+
+The first major acceptance target is a deterministic boot of a substantial real GBA title, followed by stable frame execution and input processing.
+
+### Phase 10 — Native performance
+
+Only after architectural fidelity is sufficiently strong:
+
+- block chaining;
+- constant propagation across safe boundaries;
+- memory specialization;
+- hot-path inlining;
+- cache-aware generated dispatch;
+- profiling-guided optimization;
+- deterministic performance benchmarks.
+
+Performance work must not bypass the architectural runtime contract or weaken exception/hardware correctness.
+
+## Design principles
+
+`gba-rust` intentionally follows a few strict rules:
+
+1. **Recompiler-first** — generated native Rust/LLVM is the execution center.
+2. **Architectural correctness before optimization** — unsafe transformations are deferred.
+3. **Explicit effects** — registers, flags, memory and control flow are modeled instead of inferred ad hoc.
+4. **Exceptions at boundaries** — asynchronous and architectural transitions do not mutate generated instructions mid-flight.
+5. **One runtime contract** — generated code, CPU, BIOS and hardware share explicit interfaces.
+6. **Determinism** — CFGs, generated sources, scheduling and regression fixtures should be reproducible.
+7. **Conservative unknowns** — unresolved dynamic behavior is represented as unknown instead of guessed.
+8. **Layered hardware** — address classification, device semantics, timing and architectural CPU transitions remain distinct.
+
+## License
+
+The workspace metadata currently declares the project under the **MIT** license. ROM images are separate copyrighted works and are not covered by the project license.
