@@ -30,6 +30,26 @@ Nested exception entry is therefore reentrant: an IRQ taken while executing Supe
 
 BIOS HALT/IntrWait continue to unmask the IRQ path while waiting. The generated execution contract keeps the asynchronous hardware mechanism in the runtime while the generated CFG remains responsible only for linked control-flow targets.
 
+## GBA bus and memory contract
+
+The runtime exposes a single CPU bus address decoder before device-specific semantics. `BusRegion` classifies addresses and produces a canonical physical offset so generated code, DMA and future timing-aware devices can share one memory map.
+
+The contract currently models:
+
+- BIOS `0x00000000-0x00003FFF` as read-only;
+- EWRAM `0x02000000-0x02FFFFFF` mirrored every 256 KiB;
+- IWRAM `0x03000000-0x03FFFFFF` mirrored every 32 KiB;
+- MMIO `0x04000000-0x040003FF` as an explicit device boundary;
+- palette RAM `0x05000000-0x05FFFFFF` mirrored every 1 KiB;
+- VRAM `0x06000000-0x06FFFFFF` with the GBA-specific 128 KiB mirror pattern over 96 KiB of storage;
+- OAM `0x07000000-0x07FFFFFF` mirrored every 1 KiB;
+- Game Pak ROM wait-state windows `0x08000000-0x0DFFFFFF` as aliases of one cartridge image;
+- SRAM/Flash `0x0E000000-0x0FFFFFFF` mirrored over the 64 KiB bus window.
+
+Device behavior remains separate from address classification. Video memory byte writes follow their GBA halfword rules, cartridge save reads/writes follow the narrow external bus behavior, and ARM unaligned word reads continue through the architectural rotation primitive.
+
+Timing, waitstates, DMA arbitration and MMIO register completeness are deliberately not folded into the first bus layer; they build on this stable address contract.
+
 ## Cartridge saves
 
 Battery-backed SRAM/Flash/EEPROM belongs to the cartridge model. It is persisted as `<game>.sav`; this is **not** a savestate. Writes are dirty-tracked, flushed atomically, and the previous save is retained as `<game>.sav.bak` when possible.
@@ -39,8 +59,9 @@ Battery-backed SRAM/Flash/EEPROM belongs to the cartridge model. It is persisted
 1. Complete ARM7TDMI ARM/Thumb decoder and static CFG recovery.
 2. Introduce a typed IR and basic-block/function analysis.
 3. Generate executable Rust with explicit runtime calls for memory, branches, DMA, I/O and BIOS exception services.
-4. Implement PPU modes 0-5, sprites and windows.
-5. Implement APU, timers, DMA, IRQ and keypad.
-6. Complete SRAM/Flash/EEPROM protocols and save detection.
-7. Add egui frontend and deterministic regression tests against FireRed/Emerald.
-8. Add native-code-oriented optimizations: block chaining, constant propagation, memory specialization and hot-path inlining.
+4. Establish the GBA bus and memory contract before layering timing-sensitive hardware devices.
+5. Implement PPU modes 0-5, sprites and windows.
+6. Implement APU, timers, DMA, IRQ and keypad.
+7. Complete SRAM/Flash/EEPROM protocols and save detection.
+8. Add egui frontend and deterministic regression tests against FireRed/Emerald.
+9. Add native-code-oriented optimizations: block chaining, constant propagation, memory specialization and hot-path inlining.

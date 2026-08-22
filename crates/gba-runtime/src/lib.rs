@@ -5,6 +5,7 @@ mod contract;
 mod execution;
 
 pub mod apu;
+pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 pub mod ppu;
@@ -20,6 +21,7 @@ pub use bios::{
     VRAM_START, WAITCNT,
 };
 pub use bios_memory::{Bios, BiosLoadError, BIOS_SIZE};
+pub use bus::{decode as decode_bus_address, BusAddress, BusRegion};
 pub use cartridge::{detect_save_type, Cartridge, SaveRam, SaveType};
 pub use cpu::{
     BankedRegisters, Cpu, CpuMode, ExceptionKind, CPSR_C, CPSR_N, CPSR_V, CPSR_Z, REG_LR, REG_PC,

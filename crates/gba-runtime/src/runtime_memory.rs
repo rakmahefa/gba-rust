@@ -1,32 +1,25 @@
 use super::Runtime;
 use crate::arm7tdmi;
 use crate::bios::{PowerState, HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT};
+use crate::bus::{self, BusRegion};
 
 const KEYINPUT_HIGH: u32 = KEYINPUT + 1;
 const WAITCNT_HIGH: u32 = WAITCNT + 1;
 
 impl Runtime {
     pub fn read8(&self, address: u32) -> u8 {
-        match address {
-            0x0000_0000..=0x0000_3fff => self.bios.read8(address as usize),
-            0x0200_0000..=0x0203_ffff => self.ewram[(address - 0x0200_0000) as usize],
-            0x0300_0000..=0x0300_7fff => self.iwram[(address - 0x0300_0000) as usize],
-            0x0400_0000..=0x0400_03ff => self.read_mmio8(address),
-            0x0500_0000..=0x0500_03ff => self.palette[(address - 0x0500_0000) as usize],
-            0x0600_0000..=0x0601_7fff => self.vram[(address - 0x0600_0000) as usize],
-            0x0700_0000..=0x0700_03ff => self.oam[(address - 0x0700_0000) as usize],
-            0x0800_0000..0x0e00_0000 => self
-                .cartridge
-                .as_ref()
-                .and_then(|c| c.rom.get((address - 0x0800_0000) as usize))
-                .copied()
-                .unwrap_or(0xff),
-            0x0e00_0000..=0x0e00_ffff => self
-                .cartridge
-                .as_ref()
-                .map(|c| c.save.read((address - 0x0e00_0000) as usize))
-                .unwrap_or(0xff),
-            _ => *self.io.get(&address).unwrap_or(&0),
+        let bus = bus::decode(address);
+        match bus.region {
+            BusRegion::Bios => self.bios.read8(bus.offset),
+            BusRegion::Ewram => self.ewram[bus.offset],
+            BusRegion::Iwram => self.iwram[bus.offset],
+            BusRegion::Io => self.read_mmio8(address),
+            BusRegion::Palette => self.palette[bus.offset],
+            BusRegion::Vram => self.vram[bus.offset],
+            BusRegion::Oam => self.oam[bus.offset],
+            BusRegion::CartridgeRom => self.cartridge.as_ref().and_then(|c| c.rom.get(bus.offset)).copied().unwrap_or(0xff),
+            BusRegion::CartridgeSave => self.cartridge.as_ref().map(|c| c.save.read(bus.offset)).unwrap_or(0xff),
+            BusRegion::Unmapped => *self.io.get(&address).unwrap_or(&0),
         }
     }
 
@@ -50,17 +43,18 @@ impl Runtime {
     }
 
     pub fn read16(&self, address: u32) -> u16 {
-        if (0x0400_0000..=0x0400_03ff).contains(&address) {
-            u16::from_le_bytes([
-                self.read_mmio8(address),
-                self.read_mmio8(address.wrapping_add(1)),
-            ])
-        } else {
-            u16::from_le_bytes([self.read8(address), self.read8(address.wrapping_add(1))])
+        if matches!(bus::decode(address).region, BusRegion::CartridgeSave) {
+            let value = self.read8(address);
+            return u16::from_le_bytes([value, value]);
         }
+        u16::from_le_bytes([self.read8(address), self.read8(address.wrapping_add(1))])
     }
 
     pub fn read32(&self, address: u32) -> u32 {
+        if matches!(bus::decode(address).region, BusRegion::CartridgeSave) {
+            let value = self.read8(address);
+            return u32::from_le_bytes([value, value, value, value]);
+        }
         let aligned = address & !3;
         let raw = u32::from_le_bytes([
             self.read8(aligned),
@@ -72,34 +66,31 @@ impl Runtime {
     }
 
     pub fn write8(&mut self, address: u32, value: u8) {
-        match address {
-            0x0200_0000..=0x0203_ffff => {
-                self.ewram[(address - 0x0200_0000) as usize] = value;
-            }
-            0x0300_0000..=0x0300_7fff => {
-                self.iwram[(address - 0x0300_0000) as usize] = value;
-            }
-            0x0400_0000..=0x0400_03ff => self.write_mmio8(address, value),
-            0x0500_0000..=0x0500_03ff => {
-                self.palette[(address - 0x0500_0000) as usize] = value;
-            }
-            0x0600_0000..=0x0601_7fff => {
-                self.vram[(address - 0x0600_0000) as usize] = value;
-            }
-            0x0700_0000..=0x0700_03ff => {
-                self.oam[(address - 0x0700_0000) as usize] = value;
-            }
-            0x0e00_0000..=0x0e00_ffff => {
-                if let Some(cartridge) = self.cartridge.as_mut() {
-                    cartridge
-                        .save
-                        .write((address - 0x0e00_0000) as usize, value);
+        let bus = bus::decode(address);
+        match bus.region {
+            BusRegion::Ewram => self.ewram[bus.offset] = value,
+            BusRegion::Iwram => self.iwram[bus.offset] = value,
+            BusRegion::Io => self.write_mmio8(address, value),
+            BusRegion::Palette | BusRegion::Vram => {
+                let memory = match bus.region {
+                    BusRegion::Palette => &mut self.palette[..],
+                    BusRegion::Vram => &mut self.vram[..],
+                    _ => unreachable!(),
+                };
+                let base = bus.offset & !1;
+                if base + 1 < memory.len() {
+                    memory[base] = value;
+                    memory[base + 1] = value;
                 }
             }
-            0x0000_0000..=0x0000_3fff => {
-                // GBA BIOS is read-only from the CPU memory bus.
+            BusRegion::Oam => {}
+            BusRegion::CartridgeSave => {
+                if let Some(cartridge) = self.cartridge.as_mut() {
+                    cartridge.save.write(bus.offset, value);
+                }
             }
-            _ => {
+            BusRegion::Bios | BusRegion::CartridgeRom => {}
+            BusRegion::Unmapped => {
                 self.io.insert(address, value);
             }
         }
@@ -109,61 +100,76 @@ impl Runtime {
         match address {
             0x0400_0004 => self.dispstat = (self.dispstat & 0xff00) | value as u16,
             0x0400_0005 => self.dispstat = (self.dispstat & 0x00ff) | ((value as u16) << 8),
-            KEYINPUT => {}
-            KEYINPUT_HIGH => {}
+            KEYINPUT | KEYINPUT_HIGH => {}
             IE => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
-            0x0400_0201 => {
-                self.interrupts.ie = (self.interrupts.ie & 0x00ff) | ((value as u16) << 8)
-            }
+            0x0400_0201 => self.interrupts.ie = (self.interrupts.ie & 0x00ff) | ((value as u16) << 8),
             IF => self.interrupts.acknowledge(value as u16),
             0x0400_0203 => self.interrupts.acknowledge((value as u16) << 8),
             WAITCNT => self.waitcnt = (self.waitcnt & 0xff00) | value as u16,
             WAITCNT_HIGH => self.waitcnt = (self.waitcnt & 0x00ff) | ((value as u16) << 8),
             IME => {
                 self.interrupts.ime = value & 1 != 0;
-                if self.interrupts.ime {
-                    self.service_interrupts();
-                }
+                if self.interrupts.ime { self.service_interrupts(); }
             }
             0x0400_0300 => self.postflg = value & 1,
-            HALTCNT => {
-                self.power = if value & 0x80 != 0 {
-                    PowerState::Stopped
-                } else {
-                    PowerState::Halted
-                };
-            }
-            _ => {
-                self.io.insert(address, value);
-            }
+            HALTCNT => self.power = if value & 0x80 != 0 { PowerState::Stopped } else { PowerState::Halted },
+            _ => { self.io.insert(address, value); }
         }
     }
 
     pub fn write16(&mut self, address: u32, value: u16) {
-        if address == IF {
-            self.interrupts.acknowledge(value);
-            return;
-        }
-        if address == IE {
-            self.interrupts.ie = value;
-            self.service_interrupts();
-            return;
-        }
-        if address == IME {
-            self.interrupts.ime = value & 1 != 0;
-            if self.interrupts.ime {
-                self.service_interrupts();
+        match bus::decode(address).region {
+            BusRegion::Palette => {
+                let o = bus::decode(address).offset & !1;
+                self.palette[o..o + 2].copy_from_slice(&value.to_le_bytes());
             }
-            return;
-        }
-        for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
-            self.write8(address.wrapping_add(i as u32), byte);
+            BusRegion::Vram => {
+                let o = bus::decode(address).offset & !1;
+                self.vram[o..o + 2].copy_from_slice(&value.to_le_bytes());
+            }
+            BusRegion::Oam => {
+                let o = bus::decode(address).offset & !1;
+                self.oam[o..o + 2].copy_from_slice(&value.to_le_bytes());
+            }
+            BusRegion::CartridgeSave => self.write8(address, value.to_le_bytes()[0]),
+            _ if address == IF => self.interrupts.acknowledge(value),
+            _ if address == IE => { self.interrupts.ie = value; self.service_interrupts(); }
+            _ if address == IME => {
+                self.interrupts.ime = value & 1 != 0;
+                if self.interrupts.ime { self.service_interrupts(); }
+            }
+            _ => {
+                for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
+                    self.write8(address.wrapping_add(i as u32), byte);
+                }
+            }
         }
     }
 
     pub fn write32(&mut self, address: u32, value: u32) {
-        for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
-            self.write8(address.wrapping_add(i as u32), byte);
+        let region = bus::decode(address).region;
+        match region {
+            BusRegion::Palette => {
+                let o = bus::decode(address).offset & !3;
+                self.palette[o..o + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            BusRegion::Vram => {
+                let o = bus::decode(address).offset & !3;
+                self.vram[o..o + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            BusRegion::Oam => {
+                let o = bus::decode(address).offset & !3;
+                self.oam[o..o + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            BusRegion::CartridgeSave => {
+                let byte = value.rotate_right((address & 3) * 8) as u8;
+                self.write8(address, byte);
+            }
+            _ => {
+                for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
+                    self.write8(address.wrapping_add(i as u32), byte);
+                }
+            }
         }
     }
 }
