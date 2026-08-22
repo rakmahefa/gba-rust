@@ -4,14 +4,16 @@ This document defines the observable GBA BIOS behavior modeled by `gba-runtime` 
 
 ## Runtime integration
 
-The BIOS model is now part of `Runtime` rather than an isolated helper layer. `Runtime` owns:
+The BIOS model is part of `Runtime`, not an isolated helper layer. `Runtime` owns:
 
 - CPU power state (`Running`, `Halted`, `Stopped`);
 - interrupt state (`IE`, `IF`, `IME`);
 - EWRAM, IWRAM, palette RAM, VRAM and OAM backing storage;
 - key MMIO register state such as `WAITCNT`, `POSTFLG`, `KEYINPUT` and `DISPSTAT`.
 
-Generated code and CPU-side memory accesses therefore reach the same state machine through `Runtime::read8/read16/read32` and `Runtime::write8/write16/write32`.
+Generated code and CPU-side memory accesses reach the same state machine through `Runtime::read8/read16/read32` and `Runtime::write8/write16/write32`.
+
+The runtime exposes `bios_swi` and `bios_swi_number` as the behavioral SWI entry points. These consume the CPU register state and update the same runtime-owned memory, interrupt and power state used by MMIO.
 
 ## Scope
 
@@ -44,7 +46,7 @@ POSTFLG    0x04000300
 HALTCNT    0x04000301
 ```
 
-`IF` is write-one-to-clear: writing a set bit acknowledges that interrupt request, while IRQ entry does not implicitly clear the request latch.
+`IF` is write-one-to-clear: writing a set bit acknowledges that interrupt request. IRQ entry does not implicitly clear the request latch; hardware events create requests through the runtime interrupt path.
 
 `HALTCNT` changes `Runtime::power`: a value without bit 7 enters `Halted`, while bit 7 enters `Stopped`. An enabled interrupt request wakes a halted runtime, and an eligible pending IRQ then vectors through the ARM7TDMI IRQ exception path.
 
@@ -90,9 +92,11 @@ The top `0x200` bytes of IWRAM are deliberately preserved because BIOS/system bo
 
 When `IME` is enabled, the corresponding bit is enabled in `IE`, and a bit is pending in `IF`, `Runtime::service_interrupts` enters IRQ mode through `service_pending_irq`. CPSR is preserved in `SPSR_irq`, IRQs are masked, ARM state is selected, `LR_irq` receives the architectural return point, and the CPU vectors to `0x00000018`.
 
+The runtime's `request_interrupt` method is the event-side path: it latches `IF`, wakes a halted runtime when the source is enabled, and attempts IRQ entry through the same controller.
+
 The BIOS IRQ vector itself remains outside this behavioral model. This separation keeps the runtime independent from a redistributable BIOS binary.
 
-The runtime also connects the existing frame path to `IRQ_VBLANK`: a completed `Runtime::frame()` requests VBlank through the same interrupt controller used by MMIO and BIOS waits.
+The existing frame path is connected to `IRQ_VBLANK`: `Runtime::frame()` requests VBlank through the same interrupt controller used by MMIO and BIOS waits.
 
 ## Memory-map anchors
 
