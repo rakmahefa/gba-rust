@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+use crate::address_space::ImageMapping;
 use crate::decoder::{DecodeError, Mode};
 
 mod abstract_state;
@@ -13,7 +14,7 @@ pub use hardening::ValidationError;
 pub use model::{BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
 
 use discovery::discover_reachable;
-use edges::in_rom;
+use edges::in_image;
 use hardening::validate_cfg;
 use partition::{collect_leaders, partition_blocks};
 
@@ -21,27 +22,51 @@ use partition::{collect_leaders, partition_blocks};
 pub enum AnalysisError {
     #[error(transparent)]
     Decode(#[from] DecodeError),
-    #[error("entry {0:#x} is outside the cartridge ROM")]
+    #[error("entry {0:#x} is outside the mapped image")]
     InvalidEntry(u32),
+    #[error("image mapping entry {entry:#x} does not match the requested analysis entry {requested:#x}")]
+    EntryMismatch { entry: u32, requested: u32 },
     #[error("CFG invariant violation: {0}")]
     InvalidCfg(#[from] ValidationError),
 }
 
 pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, AnalysisError> {
-    if !in_rom(rom, entry) {
-        return Err(AnalysisError::InvalidEntry(entry));
+    analyze_with_mapping(
+        rom,
+        ImageMapping::new(
+            crate::address_space::ImageKind::CartridgeRom,
+            crate::decoder::ROM_BASE,
+            rom.len() as u32,
+            entry,
+            entry_mode,
+        ),
+    )
+}
+
+pub fn analyze_with_mapping(
+    image: &[u8],
+    mapping: ImageMapping,
+) -> Result<Program, AnalysisError> {
+    if mapping.size != image.len() as u32 {
+        return Err(AnalysisError::InvalidEntry(mapping.entry));
+    }
+    if !mapping.contains(mapping.entry) {
+        return Err(AnalysisError::InvalidEntry(mapping.entry));
     }
 
     let entry_key = BlockKey {
-        address: entry,
-        mode: entry_mode,
+        address: mapping.entry,
+        mode: mapping.entry_mode,
     };
-    let (discovered_order, discovered) = discover_reachable(rom, entry_key.clone())?;
+    let (discovered_order, discovered) = discover_reachable(image, entry_key.clone(), mapping)?;
     let leaders = collect_leaders(&discovered, &entry_key);
     let (blocks, ids) = partition_blocks(&discovered, &leaders);
     let entry_id = *ids
         .get(&entry_key)
-        .ok_or(AnalysisError::InvalidEntry(entry))?;
+        .ok_or(AnalysisError::EntryMismatch {
+            entry: mapping.entry,
+            requested: mapping.entry,
+        })?;
 
     let cfg = ControlFlowGraph {
         entry: entry_id,
@@ -60,6 +85,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
+    use crate::address_space::{ImageKind, ImageMapping};
     use crate::decoder::ROM_BASE;
 
     fn arm_rom(words: &[u32]) -> Vec<u8> {
@@ -71,6 +97,14 @@ mod tests {
         let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
         assert_eq!(program.cfg.blocks.len(), 1);
         assert_eq!(program.cfg.blocks[0].instructions.len(), 2);
+    }
+
+    #[test]
+    fn zero_based_image_mapping_supports_bios_entry() {
+        let image = arm_rom(&[0xE3A0_0001, 0xE1A0_0000]);
+        let mapping = ImageMapping::new(ImageKind::Bios, 0, image.len() as u32, 0, Mode::Arm);
+        let program = analyze_with_mapping(&image, mapping).unwrap();
+        assert_eq!(program.cfg.blocks[0].key.address, 0);
     }
 
     #[test]
