@@ -82,14 +82,14 @@ pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Progra
             if let Some((target, thumb)) = source_successor(program, block) {
                 let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {}));", mode_bool(thumb));
             } else {
-                let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));");
+                let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); eprintln!(\"generated dynamic branch: source={address:#010x} register=r{register} target={{target:#010x}} thumb={{thumb}}\"); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));");
             }
         }
         SemanticTerminator::IndirectCall { register, .. } => {
             if let Some((target, thumb)) = indirect_call_target(program, block) {
                 let _ = writeln!(out, "    rt.link_from_instruction({address:#010x}, {size}, {}); return Ok(GeneratedBlockExit::continue_to({target:#010x}, {}));", mode_bool(block.mode), mode_bool(thumb));
             } else {
-                let _ = writeln!(out, "    rt.link_from_instruction({address:#010x}, {size}, {}); let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));", mode_bool(block.mode));
+                let _ = writeln!(out, "    rt.link_from_instruction({address:#010x}, {size}, {}); let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); eprintln!(\"generated dynamic call: source={address:#010x} register=r{register} target={{target:#010x}} thumb={{thumb}}\"); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));", mode_bool(block.mode));
             }
         }
         SemanticTerminator::Branch { condition, target } => {
