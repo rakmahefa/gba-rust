@@ -8,8 +8,10 @@ pub mod apu;
 pub mod bus;
 pub mod cartridge;
 pub mod cpu;
+pub mod mmio;
 pub mod ppu;
 pub mod runtime;
+pub mod timers;
 
 pub use apu::Apu;
 pub use bios::{
@@ -27,8 +29,10 @@ pub use cpu::{
     BankedRegisters, Cpu, CpuMode, ExceptionKind, CPSR_C, CPSR_N, CPSR_V, CPSR_Z, REG_LR, REG_PC,
     REG_SP,
 };
+pub use mmio::{DISPSTAT_HBLANK, DISPSTAT_VBLANK, DISPSTAT_VCOUNT_IRQ, VCOUNT};
 pub use ppu::Ppu;
 pub use runtime::Runtime;
+pub use timers::{Timer, TimerControl, TimerState, TIMER_COUNT};
 
 pub use arm7tdmi::Nzcv;
 pub use arm7tdmi::{
@@ -37,8 +41,13 @@ pub use arm7tdmi::{
 };
 pub use contract::{
     ArchitecturalState, GeneratedBlockExit, GeneratedBlockKey, GeneratedExecutionExit,
-    GeneratedExecutionResult, RuntimeContract, GENERATED_TARGET_MISALIGNED,
-    GENERATED_TARGET_OUTSIDE_CFG, RUNTIME_CONTRACT_VERSION,
+    GeneratedExecutionResult, RuntimeContract, GENERATED_BIOS_SWI_UNIMPLEMENTED,
+    GENERATED_TARGET_DYNAMIC_UNRESOLVED, GENERATED_TARGET_MISALIGNED, GENERATED_TARGET_OUTSIDE_CFG,
+    RUNTIME_CONTRACT_VERSION,
+};
+pub use timers::{
+    TIMER0CNT_H, TIMER0CNT_L, TIMER1CNT_H, TIMER1CNT_L, TIMER2CNT_H, TIMER2CNT_L, TIMER3CNT_H,
+    TIMER3CNT_L,
 };
 
 pub const WIDTH: usize = 240;

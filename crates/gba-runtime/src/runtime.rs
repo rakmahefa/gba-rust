@@ -4,6 +4,7 @@ use super::bios::{InterruptController, PowerState};
 use super::bios_memory::{Bios, BiosLoadError};
 use super::cartridge::Cartridge;
 use super::cpu::Cpu;
+use super::timers::{Timer, TIMER_COUNT};
 use super::{Apu, Ppu};
 
 const EWRAM_LEN: usize = 0x40000;
@@ -25,6 +26,9 @@ mod runtime_memory;
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "timer_tests.rs"]
+mod timer_tests;
 
 #[derive(Debug)]
 pub struct Runtime {
@@ -40,11 +44,13 @@ pub struct Runtime {
     pub vram: [u8; VRAM_LEN],
     pub oam: [u8; OAM_LEN],
     pub interrupts: InterruptController,
+    pub timers: [Timer; TIMER_COUNT],
     pub power: PowerState,
     pub waitcnt: u16,
     pub postflg: u8,
     pub keyinput: u16,
     pub dispstat: u16,
+    pub vcount: u16,
     pub cycles: u64,
 }
 
@@ -63,11 +69,13 @@ impl Default for Runtime {
             vram: [0; VRAM_LEN],
             oam: [0; OAM_LEN],
             interrupts: InterruptController::default(),
+            timers: std::array::from_fn(|_| Timer::default()),
             power: PowerState::default(),
             waitcnt: 0,
             postflg: 0,
             keyinput: KEYINPUT_DEFAULT,
             dispstat: 0,
+            vcount: 0,
             cycles: 0,
         }
     }

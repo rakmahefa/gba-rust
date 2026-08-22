@@ -97,13 +97,13 @@ fn arm_block_transfer_updates_registers_and_writeback() {
     let mut rt = Runtime::new();
     rt.write_reg(0, 0x1111_1111);
     rt.write_reg(2, 0x2222_2222);
-    rt.write_reg(1, 0x0400_0100);
+    rt.write_reg(1, 0x0200_0000);
     rt.execute_arm_instruction(0xE8A1_0005);
-    assert_eq!(rt.read_reg(1), 0x0400_0108);
+    assert_eq!(rt.read_reg(1), 0x0200_0008);
 
     rt.write_reg(0, 0);
     rt.write_reg(2, 0);
-    rt.write_reg(1, 0x0400_0100);
+    rt.write_reg(1, 0x0200_0000);
     rt.execute_arm_instruction(0xE8B1_0005);
     assert_eq!(rt.read_reg(0), 0x1111_1111);
     assert_eq!(rt.read_reg(2), 0x2222_2222);

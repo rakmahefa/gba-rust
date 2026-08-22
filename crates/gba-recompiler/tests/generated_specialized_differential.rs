@@ -136,8 +136,8 @@ fn specialized_memory_codegen_executes_load_store_roundtrip() {
     compile_and_run_generated(
         &source,
         "entry",
-        "rt.write_reg(0, 0x0400_0004);",
-        "assert_eq!(rt.read8(0x0400_0004), 42); assert_eq!(result.state.registers[2], 42);",
+        "rt.write_reg(0, 0x0400_0010);",
+        "assert_eq!(rt.read8(0x0400_0010), 42); assert_eq!(result.state.registers[2], 42);",
     );
 }
 

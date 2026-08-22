@@ -6,10 +6,39 @@ use crate::cpu::REG_PC;
 impl Runtime {
     pub fn step_recompiled(&mut self, cycles: u32) {
         self.cycles = self.cycles.wrapping_add(cycles as u64);
+        self.tick_timers(cycles);
     }
 
     pub fn tick(&mut self, cycles: u32) {
         self.step_recompiled(cycles);
+    }
+
+    fn tick_timers(&mut self, cycles: u32) {
+        let mut cascade_edges = 0u32;
+        for index in 0..self.timers.len() {
+            let cascade = index != 0 && self.timers[index].control().cascade;
+            let overflows = if cascade {
+                self.timers[index].tick_cascade(cascade_edges)
+            } else {
+                self.timers[index].tick_cycles(cycles)
+            };
+
+            if overflows == 0 {
+                cascade_edges = 0;
+                continue;
+            }
+
+            if self.timers[index].control().irq {
+                let mask = 1 << (3 + index);
+                // Timer-generated IRQs become pending hardware state. The
+                // generated-block dispatcher consumes them at the next
+                // architectural boundary rather than mutating CPU mode inside
+                // an instruction.
+                self.interrupts.request(mask);
+                self.wake_from_interrupt(mask);
+            }
+            cascade_edges = overflows;
+        }
     }
 
     pub fn trace_recompiled(&mut self, _address: u32, _raw: u32) {

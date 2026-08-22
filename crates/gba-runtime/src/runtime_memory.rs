@@ -1,10 +1,9 @@
 use super::Runtime;
 use crate::arm7tdmi;
-use crate::bios::{PowerState, HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT};
+use crate::bios::PowerState;
 use crate::bus::{self, BusRegion};
-
-const KEYINPUT_HIGH: u32 = KEYINPUT + 1;
-const WAITCNT_HIGH: u32 = WAITCNT + 1;
+use crate::mmio;
+use crate::timers::{timer_index, timer_register_is_control};
 
 impl Runtime {
     pub fn read8(&self, address: u32) -> u8 {
@@ -17,28 +16,98 @@ impl Runtime {
             BusRegion::Palette => self.palette[bus.offset],
             BusRegion::Vram => self.vram[bus.offset],
             BusRegion::Oam => self.oam[bus.offset],
-            BusRegion::CartridgeRom => self.cartridge.as_ref().and_then(|c| c.rom.get(bus.offset)).copied().unwrap_or(0xff),
-            BusRegion::CartridgeSave => self.cartridge.as_ref().map(|c| c.save.read(bus.offset)).unwrap_or(0xff),
+            BusRegion::CartridgeRom => self
+                .cartridge
+                .as_ref()
+                .and_then(|c| c.rom.get(bus.offset))
+                .copied()
+                .unwrap_or(0xff),
+            BusRegion::CartridgeSave => self
+                .cartridge
+                .as_ref()
+                .map(|c| c.save.read(bus.offset))
+                .unwrap_or(0xff),
             BusRegion::Unmapped => *self.io.get(&address).unwrap_or(&0),
         }
     }
 
     fn read_mmio8(&self, address: u32) -> u8 {
+        if let Some(index) = timer_index(address) {
+            if timer_register_is_control(address) {
+                return self.timers[index].read_control() as u8;
+            }
+            return self.timers[index].counter() as u8;
+        }
+
         match address {
-            0x0400_0004 => self.dispstat as u8,
-            0x0400_0005 => (self.dispstat >> 8) as u8,
-            KEYINPUT => self.keyinput as u8,
-            KEYINPUT_HIGH => (self.keyinput >> 8) as u8,
-            IE => self.interrupts.ie as u8,
-            0x0400_0201 => (self.interrupts.ie >> 8) as u8,
-            IF => self.interrupts.iflags as u8,
-            0x0400_0203 => (self.interrupts.iflags >> 8) as u8,
-            WAITCNT => self.waitcnt as u8,
-            WAITCNT_HIGH => (self.waitcnt >> 8) as u8,
-            IME => u8::from(self.interrupts.ime),
-            0x0400_0300 => self.postflg,
-            HALTCNT => 0,
+            mmio::DISPSTAT => self.dispstat as u8,
+            mmio::DISPSTAT_HI => (self.dispstat >> 8) as u8,
+            mmio::VCOUNT => self.vcount as u8,
+            mmio::VCOUNT_HI => (self.vcount >> 8) as u8,
+            mmio::KEYINPUT => self.keyinput as u8,
+            mmio::KEYINPUT_HI => (self.keyinput >> 8) as u8,
+            mmio::IE => self.interrupts.ie as u8,
+            mmio::IE_HI => (self.interrupts.ie >> 8) as u8,
+            mmio::IF => self.interrupts.iflags as u8,
+            mmio::IF_HI => (self.interrupts.iflags >> 8) as u8,
+            mmio::WAITCNT => self.waitcnt as u8,
+            mmio::WAITCNT_HI => (self.waitcnt >> 8) as u8,
+            mmio::IME => u8::from(self.interrupts.ime),
+            mmio::IME_HI => 0,
+            mmio::POSTFLG => self.postflg,
+            mmio::HALTCNT => 0,
             _ => *self.io.get(&address).unwrap_or(&0),
+        }
+    }
+
+    fn write_mmio8(&mut self, address: u32, value: u8) {
+        if let Some(index) = timer_index(address) {
+            if timer_register_is_control(address) {
+                self.timers[index].write_control(value as u16);
+            } else {
+                let current = self.timers[index].reload();
+                self.timers[index].write_reload((current & 0xff00) | value as u16);
+            }
+            return;
+        }
+
+        match address {
+            mmio::DISPSTAT => {
+                self.dispstat = (self.dispstat & 0xff07) | (u16::from(value) & 0xf8);
+            }
+            mmio::DISPSTAT_HI => {
+                self.dispstat = (self.dispstat & 0x00ff) | (u16::from(value) << 8);
+            }
+            mmio::VCOUNT | mmio::VCOUNT_HI => {}
+            mmio::KEYINPUT | mmio::KEYINPUT_HI => {}
+            mmio::IE => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
+            mmio::IE_HI => {
+                self.interrupts.ie = (self.interrupts.ie & 0x00ff) | (u16::from(value) << 8)
+            }
+            mmio::IF => self.interrupts.acknowledge(value as u16),
+            mmio::IF_HI => self.interrupts.acknowledge((u16::from(value)) << 8),
+            mmio::WAITCNT => self.waitcnt = (self.waitcnt & 0xff00) | value as u16,
+            mmio::WAITCNT_HI => {
+                self.waitcnt = (self.waitcnt & 0x00ff) | (u16::from(value) << 8)
+            }
+            mmio::IME => {
+                self.interrupts.ime = value & 1 != 0;
+                if self.interrupts.ime {
+                    self.service_interrupts();
+                }
+            }
+            mmio::IME_HI => {}
+            mmio::POSTFLG => self.postflg = value & 1,
+            mmio::HALTCNT => {
+                self.power = if value & 0x80 != 0 {
+                    PowerState::Stopped
+                } else {
+                    PowerState::Halted
+                }
+            }
+            _ => {
+                self.io.insert(address, value);
+            }
         }
     }
 
@@ -46,6 +115,13 @@ impl Runtime {
         if matches!(bus::decode(address).region, BusRegion::CartridgeSave) {
             let value = self.read8(address);
             return u16::from_le_bytes([value, value]);
+        }
+        if let Some(index) = timer_index(address) {
+            return if timer_register_is_control(address) {
+                self.timers[index].read_control()
+            } else {
+                self.timers[index].counter()
+            };
         }
         u16::from_le_bytes([self.read8(address), self.read8(address.wrapping_add(1))])
     }
@@ -96,28 +172,16 @@ impl Runtime {
         }
     }
 
-    fn write_mmio8(&mut self, address: u32, value: u8) {
-        match address {
-            0x0400_0004 => self.dispstat = (self.dispstat & 0xff00) | value as u16,
-            0x0400_0005 => self.dispstat = (self.dispstat & 0x00ff) | ((value as u16) << 8),
-            KEYINPUT | KEYINPUT_HIGH => {}
-            IE => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
-            0x0400_0201 => self.interrupts.ie = (self.interrupts.ie & 0x00ff) | ((value as u16) << 8),
-            IF => self.interrupts.acknowledge(value as u16),
-            0x0400_0203 => self.interrupts.acknowledge((value as u16) << 8),
-            WAITCNT => self.waitcnt = (self.waitcnt & 0xff00) | value as u16,
-            WAITCNT_HIGH => self.waitcnt = (self.waitcnt & 0x00ff) | ((value as u16) << 8),
-            IME => {
-                self.interrupts.ime = value & 1 != 0;
-                if self.interrupts.ime { self.service_interrupts(); }
-            }
-            0x0400_0300 => self.postflg = value & 1,
-            HALTCNT => self.power = if value & 0x80 != 0 { PowerState::Stopped } else { PowerState::Halted },
-            _ => { self.io.insert(address, value); }
-        }
-    }
-
     pub fn write16(&mut self, address: u32, value: u16) {
+        if let Some(index) = timer_index(address) {
+            if timer_register_is_control(address) {
+                self.timers[index].write_control(value);
+            } else {
+                self.timers[index].write_reload(value);
+            }
+            return;
+        }
+
         match bus::decode(address).region {
             BusRegion::Palette => {
                 let o = bus::decode(address).offset & !1;
@@ -132,12 +196,21 @@ impl Runtime {
                 self.oam[o..o + 2].copy_from_slice(&value.to_le_bytes());
             }
             BusRegion::CartridgeSave => self.write8(address, value.to_le_bytes()[0]),
-            _ if address == IF => self.interrupts.acknowledge(value),
-            _ if address == IE => { self.interrupts.ie = value; self.service_interrupts(); }
-            _ if address == IME => {
-                self.interrupts.ime = value & 1 != 0;
-                if self.interrupts.ime { self.service_interrupts(); }
+            _ if address == mmio::IF => self.interrupts.acknowledge(value),
+            _ if address == mmio::IE => {
+                self.interrupts.ie = value;
+                self.service_interrupts();
             }
+            _ if address == mmio::IME => {
+                self.interrupts.ime = value & 1 != 0;
+                if self.interrupts.ime {
+                    self.service_interrupts();
+                }
+            }
+            _ if address == mmio::DISPSTAT => {
+                self.dispstat = (self.dispstat & 0x0007) | (value & 0xfff8);
+            }
+            _ if address == mmio::VCOUNT => {}
             _ => {
                 for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
                     self.write8(address.wrapping_add(i as u32), byte);

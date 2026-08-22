@@ -2,6 +2,7 @@ mod arm;
 mod blocks;
 mod common;
 mod dispatcher;
+mod linking;
 mod operands;
 mod ops;
 mod terminators;
