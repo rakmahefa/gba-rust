@@ -18,6 +18,7 @@ mod runtime_execution;
 mod runtime_memory;
 
 #[cfg(test)]
+#[path = "runtime_tests.rs"]
 mod tests;
 
 #[derive(Debug)]
