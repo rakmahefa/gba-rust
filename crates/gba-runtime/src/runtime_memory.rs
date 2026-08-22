@@ -3,7 +3,7 @@ use crate::arm7tdmi;
 use crate::bios::PowerState;
 use crate::bus::{self, BusRegion};
 use crate::mmio;
-use crate::timers::{self, timer_index, timer_register_is_control};
+use crate::timers::{timer_index, timer_register_is_control};
 
 impl Runtime {
     pub fn read8(&self, address: u32) -> u8 {
