@@ -1,3 +1,4 @@
+pub mod address_space;
 pub mod architecture;
 pub mod cfg;
 pub mod codegen;
@@ -8,12 +9,16 @@ pub mod ir;
 pub mod optimization;
 pub mod semantic_ir;
 
+pub use address_space::{
+    AddressRange, AddressRegion, AddressSpace, AddressSpaceRegion, ImageKind, ImageMapping,
+    MappingError,
+};
 pub use architecture::{
     add_with_carry, architectural_pc, condition_holds as architectural_condition_holds,
     exchange_target, link_address, rotate_unaligned_word, shift_immediate, shift_register,
     NzcvMask, ShiftResult, ShiftType,
 };
-pub use cfg::{analyze, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
+pub use cfg::{analyze, analyze_with_mapping, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
 pub use codegen::{generate, generate_semantic, RustModule};
 pub use decoder::{
     decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction,
