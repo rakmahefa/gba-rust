@@ -70,7 +70,9 @@ fn generated_bios_returning_swi_resumes_cfg_and_mutates_runtime_memory() {
     .expect("write temporary Cargo manifest");
     fs::write(
         src.join("main.rs"),
-        r#"mod gba_generated;
+        r#"#![allow(dead_code)]
+
+mod gba_generated;
 
 use std::{env, fs};
 
@@ -97,7 +99,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         result.exit,
         GeneratedExecutionExit::Halted { address: 16, thumb: false }
     ));
-    assert_eq!(result.steps, 4);
+    // Generated steps count dispatched basic blocks, not individual instructions.
+    // This fixture has one block for SWI #1 and one for the post-SWI continuation.
+    assert_eq!(result.steps, 2);
     assert_eq!(result.state.pc(), 16);
     assert_eq!(result.state.registers[0], 1);
     assert_eq!(result.state.registers[1], 0x42);
@@ -131,7 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("exit=Halted"));
-    assert!(stdout.contains("steps=4"));
+    assert!(stdout.contains("steps=2"));
     assert!(stdout.contains("pc=0x00000010"));
     assert!(stdout.contains("r1=0x00000042"));
     assert!(stdout.contains("power=Halted"));
