@@ -1,14 +1,16 @@
 use std::env;
 
-use crate::{Runtime, REG_PC};
+use crate::{BiosResult, Runtime, REG_PC};
 
-pub const RUNTIME_CONTRACT_VERSION: u32 = 5;
+pub const RUNTIME_CONTRACT_VERSION: u32 = 6;
 pub const GENERATED_TARGET_OUTSIDE_CFG: &str =
     "generated direct target is outside the statically linked CFG";
 pub const GENERATED_TARGET_DYNAMIC_UNRESOLVED: &str =
     "generated indirect target is unresolved or outside the statically linked CFG";
 pub const GENERATED_TARGET_MISALIGNED: &str =
     "generated target cannot be represented by the requested execution mode";
+pub const GENERATED_BIOS_SWI_UNIMPLEMENTED: &str =
+    "generated BIOS SWI number is not implemented";
 
 const GENERATED_TRACE_ENV: &str = "GBA_GENERATED_TRACE";
 const GENERATED_TRACE_LIMIT_ENV: &str = "GBA_GENERATED_TRACE_LIMIT";
@@ -198,6 +200,11 @@ pub trait RuntimeContract {
     fn write32(&mut self, address: u32, value: u32);
     fn execute_arm_instruction(&mut self, raw: u32) -> Option<(u32, bool)>;
     fn execute_thumb_instruction(&mut self, raw: u16) -> Option<(u32, bool)>;
+    fn execute_bios_swi_comment(
+        &mut self,
+        comment: u32,
+        thumb: bool,
+    ) -> Result<BiosResult, &'static str>;
     fn exchange_target_for_dispatch(&mut self, target: u32) -> (u32, bool);
     fn tick(&mut self, cycles: u32);
     fn run_generated_contract<F, L>(
@@ -259,6 +266,14 @@ impl RuntimeContract for Runtime {
     }
     fn execute_thumb_instruction(&mut self, raw: u16) -> Option<(u32, bool)> {
         Runtime::execute_thumb_instruction(self, raw)
+    }
+    fn execute_bios_swi_comment(
+        &mut self,
+        comment: u32,
+        thumb: bool,
+    ) -> Result<BiosResult, &'static str> {
+        Runtime::execute_bios_swi_comment(self, comment, thumb)
+            .map_err(|_| GENERATED_BIOS_SWI_UNIMPLEMENTED)
     }
     fn exchange_target_for_dispatch(&mut self, target: u32) -> (u32, bool) {
         Runtime::exchange_target_for_dispatch(self, target)
@@ -374,6 +389,7 @@ impl RuntimeContract for Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PowerState;
 
     #[test]
     fn trace_config_is_disabled_by_default_without_environment() {
@@ -385,5 +401,13 @@ mod tests {
     fn generated_block_key_trace_identity_preserves_mode() {
         let key = GeneratedBlockKey::new(0x120, true);
         assert_eq!(key.tuple(), (0x120, true));
+    }
+
+    #[test]
+    fn bios_swi_contract_is_exposed_by_runtime_trait() {
+        let mut runtime = Runtime::new();
+        let result = RuntimeContract::execute_bios_swi_comment(&mut runtime, 0x02, false).unwrap();
+        assert!(!result.returned);
+        assert_eq!(runtime.power, PowerState::Halted);
     }
 }
