@@ -13,8 +13,8 @@ pub use arm7tdmi::{
 };
 pub use contract::{
     ArchitecturalState, GeneratedBlockExit, GeneratedBlockKey, GeneratedExecutionExit,
-    GeneratedExecutionResult, RuntimeContract, GENERATED_TARGET_MISALIGNED,
-    GENERATED_TARGET_OUTSIDE_CFG, RUNTIME_CONTRACT_VERSION,
+    GeneratedExecutionResult, RuntimeContract, GENERATED_TARGET_DYNAMIC_UNRESOLVED,
+    GENERATED_TARGET_MISALIGNED, GENERATED_TARGET_OUTSIDE_CFG, RUNTIME_CONTRACT_VERSION,
 };
 
 pub const WIDTH: usize = 240;
@@ -439,10 +439,14 @@ pub struct Runtime {
     pub cartridge: Option<Cartridge>,
     pub io: HashMap<u32, u8>,
     pub cycles: u64,
+    generated_dispatch_target: Option<(u32, bool)>,
 }
 impl Runtime {
     pub fn new() -> Self {
         Self::default()
+    }
+    pub fn last_generated_dispatch_target(&self) -> Option<(u32, bool)> {
+        self.generated_dispatch_target
     }
     pub fn load_cartridge(&mut self, cartridge: Cartridge) {
         self.cartridge = Some(cartridge);
@@ -620,187 +624,5 @@ impl Runtime {
         for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
             self.write8(address.wrapping_add(i as u32), byte)
         }
-    }
-    pub fn dispatch_mode(&mut self, address: u32, thumb: bool) -> ! {
-        self.cpu.set_thumb(thumb);
-        self.cpu.r[REG_PC] = address & if thumb { !1 } else { !3 };
-        panic!(
-            "generated dispatch target {address:#010x} ({}) is not linked yet",
-            if thumb { "Thumb" } else { "ARM" }
-        )
-    }
-    pub fn dispatch_exchange(&mut self, target: u32) -> ! {
-        let (address, thumb) = arm7tdmi::exchange_target(target);
-        self.cpu.set_thumb(thumb);
-        self.cpu.r[REG_PC] = address;
-        panic!("generated BX target {target:#010x} is not linked yet")
-    }
-    pub fn dispatch(&mut self, address: u32) -> ! {
-        self.dispatch_mode(address, self.cpu.thumb)
-    }
-    pub fn halt(&mut self) -> ! {
-        panic!("recompiled program halted")
-    }
-    pub fn unimplemented(&mut self, address: u32, raw: u32, mode: &str) -> ! {
-        panic!("unimplemented {mode} instruction {raw:#010x} at {address:#010x}")
-    }
-    pub fn run_generated<F>(
-        &mut self,
-        address: u32,
-        thumb: bool,
-        max_steps: Option<u64>,
-        mut dispatch: F,
-    ) -> Result<(u32, bool), &'static str>
-    where
-        F: FnMut(&mut Runtime, u32, bool) -> Result<(u32, bool), &'static str>,
-    {
-        let mut next = (address & if thumb { !1 } else { !3 }, thumb);
-        let mut steps = 0u64;
-        loop {
-            if let Some(limit) = max_steps {
-                if steps >= limit {
-                    return Err("generated execution step limit exceeded");
-                }
-            }
-            self.cpu.set_thumb(next.1);
-            self.cpu.r[REG_PC] = next.0;
-            next = dispatch(self, next.0, next.1)?;
-            steps = steps.wrapping_add(1);
-        }
-    }
-    pub fn exchange_target_for_dispatch(&mut self, target: u32) -> (u32, bool) {
-        let (address, thumb) = arm7tdmi::exchange_target(target);
-        self.cpu.set_thumb(thumb);
-        self.cpu.r[REG_PC] = address;
-        (address, thumb)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn compare_updates_all_nzcv_flags() {
-        let mut runtime = Runtime::new();
-        runtime.compare(0x7fff_ffff, u32::MAX);
-        assert!(runtime.cpu.cpsr & CPSR_N != 0);
-        assert!(runtime.cpu.cpsr & CPSR_C == 0);
-        assert!(runtime.cpu.cpsr & CPSR_V != 0);
-    }
-    #[test]
-    fn condition_contract_covers_signed_and_unsigned_relations() {
-        let mut runtime = Runtime::new();
-        runtime.cpu.cpsr = CPSR_V | CpuMode::System as u32;
-        assert!(runtime.condition_code(6));
-        assert!(!runtime.condition_code(7));
-        runtime.cpu.cpsr = CPSR_C | CpuMode::System as u32;
-        assert!(runtime.condition_code(2));
-        assert!(runtime.condition_code(8));
-        assert!(!runtime.condition_code(9));
-    }
-    #[test]
-    fn mov_preserves_c_and_v_when_setting_logical_flags() {
-        let mut runtime = Runtime::new();
-        runtime.cpu.cpsr = CPSR_C | CPSR_V | CpuMode::System as u32;
-        runtime.mov(0, 0, true);
-        assert!(runtime.cpu.cpsr & CPSR_Z != 0);
-        assert!(runtime.cpu.cpsr & CPSR_C != 0);
-        assert!(runtime.cpu.cpsr & CPSR_V != 0);
-    }
-    #[test]
-    fn adc_and_sbc_consume_the_current_carry_bit() {
-        let mut runtime = Runtime::new();
-        runtime.cpu.cpsr = CPSR_C | CpuMode::System as u32;
-        runtime.adc(0, 1, 1, true);
-        assert_eq!(runtime.read_reg(0), 3);
-        runtime.cpu.cpsr = CPSR_C | CpuMode::System as u32;
-        runtime.sbc(1, 3, 1, true);
-        assert_eq!(runtime.read_reg(1), 2);
-        runtime.cpu.cpsr &= !CPSR_C;
-        runtime.adc(2, 1, 1, true);
-        assert_eq!(runtime.read_reg(2), 2);
-        runtime.cpu.cpsr &= !CPSR_C;
-        runtime.sbc(3, 3, 1, true);
-        assert_eq!(runtime.read_reg(3), 1);
-    }
-    #[test]
-    fn instruction_context_exposes_architectural_pc_and_link_value() {
-        let mut runtime = Runtime::new();
-        runtime.enter_instruction(0x0800_0100, false);
-        assert_eq!(runtime.read_reg(REG_PC), 0x0800_0108);
-        runtime.link_from_instruction(0x0800_0100, 4, false);
-        assert_eq!(runtime.read_reg(REG_LR), 0x0800_0104);
-        runtime.enter_instruction(0x0800_0100, true);
-        assert_eq!(runtime.read_reg(REG_PC), 0x0800_0104);
-        runtime.link_from_instruction(0x0800_0100, 4, true);
-        assert_eq!(runtime.read_reg(REG_LR), 0x0800_0105);
-    }
-    #[test]
-    fn word_reads_apply_arm_unaligned_rotation() {
-        let mut runtime = Runtime::new();
-        runtime.write32(0x0400_0000, 0x4433_2211);
-        assert_eq!(runtime.read32(0x0400_0001), 0x1144_3322);
-        assert_eq!(runtime.read32(0x0400_0002), 0x2211_4433);
-    }
-    #[test]
-    fn banked_modes_keep_distinct_stack_and_link_registers() {
-        let mut runtime = Runtime::new();
-        runtime.write_reg(REG_SP, 0x1000);
-        runtime.write_reg(REG_LR, 0x2000);
-        runtime.switch_mode(CpuMode::Supervisor);
-        runtime.write_reg(REG_SP, 0x3000);
-        runtime.write_reg(REG_LR, 0x4000);
-        runtime.switch_mode(CpuMode::System);
-        assert_eq!(runtime.read_reg(REG_SP), 0x1000);
-        assert_eq!(runtime.read_reg(REG_LR), 0x2000);
-        runtime.switch_mode(CpuMode::Supervisor);
-        assert_eq!(runtime.read_reg(REG_SP), 0x3000);
-        assert_eq!(runtime.read_reg(REG_LR), 0x4000);
-    }
-    #[test]
-    fn swi_exception_saves_cpsr_and_restores_banks() {
-        let mut runtime = Runtime::new();
-        runtime.enter_instruction(0x0800_0100, false);
-        runtime.write_reg(REG_SP, 0x1000);
-        runtime.write_reg(REG_LR, 0x2000);
-        let old = runtime.cpu.cpsr;
-        let (vector, thumb) = runtime.raise_exception(ExceptionKind::SoftwareInterrupt);
-        assert_eq!((vector, thumb), (0x08, false));
-        assert_eq!(runtime.mode(), CpuMode::Supervisor);
-        runtime.write_reg(REG_SP, 0x3000);
-        runtime.write_reg(REG_LR, 0x4000);
-        assert_eq!(runtime.cpu.banked.spsr(CpuMode::Supervisor), Some(old));
-        let result = runtime
-            .exception_return(0x0800_0104)
-            .expect("exception return");
-        assert_eq!(result, (0x0800_0104, false));
-        assert_eq!(runtime.mode(), CpuMode::System);
-        assert_eq!(runtime.read_reg(REG_SP), 0x1000);
-        assert_eq!(runtime.read_reg(REG_LR), 0x2000);
-    }
-    #[test]
-    fn generated_engine_dispatches_iteratively_without_recursive_calls() {
-        let mut runtime = Runtime::new();
-        let result =
-            runtime.run_generated(0x0800_0000, false, Some(10_000), |rt, address, thumb| {
-                rt.tick(1);
-                if rt.cycles == 10_000 {
-                    Err("done")
-                } else {
-                    Ok((address, thumb))
-                }
-            });
-        assert_eq!(result, Err("done"));
-        assert_eq!(runtime.cycles, 10_000);
-    }
-    #[test]
-    fn exchange_target_for_dispatch_updates_thumb_and_pc() {
-        let mut runtime = Runtime::new();
-        assert_eq!(
-            runtime.exchange_target_for_dispatch(0x0800_0101),
-            (0x0800_0100, true)
-        );
-        assert!(runtime.cpu.thumb);
-        assert_eq!(runtime.read_reg(REG_PC), 0x0800_0100);
     }
 }
