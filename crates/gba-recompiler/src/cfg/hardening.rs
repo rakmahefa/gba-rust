@@ -77,8 +77,9 @@ fn validate_terminator_edges(
             let target = BlockKey { address: target, mode: Mode::Arm };
             let mut allowed = HashSet::new();
             if owners.contains_key(&target) { allowed.insert(target.clone()); require_edge(block, &target, owners, keys)?; }
-            if condition != Condition::Al || link {
-                if owners.contains_key(&next) { allowed.insert(next.clone()); require_edge(block, &next, owners, keys)?; }
+            if (condition != Condition::Al || link) && owners.contains_key(&next) {
+                allowed.insert(next.clone());
+                require_edge(block, &next, owners, keys)?;
             }
             if let Some(unexpected) = actual.iter().find(|key| !allowed.contains(*key)) {
                 return Err(ValidationError::UnexpectedEdge { block: block.id, target: unexpected.clone() });
