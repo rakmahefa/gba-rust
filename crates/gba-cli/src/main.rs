@@ -4,14 +4,31 @@ use std::{
     process::Command,
 };
 
-use gba_recompiler::{analyze, generate, Mode, ROM_BASE};
+use gba_recompiler::{analyze_with_mapping, generate, ImageKind, ImageMapping};
 use gba_runtime::{Cartridge, Runtime};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImageArg {
+    Rom,
+    Bios,
+}
+
+impl ImageArg {
+    fn parse(value: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        match value {
+            "rom" => Ok(Self::Rom),
+            "bios" => Ok(Self::Bios),
+            other => Err(format!("unknown --image kind: {other} (expected rom or bios)").into()),
+        }
+    }
+}
 
 #[derive(Debug)]
 struct Args {
     rom_path: PathBuf,
     execute: bool,
     max_steps: u64,
+    image: ImageArg,
 }
 
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
@@ -19,6 +36,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let mut rom_path = None;
     let mut execute = false;
     let mut max_steps = 100_000;
+    let mut image = ImageArg::Rom;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -28,6 +46,9 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
                     .next()
                     .ok_or("--max-steps requires a value")?
                     .parse()?;
+            }
+            "--image" => {
+                image = ImageArg::parse(&args.next().ok_or("--image requires rom or bios")?)?;
             }
             value if value.starts_with('-') => {
                 return Err(format!("unknown option: {value}").into());
@@ -43,7 +64,27 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
         }),
         execute,
         max_steps,
+        image,
     })
+}
+
+fn image_mapping(image: ImageArg, size: usize) -> ImageMapping {
+    match image {
+        ImageArg::Rom => ImageMapping::new(
+            ImageKind::CartridgeRom,
+            0x0800_0000,
+            size as u32,
+            0x0800_0000,
+            gba_recompiler::Mode::Arm,
+        ),
+        ImageArg::Bios => ImageMapping::new(
+            ImageKind::Bios,
+            0x0000_0000,
+            size as u32,
+            0x0000_0000,
+            gba_recompiler::Mode::Arm,
+        ),
+    }
 }
 
 fn workspace_generated_runner_dir() -> PathBuf {
@@ -134,11 +175,15 @@ fn execute_generated_rom(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args()?;
-    let rom = fs::read(&args.rom_path)?;
-    let program = analyze(&rom, ROM_BASE, Mode::Arm)?;
+    let image = fs::read(&args.rom_path)?;
+    let mapping = image_mapping(args.image, image.len());
+    let program = analyze_with_mapping(&image, mapping)?;
+
     println!(
-        "static analysis: entry={:#x}, blocks={}, instructions={}",
+        "static analysis: image={:?}, entry={:#x}, region={:?}, blocks={}, instructions={}",
+        mapping.kind,
         program.cfg.blocks[program.entry.0].key.address,
+        program.address_space.region_at(mapping.entry),
         program.cfg.blocks.len(),
         program
             .cfg
@@ -155,6 +200,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("generated Rust: {generated_path}");
 
     if args.execute {
+        if args.image == ImageArg::Bios {
+            return Err(
+                "BIOS generated execution is not enabled yet: gba-runtime must map BIOS bytes into the GBA address space first".into(),
+            );
+        }
         println!(
             "executing generated ROM: max_steps={}, dispatcher=linked CFG",
             args.max_steps
@@ -163,12 +213,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let mut runtime = Runtime::new();
-    runtime.load_cartridge(Cartridge::from_rom(rom, "saves"));
-    println!(
-        "runtime ready: pc={:#x}, rom={} bytes",
-        runtime.cpu.r[15],
-        runtime.cartridge.as_ref().unwrap().rom.len()
-    );
+    if args.image == ImageArg::Rom {
+        let mut runtime = Runtime::new();
+        runtime.load_cartridge(Cartridge::from_rom(image, "saves"));
+        println!(
+            "runtime ready: pc={:#x}, rom={} bytes",
+            runtime.cpu.r[15],
+            runtime.cartridge.as_ref().unwrap().rom.len()
+        );
+    } else {
+        println!("runtime: BIOS mapping recorded; BIOS-backed execution remains disabled");
+    }
+
     Ok(())
 }
