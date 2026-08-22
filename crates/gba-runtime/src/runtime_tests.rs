@@ -245,7 +245,7 @@ fn internal_ram_and_video_mirrors_share_physical_storage() {
 #[test]
 fn cartridge_rom_waitstate_windows_alias_the_same_rom() {
     let mut runtime = Runtime::new();
-    runtime.cartridge = Some(crate::Cartridge::from_rom(vec![0x78, 0x56, 0x34, 0x12]));
+    runtime.cartridge = Some(crate::Cartridge::from_rom(vec![0x78, 0x56, 0x34, 0x12], "."));
     assert_eq!(runtime.read32(ROM0_START), 0x1234_5678);
     assert_eq!(runtime.read32(ROM1_START), 0x1234_5678);
     assert_eq!(runtime.read32(ROM0_START + 0x20_000), 0xff_ff_ff_ff);
