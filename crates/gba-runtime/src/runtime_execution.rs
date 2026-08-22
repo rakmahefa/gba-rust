@@ -72,6 +72,7 @@ impl Runtime {
         match event {
             EventKind::PpuHBlankStart => {
                 self.dispstat |= DISPSTAT_HBLANK;
+                self.ppu.sync_registers(&self.io);
                 self.ppu.render_scanline(self.dispcnt, self.vcount, &self.vram, &self.palette);
                 if self.dispstat & DISPSTAT_HBLANK_IRQ != 0 {
                     self.raise_hardware_interrupt(IRQ_HBLANK);
