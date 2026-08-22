@@ -36,6 +36,17 @@ fn timer_prescaler_accumulates_partial_cycles() {
 }
 
 #[test]
+fn non_cascade_timer_counts_direct_cpu_cycles() {
+    let mut runtime = Runtime::new();
+    runtime.write16(TIMER1CNT_L, 0);
+    runtime.write16(TIMER1CNT_H, CONTROL_ENABLE);
+
+    runtime.tick(17);
+
+    assert_eq!(runtime.read16(TIMER1CNT_L), 17);
+}
+
+#[test]
 fn cascade_timer_consumes_predecessor_overflow_and_can_request_its_own_irq() {
     let mut runtime = Runtime::new();
     runtime.write16(TIMER0CNT_L, 0xffff);
