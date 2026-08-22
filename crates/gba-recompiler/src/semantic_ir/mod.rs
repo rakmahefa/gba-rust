@@ -12,8 +12,8 @@ pub use validate::validate_semantic_program;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decoder::{Condition, Mode, ROM_BASE};
-    use crate::ir::{IrControlEffect, IrOp};
+    use crate::decoder::{Mode, ROM_BASE};
+    use crate::ir::IrControlEffect;
     use crate::{analyze, discover_functions};
 
     fn arm_rom(words: &[u32]) -> Vec<u8> {
@@ -34,7 +34,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_condition_preserves_flag_dependency() {
+    fn semantic_condition_preserves_exact_flag_dependency() {
         let program = analyze(
             &arm_rom(&[0x0A00_0000, 0xE1A0_0000, 0xE1A0_0000]),
             ROM_BASE,
@@ -44,8 +44,11 @@ mod tests {
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
         let flags = semantic.functions[0].blocks[0].instructions[0].flags;
-        assert!(flags.read);
-        assert!(!flags.write);
+        assert!(!flags.read_n);
+        assert!(flags.read_z);
+        assert!(!flags.read_c);
+        assert!(!flags.read_v);
+        assert!(!flags.writes_any());
     }
 
     #[test]
@@ -56,7 +59,7 @@ mod tests {
         let instruction = &semantic.functions[0].blocks[0].instructions[0];
         assert_eq!(instruction.reads, vec![1, 2]);
         assert_eq!(instruction.writes, vec![0]);
-        assert!(!instruction.flags.write);
+        assert!(!instruction.flags.writes_any());
         assert_eq!(instruction.control_effect(), IrControlEffect::None);
     }
 
@@ -136,16 +139,43 @@ mod tests {
     }
 
     #[test]
-    fn semantic_validation_rejects_changed_control_effect() {
+    fn semantic_validation_rejects_changed_operations() {
         let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let mut semantic = build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].instructions[0].ops.push(IrOp::Branch {
-            target: ROM_BASE,
-            condition: Condition::Al,
-            link: false,
-        });
+        semantic.functions[0].blocks[0].instructions[0].ops.clear();
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
-        assert!(error.contains("instruction control effect changed"));
+        assert!(error.contains("instruction operations changed"));
+    }
+
+    #[test]
+    fn semantic_validation_rejects_changed_flag_identity() {
+        let program = analyze(
+            &arm_rom(&[0x0A00_0000, 0xE1A0_0000, 0xE1A0_0000]),
+            ROM_BASE,
+            Mode::Arm,
+        )
+        .unwrap();
+        let functions = discover_functions(&program);
+        let mut semantic = build_semantic_program(&program, &functions).unwrap();
+        semantic.functions[0].blocks[0].instructions[0].flags.read_c = true;
+        let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
+        assert!(error.contains("instruction flag effects changed"));
+    }
+
+    #[test]
+    fn semantic_validation_rejects_changed_memory_address_mode() {
+        let program = analyze(&arm_rom(&[0xE59F_0000, 0xE1A0_0000]), ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let mut semantic = build_semantic_program(&program, &functions).unwrap();
+        match semantic.functions[0].blocks[0].instructions[0].memory {
+            Some(MemoryEffect::Read {
+                ref mut address_is_dynamic,
+                ..
+            }) => *address_is_dynamic = !*address_is_dynamic,
+            _ => panic!("expected a semantic memory read"),
+        }
+        let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
+        assert!(error.contains("instruction memory effects changed"));
     }
 }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ir::{IrInstruction, IrOp, Value};
-use crate::semantic_ir::{SemanticInstruction, SemanticProgram};
+use crate::semantic_ir::{FlagEffect, MemoryEffect, MemoryWidth, SemanticInstruction, SemanticProgram};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptimizationKind {
@@ -350,35 +350,39 @@ fn semantic_instruction_from_ir(instruction: &IrInstruction) -> SemanticInstruct
         ops: instruction.ops.clone(),
         reads: instruction.reads(),
         writes: instruction.writes(),
-        memory: instruction.memory().map(|memory| match memory.kind {
-            crate::ir::IrMemoryKind::Read => crate::semantic_ir::MemoryEffect::Read {
-                width: match memory.width {
-                    crate::ir::IrMemoryWidth::Byte => crate::semantic_ir::MemoryWidth::Byte,
-                    crate::ir::IrMemoryWidth::Halfword => crate::semantic_ir::MemoryWidth::Halfword,
-                    crate::ir::IrMemoryWidth::Word => crate::semantic_ir::MemoryWidth::Word,
+        memory: instruction.memory().map(|memory| {
+            let width = match memory.width {
+                crate::ir::IrMemoryWidth::Byte => MemoryWidth::Byte,
+                crate::ir::IrMemoryWidth::Halfword => MemoryWidth::Halfword,
+                crate::ir::IrMemoryWidth::Word => MemoryWidth::Word,
+            };
+            match memory.kind {
+                crate::ir::IrMemoryKind::Read => MemoryEffect::Read {
+                    width,
+                    base: memory.base,
+                    address_is_dynamic: memory.address_is_dynamic,
                 },
-                base: memory.base,
-            },
-            crate::ir::IrMemoryKind::Write => crate::semantic_ir::MemoryEffect::Write {
-                width: match memory.width {
-                    crate::ir::IrMemoryWidth::Byte => crate::semantic_ir::MemoryWidth::Byte,
-                    crate::ir::IrMemoryWidth::Halfword => crate::semantic_ir::MemoryWidth::Halfword,
-                    crate::ir::IrMemoryWidth::Word => crate::semantic_ir::MemoryWidth::Word,
+                crate::ir::IrMemoryKind::Write => MemoryEffect::Write {
+                    width,
+                    base: memory.base,
+                    address_is_dynamic: memory.address_is_dynamic,
                 },
-                base: memory.base,
-            },
-            crate::ir::IrMemoryKind::ReadWrite => crate::semantic_ir::MemoryEffect::ReadWrite {
-                width: match memory.width {
-                    crate::ir::IrMemoryWidth::Byte => crate::semantic_ir::MemoryWidth::Byte,
-                    crate::ir::IrMemoryWidth::Halfword => crate::semantic_ir::MemoryWidth::Halfword,
-                    crate::ir::IrMemoryWidth::Word => crate::semantic_ir::MemoryWidth::Word,
+                crate::ir::IrMemoryKind::ReadWrite => MemoryEffect::ReadWrite {
+                    width,
+                    base: memory.base,
+                    address_is_dynamic: memory.address_is_dynamic,
                 },
-                base: memory.base,
-            },
+            }
         }),
-        flags: crate::semantic_ir::FlagEffect {
-            read: flags.reads_any(),
-            write: flags.writes_any(),
+        flags: FlagEffect {
+            read_n: flags.read_n,
+            read_z: flags.read_z,
+            read_c: flags.read_c,
+            read_v: flags.read_v,
+            write_n: flags.write_n,
+            write_z: flags.write_z,
+            write_c: flags.write_c,
+            write_v: flags.write_v,
         },
     }
 }

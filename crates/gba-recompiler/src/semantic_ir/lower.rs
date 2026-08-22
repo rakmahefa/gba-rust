@@ -3,8 +3,8 @@ use crate::function::FunctionControlFlowGraph;
 use crate::ir::{IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth};
 
 use super::{
-    MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram,
-    SemanticTerminator,
+    FlagEffect, MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction,
+    SemanticProgram, SemanticTerminator,
 };
 
 fn memory_width(width: IrMemoryWidth) -> MemoryWidth {
@@ -17,9 +17,21 @@ fn memory_width(width: IrMemoryWidth) -> MemoryWidth {
 
 fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
     let memory = ir.memory().map(|memory| match memory.kind {
-        IrMemoryKind::Read => MemoryEffect::Read { width: memory_width(memory.width), base: memory.base },
-        IrMemoryKind::Write => MemoryEffect::Write { width: memory_width(memory.width), base: memory.base },
-        IrMemoryKind::ReadWrite => MemoryEffect::ReadWrite { width: memory_width(memory.width), base: memory.base },
+        IrMemoryKind::Read => MemoryEffect::Read {
+            width: memory_width(memory.width),
+            base: memory.base,
+            address_is_dynamic: memory.address_is_dynamic,
+        },
+        IrMemoryKind::Write => MemoryEffect::Write {
+            width: memory_width(memory.width),
+            base: memory.base,
+            address_is_dynamic: memory.address_is_dynamic,
+        },
+        IrMemoryKind::ReadWrite => MemoryEffect::ReadWrite {
+            width: memory_width(memory.width),
+            base: memory.base,
+            address_is_dynamic: memory.address_is_dynamic,
+        },
     });
     let flags = ir.flags();
     SemanticInstruction {
@@ -29,38 +41,85 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
         reads: ir.reads(),
         writes: ir.writes(),
         memory,
-        flags: super::FlagEffect { read: flags.reads_any(), write: flags.writes_any() },
+        flags: FlagEffect {
+            read_n: flags.read_n,
+            read_z: flags.read_z,
+            read_c: flags.read_c,
+            read_v: flags.read_v,
+            write_n: flags.write_n,
+            write_z: flags.write_z,
+            write_c: flags.write_c,
+            write_v: flags.write_v,
+        },
     }
 }
 
 fn terminator(block: &SemanticBlock) -> SemanticTerminator {
-    let Some(effect) = block.instructions.iter().rev().map(SemanticInstruction::control_effect).find(|effect| !matches!(effect, IrControlEffect::None)) else {
+    let Some(effect) = block
+        .instructions
+        .iter()
+        .rev()
+        .map(SemanticInstruction::control_effect)
+        .find(|effect| !matches!(effect, IrControlEffect::None))
+    else {
         return SemanticTerminator::Fallthrough;
     };
     match effect {
-        IrControlEffect::Branch { target, condition, link: true } => SemanticTerminator::Call { target, condition },
-        IrControlEffect::Branch { target, condition, link: false } => SemanticTerminator::Branch { target, condition },
-        IrControlEffect::BranchExchange { register: 14, link: false } => SemanticTerminator::Return,
-        IrControlEffect::BranchExchange { register, link: true } => SemanticTerminator::IndirectCall { register, mode: block.mode },
-        IrControlEffect::BranchExchange { register, link: false } => SemanticTerminator::IndirectBranch { register },
+        IrControlEffect::Branch {
+            target,
+            condition,
+            link: true,
+        } => SemanticTerminator::Call { target, condition },
+        IrControlEffect::Branch {
+            target,
+            condition,
+            link: false,
+        } => SemanticTerminator::Branch { target, condition },
+        IrControlEffect::BranchExchange {
+            register: 14,
+            link: false,
+        } => SemanticTerminator::Return,
+        IrControlEffect::BranchExchange {
+            register,
+            link: true,
+        } => SemanticTerminator::IndirectCall {
+            register,
+            mode: block.mode,
+        },
+        IrControlEffect::BranchExchange {
+            register,
+            link: false,
+        } => SemanticTerminator::IndirectBranch { register },
         IrControlEffect::Unknown => SemanticTerminator::Unknown,
         IrControlEffect::None => SemanticTerminator::Fallthrough,
     }
 }
 
-fn semantic_successors(source_successors: &[BlockId], terminator: &SemanticTerminator) -> Vec<BlockId> {
+fn semantic_successors(
+    source_successors: &[BlockId],
+    terminator: &SemanticTerminator,
+) -> Vec<BlockId> {
     match terminator {
-        SemanticTerminator::Return | SemanticTerminator::IndirectBranch { .. } | SemanticTerminator::Unknown => Vec::new(),
+        SemanticTerminator::Return
+        | SemanticTerminator::IndirectBranch { .. }
+        | SemanticTerminator::Unknown => Vec::new(),
         _ => source_successors.to_vec(),
     }
 }
 
-pub fn build_semantic_program(program: &Program, functions: &FunctionControlFlowGraph) -> Result<SemanticProgram, String> {
+pub fn build_semantic_program(
+    program: &Program,
+    functions: &FunctionControlFlowGraph,
+) -> Result<SemanticProgram, String> {
     let mut semantic_functions = Vec::with_capacity(functions.functions.len());
     for function in &functions.functions {
         let mut blocks = Vec::with_capacity(function.blocks.len());
         for &block_id in &function.blocks {
-            let block = program.cfg.blocks.get(block_id.0).ok_or_else(|| format!("function {} references missing block {}", function.id.0, block_id.0))?;
+            let block = program
+                .cfg
+                .blocks
+                .get(block_id.0)
+                .ok_or_else(|| format!("function {} references missing block {}", function.id.0, block_id.0))?;
             let instructions = block.ir.iter().map(semantic_instruction).collect::<Vec<_>>();
             let mut semantic = SemanticBlock {
                 id: block.id,
@@ -83,7 +142,11 @@ pub fn build_semantic_program(program: &Program, functions: &FunctionControlFlow
             returns: function.return_sites.clone(),
         });
     }
-    let semantic = SemanticProgram { entry: functions.entry, functions: semantic_functions, block_to_function: functions.block_to_function.clone() };
+    let semantic = SemanticProgram {
+        entry: functions.entry,
+        functions: semantic_functions,
+        block_to_function: functions.block_to_function.clone(),
+    };
     super::validate::validate_semantic_program(program, functions, &semantic)?;
     Ok(semantic)
 }
