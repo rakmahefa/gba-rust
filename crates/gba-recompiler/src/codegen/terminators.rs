@@ -97,6 +97,48 @@ fn emit_direct_terminator(
     }
 }
 
+fn emit_software_interrupt(
+    out: &mut String,
+    block: &SemanticBlock,
+    program: &Program,
+    comment: u32,
+) {
+    let thumb = mode_bool(block.mode);
+    let (address, size) = block
+        .instructions
+        .last()
+        .map(|instruction| (instruction.address, instruction.size))
+        .unwrap_or((block.address, 0));
+    let next_pc = address.wrapping_add(size as u32);
+
+    let _ = writeln!(
+        out,
+        "    let bios_result = rt.execute_bios_swi_comment({comment:#010x}, {thumb})?;"
+    );
+    let _ = writeln!(out, "    if bios_result.returned {{");
+    if let Some((target, target_mode)) = source_successor(program, block) {
+        let _ = writeln!(
+            out,
+            "        return Ok(GeneratedBlockExit::continue_to({target:#010x}, {}));",
+            mode_bool(target_mode)
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "        return Ok(GeneratedBlockExit::halt({next_pc:#010x}, {thumb}));"
+        );
+    }
+    let _ = writeln!(out, "    }}");
+    let _ = writeln!(
+        out,
+        "    if let Some(next_pc) = bios_result.next_pc {{ return Ok(GeneratedBlockExit::continue_to(next_pc, bios_result.next_thumb)); }}"
+    );
+    let _ = writeln!(
+        out,
+        "    return Ok(GeneratedBlockExit::halt({next_pc:#010x}, {thumb}));"
+    );
+}
+
 pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Program) {
     let (address, size) = block
         .instructions
@@ -152,11 +194,8 @@ pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Progra
                 );
             }
         }
-        SemanticTerminator::SoftwareInterrupt { .. } => {
-            let _ = writeln!(
-                out,
-                "    return Err(\"software interrupt execution is not implemented\");"
-            );
+        SemanticTerminator::SoftwareInterrupt { comment } => {
+            emit_software_interrupt(out, block, program, comment);
         }
         SemanticTerminator::Unknown => {
             let _ = writeln!(
@@ -240,5 +279,26 @@ mod tests {
         assert!(generated.contains("let branch_taken = rt.condition_code(10);"));
         assert!(generated.contains("[generated-branch]"));
         assert!(generated.contains("branch_taken"));
+    }
+
+    #[test]
+    fn software_interrupt_calls_the_runtime_bios_contract() {
+        let rom = arm_rom(&[0xEF00_0002, 0xE1A0_0000]);
+        let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let block = semantic
+            .functions
+            .iter()
+            .flat_map(|function| function.blocks.iter())
+            .find(|block| matches!(block.terminator, SemanticTerminator::SoftwareInterrupt { comment: 2 }))
+            .expect("software interrupt block");
+
+        let mut generated = String::new();
+        emit_terminator(&mut generated, block, &program);
+
+        assert!(generated.contains("rt.execute_bios_swi_comment(0x00000002, false)?"));
+        assert!(generated.contains("bios_result.returned"));
+        assert!(!generated.contains("software interrupt execution is not implemented"));
     }
 }
