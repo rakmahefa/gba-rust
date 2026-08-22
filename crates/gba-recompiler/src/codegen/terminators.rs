@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn conditional_branch_emits_runtime_decision_trace() {
-        let rom = arm_rom(&[0xA000_0000, 0xE1A0_0000, 0xE1A0_0000]);
+        let rom = arm_rom(&[0xAA00_0000, 0xE1A0_0000, 0xE1A0_0000]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
