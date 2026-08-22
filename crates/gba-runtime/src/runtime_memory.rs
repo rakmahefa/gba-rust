@@ -107,7 +107,7 @@ impl Runtime {
             }
             mmio::WAITCNT_HI => {
                 self.waitcnt = (self.waitcnt & 0x8000)
-                    | ((u16::from(value) << 8) & 0x7000);
+                    | ((u16::from(value) << 8) & 0x5000);
             }
             mmio::IME => {
                 self.interrupts.ime = value & 1 != 0;
