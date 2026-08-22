@@ -1,10 +1,12 @@
-use super::arm7tdmi;
+use crate::arm7tdmi;
+use crate::bios::PowerState;
+use crate::cpu::REG_PC;
 use super::Runtime;
 
 impl Runtime {
     pub fn step_recompiled(&mut self, cycles: u32) {
         self.cycles = self.cycles.wrapping_add(cycles as u64);
-        if self.power != super::bios::PowerState::Stopped {
+        if self.power != PowerState::Stopped {
             self.service_interrupts();
         }
     }
@@ -19,7 +21,7 @@ impl Runtime {
 
     pub fn dispatch_mode(&mut self, address: u32, thumb: bool) -> ! {
         self.cpu.set_thumb(thumb);
-        self.cpu.r[super::cpu::REG_PC] = address & if thumb { !1 } else { !3 };
+        self.cpu.r[REG_PC] = address & if thumb { !1 } else { !3 };
         panic!(
             "generated dispatch target {address:#010x} ({}) is not linked yet",
             if thumb { "Thumb" } else { "ARM" }
@@ -29,7 +31,7 @@ impl Runtime {
     pub fn dispatch_exchange(&mut self, target: u32) -> ! {
         let (address, thumb) = arm7tdmi::exchange_target(target);
         self.cpu.set_thumb(thumb);
-        self.cpu.r[super::cpu::REG_PC] = address;
+        self.cpu.r[REG_PC] = address;
         panic!("generated BX target {target:#010x} is not linked yet")
     }
 
@@ -38,7 +40,7 @@ impl Runtime {
     }
 
     pub fn halt(&mut self) -> ! {
-        self.power = super::bios::PowerState::Halted;
+        self.power = PowerState::Halted;
         panic!("recompiled program halted")
     }
 
@@ -64,17 +66,17 @@ impl Runtime {
                     return Err("generated execution step limit exceeded");
                 }
             }
-            if self.power == super::bios::PowerState::Stopped {
+            if self.power == PowerState::Stopped {
                 return Err("runtime is stopped");
             }
-            if self.power == super::bios::PowerState::Halted {
+            if self.power == PowerState::Halted {
                 self.step_recompiled(1);
-                if self.power == super::bios::PowerState::Halted {
+                if self.power == PowerState::Halted {
                     return Err("runtime is halted");
                 }
             }
             self.cpu.set_thumb(next.1);
-            self.cpu.r[super::cpu::REG_PC] = next.0;
+            self.cpu.r[REG_PC] = next.0;
             next = dispatch(self, next.0, next.1)?;
             steps = steps.wrapping_add(1);
         }
@@ -83,7 +85,7 @@ impl Runtime {
     pub fn exchange_target_for_dispatch(&mut self, target: u32) -> (u32, bool) {
         let (address, thumb) = arm7tdmi::exchange_target(target);
         self.cpu.set_thumb(thumb);
-        self.cpu.r[super::cpu::REG_PC] = address;
+        self.cpu.r[REG_PC] = address;
         (address, thumb)
     }
 }
