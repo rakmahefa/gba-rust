@@ -57,13 +57,13 @@ fn hblank_dma_is_triggered_by_the_ppu_timeline_and_can_raise_irq() {
 fn timer_mmio_programming_advances_on_the_same_scheduler_clock() {
     let mut runtime = Runtime::new();
     runtime.interrupts.ie = gba_runtime::IRQ_TIMER0;
-    runtime.write8(TIMER0CNT_L, 0xff);
-    runtime.write8(TIMER0CNT_L + 1, 0xff);
-    runtime.write8(TIMER0CNT_H, (TIMER_ENABLE | TIMER_IRQ) as u8);
-    runtime.write8(TIMER0CNT_H + 1, 0);
+    runtime.write8(TIMER0CNT_L.address, 0xff);
+    runtime.write8(TIMER0CNT_L.address + 1, 0xff);
+    runtime.write8(TIMER0CNT_H.address, (TIMER_ENABLE | TIMER_IRQ) as u8);
+    runtime.write8(TIMER0CNT_H.address + 1, 0);
 
-    assert_eq!(runtime.read16(TIMER0CNT_L), 0xffff);
-    assert_eq!(runtime.read16(TIMER0CNT_H), TIMER_ENABLE | TIMER_IRQ);
+    assert_eq!(runtime.read16(TIMER0CNT_L.address), 0xffff);
+    assert_eq!(runtime.read16(TIMER0CNT_H.address), TIMER_ENABLE | TIMER_IRQ);
     runtime.advance_cycles(1);
     assert_eq!(runtime.timers[0].counter(), 0xffff);
     assert_ne!(runtime.interrupts.iflags & gba_runtime::IRQ_TIMER0, 0);
