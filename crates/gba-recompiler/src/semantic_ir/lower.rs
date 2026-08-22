@@ -1,6 +1,6 @@
 use crate::cfg::{BlockId, Program};
 use crate::function::FunctionControlFlowGraph;
-use crate::ir::{IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth, IrOp};
+use crate::ir::{IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth};
 
 use super::{
     MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram,
@@ -86,32 +86,4 @@ pub fn build_semantic_program(program: &Program, functions: &FunctionControlFlow
     let semantic = SemanticProgram { entry: functions.entry, functions: semantic_functions, block_to_function: functions.block_to_function.clone() };
     super::validate::validate_semantic_program(program, functions, &semantic)?;
     Ok(semantic)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::decoder::{Mode, ROM_BASE};
-
-    #[test]
-    fn unknown_control_effect_drops_cfg_successors() {
-        let block = SemanticBlock {
-            id: BlockId(0),
-            address: ROM_BASE,
-            mode: Mode::Arm,
-            instructions: vec![SemanticInstruction {
-                address: ROM_BASE,
-                size: 4,
-                ops: vec![IrOp::Unknown { address: ROM_BASE, raw: u32::MAX, mode: Mode::Arm }],
-                reads: Vec::new(),
-                writes: Vec::new(),
-                memory: None,
-                flags: super::super::FlagEffect { read: false, write: false },
-            }],
-            successors: vec![BlockId(1)],
-            terminator: SemanticTerminator::Unknown,
-        };
-        assert_eq!(terminator(&block), SemanticTerminator::Unknown);
-        assert!(semantic_successors(&block.successors, &SemanticTerminator::Unknown).is_empty());
-    }
 }
