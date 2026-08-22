@@ -28,6 +28,9 @@ mod runtime_memory;
 #[path = "runtime_tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "mmio_tests.rs"]
+mod mmio_tests;
+#[cfg(test)]
 #[path = "timer_tests.rs"]
 mod timer_tests;
 
