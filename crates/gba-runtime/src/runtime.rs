@@ -4,6 +4,7 @@ use super::bios::{InterruptController, PowerState};
 use super::bios_memory::{Bios, BiosLoadError};
 use super::cartridge::Cartridge;
 use super::cpu::Cpu;
+use super::scheduler::TimingScheduler;
 use super::timers::{Timer, TIMER_COUNT};
 use super::{Apu, Ppu};
 
@@ -51,11 +52,22 @@ pub struct Runtime {
     pub keyinput: u16,
     pub dispstat: u16,
     pub vcount: u16,
+    pub scheduler: TimingScheduler,
     pub cycles: u64,
 }
 
 impl Default for Runtime {
     fn default() -> Self {
+        let mut scheduler = TimingScheduler::new();
+        scheduler.schedule_at(
+            super::scheduler::HBLANK_START_CYCLES,
+            super::scheduler::EventKind::PpuHBlankStart,
+        );
+        scheduler.schedule_at(
+            super::scheduler::CYCLES_PER_SCANLINE,
+            super::scheduler::EventKind::PpuScanline,
+        );
+
         Self {
             cpu: Cpu::default(),
             bios: Bios::default(),
@@ -76,6 +88,7 @@ impl Default for Runtime {
             keyinput: KEYINPUT_DEFAULT,
             dispstat: 0,
             vcount: 0,
+            scheduler,
             cycles: 0,
         }
     }
