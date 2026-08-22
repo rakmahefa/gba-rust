@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::decoder::Mode;
+use crate::decoder::{ArmExtended, Mode, ThumbExtended};
 use crate::ir::IrOp;
 
 use super::arm::emit_arm_extended;
@@ -115,23 +115,36 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
     }
 }
 
+fn is_software_interrupt(op: &IrOp) -> bool {
+    matches!(
+        op,
+        IrOp::ArmExtended {
+            op: ArmExtended::SoftwareInterrupt { .. }
+        } | IrOp::ThumbExtended {
+            op: ThumbExtended::SoftwareInterrupt { .. }
+        }
+    )
+}
+
 pub fn emit_op(out: &mut String, ins_address: u32, ins_raw: u32, mode: Mode, op: &IrOp) {
     let _ = writeln!(
         out,
         "    rt.enter_instruction({ins_address:#010x}, {});",
         matches!(mode, Mode::Thumb)
     );
-    if mode == Mode::Arm {
-        let condition = (ins_raw >> 28) & 0xf;
-        if condition != 0xe {
-            let _ = writeln!(out, "    if rt.condition_code({condition}) {{");
-            emit_inner_op(out, ins_raw, mode, op);
-            let _ = writeln!(out, "    }}");
+    if !is_software_interrupt(op) {
+        if mode == Mode::Arm {
+            let condition = (ins_raw >> 28) & 0xf;
+            if condition != 0xe {
+                let _ = writeln!(out, "    if rt.condition_code({condition}) {{");
+                emit_inner_op(out, ins_raw, mode, op);
+                let _ = writeln!(out, "    }}");
+            } else {
+                emit_inner_op(out, ins_raw, mode, op);
+            }
         } else {
             emit_inner_op(out, ins_raw, mode, op);
         }
-    } else {
-        emit_inner_op(out, ins_raw, mode, op);
     }
     let _ = writeln!(out, "    rt.tick(1);");
 }
@@ -146,6 +159,23 @@ mod tests {
         emit_op(&mut out, 0x0800_0000, 0xE3A0_0001, Mode::Arm, &IrOp::Nop);
         assert!(out.contains("rt.enter_instruction(0x08000000, false)"));
         assert!(out.contains("rt.tick(1)"));
+    }
+
+    #[test]
+    fn software_interrupt_is_deferred_to_the_terminator() {
+        let mut out = String::new();
+        emit_op(
+            &mut out,
+            0x0000_0000,
+            0xEF00_0002,
+            Mode::Arm,
+            &IrOp::ArmExtended {
+                op: ArmExtended::SoftwareInterrupt { comment: 2 },
+            },
+        );
+        assert!(out.contains("rt.enter_instruction(0x00000000, false)"));
+        assert!(out.contains("rt.tick(1)"));
+        assert!(!out.contains("raise_exception"));
     }
 
     #[test]
