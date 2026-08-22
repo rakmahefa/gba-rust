@@ -41,19 +41,19 @@ impl Runtime {
 
         match address {
             mmio::DISPSTAT => self.dispstat as u8,
-            mmio::DISPSTAT + 1 => (self.dispstat >> 8) as u8,
+            mmio::DISPSTAT_HI => (self.dispstat >> 8) as u8,
             mmio::VCOUNT => self.vcount as u8,
-            mmio::VCOUNT + 1 => (self.vcount >> 8) as u8,
+            mmio::VCOUNT_HI => (self.vcount >> 8) as u8,
             mmio::KEYINPUT => self.keyinput as u8,
-            mmio::KEYINPUT + 1 => (self.keyinput >> 8) as u8,
+            mmio::KEYINPUT_HI => (self.keyinput >> 8) as u8,
             mmio::IE => self.interrupts.ie as u8,
-            mmio::IE + 1 => (self.interrupts.ie >> 8) as u8,
+            mmio::IE_HI => (self.interrupts.ie >> 8) as u8,
             mmio::IF => self.interrupts.iflags as u8,
-            mmio::IF + 1 => (self.interrupts.iflags >> 8) as u8,
+            mmio::IF_HI => (self.interrupts.iflags >> 8) as u8,
             mmio::WAITCNT => self.waitcnt as u8,
-            mmio::WAITCNT + 1 => (self.waitcnt >> 8) as u8,
+            mmio::WAITCNT_HI => (self.waitcnt >> 8) as u8,
             mmio::IME => u8::from(self.interrupts.ime),
-            mmio::IME + 1 => 0,
+            mmio::IME_HI => 0,
             mmio::POSTFLG => self.postflg,
             mmio::HALTCNT => 0,
             _ => *self.io.get(&address).unwrap_or(&0),
@@ -75,21 +75,19 @@ impl Runtime {
             mmio::DISPSTAT => {
                 self.dispstat = (self.dispstat & 0xff07) | (u16::from(value) & 0xf8);
             }
-            mmio::DISPSTAT + 1 => {
+            mmio::DISPSTAT_HI => {
                 self.dispstat = (self.dispstat & 0x00ff) | (u16::from(value) << 8);
             }
-            mmio::VCOUNT => {}
-            mmio::VCOUNT + 1 => {}
-            mmio::KEYINPUT => {}
-            mmio::KEYINPUT + 1 => {}
+            mmio::VCOUNT | mmio::VCOUNT_HI => {}
+            mmio::KEYINPUT | mmio::KEYINPUT_HI => {}
             mmio::IE => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
-            mmio::IE + 1 => {
+            mmio::IE_HI => {
                 self.interrupts.ie = (self.interrupts.ie & 0x00ff) | (u16::from(value) << 8)
             }
             mmio::IF => self.interrupts.acknowledge(value as u16),
-            mmio::IF + 1 => self.interrupts.acknowledge((u16::from(value)) << 8),
+            mmio::IF_HI => self.interrupts.acknowledge((u16::from(value)) << 8),
             mmio::WAITCNT => self.waitcnt = (self.waitcnt & 0xff00) | value as u16,
-            mmio::WAITCNT + 1 => {
+            mmio::WAITCNT_HI => {
                 self.waitcnt = (self.waitcnt & 0x00ff) | (u16::from(value) << 8)
             }
             mmio::IME => {
@@ -98,7 +96,7 @@ impl Runtime {
                     self.service_interrupts();
                 }
             }
-            mmio::IME + 1 => {}
+            mmio::IME_HI => {}
             mmio::POSTFLG => self.postflg = value & 1,
             mmio::HALTCNT => {
                 self.power = if value & 0x80 != 0 {
@@ -246,10 +244,5 @@ impl Runtime {
                 }
             }
         }
-    }
-
-    #[allow(dead_code)]
-    fn _timer_base_for_tests(&self, index: usize) -> Option<u32> {
-        timers::timer_base(index)
     }
 }
