@@ -35,18 +35,23 @@ impl Runtime {
         result
     }
 
-    pub fn bios_swi_number(&mut self, raw: u32, thumb: bool) -> Option<BiosResult> {
+    pub fn bios_swi_number(&mut self, raw: u32, thumb: bool) -> (u8, Option<BiosResult>) {
         let number = crate::bios::swi_number(raw, thumb);
-        BiosSwi::from_number(number).map(|swi| self.bios_swi(swi))
+        let result = BiosSwi::from_number(number).map(|swi| self.bios_swi(swi));
+        (number, result)
     }
 
     pub fn execute_bios_swi_comment(
         &mut self,
         comment: u32,
         thumb: bool,
-    ) -> Result<BiosResult, &'static str> {
-        self.bios_swi_number(comment, thumb)
-            .ok_or("generated BIOS SWI number is not implemented")
+    ) -> Result<BiosResult, String> {
+        let (number, result) = self.bios_swi_number(comment, thumb);
+        result.ok_or_else(|| {
+            format!(
+                "generated BIOS SWI number is not implemented: number=0x{number:02x} comment=0x{comment:08x} thumb={thumb}"
+            )
+        })
     }
 
     pub fn request_interrupt(&mut self, mask: u16) {
