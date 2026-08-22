@@ -1,6 +1,5 @@
-use crate::decoder::{DecodeError, Instruction, Mode};
+use crate::decoder::{Instruction, Mode};
 use crate::ir::IrInstruction;
-use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct BlockId(pub usize);
@@ -30,14 +29,6 @@ pub struct ControlFlowGraph {
 pub struct Program {
     pub entry: BlockId,
     pub cfg: ControlFlowGraph,
-}
-
-#[derive(Debug, Error)]
-pub enum AnalysisError {
-    #[error(transparent)]
-    Decode(#[from] DecodeError),
-    #[error("entry {0:#x} is outside the cartridge ROM")]
-    InvalidEntry(u32),
 }
 
 #[derive(Debug, Clone)]
