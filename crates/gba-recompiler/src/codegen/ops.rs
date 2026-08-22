@@ -113,7 +113,7 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
 fn emit_unknown_return(out: &mut String, address: u32, raw: u32, mode: Mode) {
     let _ = writeln!(
         out,
-        "    return Err(format!(\"unsupported instruction in specialized codegen: pc={{:#010x}} mode={{:?}} raw={{:#010x}}\", {address:#010x}, {mode:?}, {raw:#010x}).leak());"
+        "    return Err(format!(\"unsupported instruction in specialized codegen: pc={{:#010x}} mode={mode:?} raw={{:#010x}}\", {address:#010x}, {raw:#010x}).leak());"
     );
 }
 
