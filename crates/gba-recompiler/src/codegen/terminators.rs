@@ -154,7 +154,7 @@ mod tests {
         let rom = arm_rom(&[
             0xE59F_3000,
             0xE12F_FF33,
-            0x0000000C,
+            ROM_BASE + 0x0000_000c,
             0xE1A0_0000,
         ]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
