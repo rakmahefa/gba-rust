@@ -1,10 +1,27 @@
 use super::Runtime;
 use crate::arm7tdmi::{self, Nzcv, ShiftKind, ShiftResult};
-use crate::cpu::{CpuMode, ExceptionKind, REG_LR, REG_PC};
+use crate::cpu::{CpuMode, ExceptionKind, REG_LR, REG_PC, REG_SP};
 
 impl Runtime {
     pub fn load_cartridge(&mut self, cartridge: crate::cartridge::Cartridge) {
         self.cartridge = Some(cartridge);
+        self.initialize_cartridge_boot_state();
+    }
+
+    /// Establish the CPU state handed to cartridge code by the GBA BIOS.
+    ///
+    /// The BIOS enters the cartridge in privileged System/ARM state and
+    /// initializes the user/system, IRQ and Supervisor stack tops in IWRAM.
+    /// This boundary is intentionally separate from `Runtime::default()` so
+    /// unit tests can still construct a neutral machine state.
+    pub fn initialize_cartridge_boot_state(&mut self) {
+        self.cpu.switch_mode(CpuMode::System);
+        self.cpu.set_thumb(false);
+        self.cpu.cpsr = CpuMode::System as u32;
+        self.cpu.banked.user_system_sp_lr[0] = 0x0300_7f00;
+        self.cpu.banked.irq_sp_lr[0] = 0x0300_7fa0;
+        self.cpu.banked.svc_sp_lr[0] = 0x0300_7fe0;
+        self.cpu.r[REG_SP] = 0x0300_7f00;
         self.cpu.r[REG_PC] = 0x0800_0000;
     }
 
@@ -155,5 +172,34 @@ impl Runtime {
         self.cpu.r[REG_LR] = return_address;
         self.cpu.r[REG_PC] = kind.vector();
         (kind.vector(), false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cartridge_boot_state_matches_bios_stack_contract() {
+        let mut runtime = Runtime::new();
+        runtime.initialize_cartridge_boot_state();
+
+        assert_eq!(runtime.mode(), CpuMode::System);
+        assert!(!runtime.cpu.thumb);
+        assert_eq!(runtime.cpu.r[REG_PC], 0x0800_0000);
+        assert_eq!(runtime.cpu.r[REG_SP], 0x0300_7f00);
+        assert_eq!(runtime.cpu.banked.user_system_sp_lr[0], 0x0300_7f00);
+        assert_eq!(runtime.cpu.banked.irq_sp_lr[0], 0x0300_7fa0);
+        assert_eq!(runtime.cpu.banked.svc_sp_lr[0], 0x0300_7fe0);
+    }
+
+    #[test]
+    fn loading_cartridge_establishes_boot_state() {
+        let mut runtime = Runtime::new();
+        runtime.load_cartridge(crate::cartridge::Cartridge::from_rom(vec![0; 4], "saves"));
+
+        assert_eq!(runtime.cpu.r[REG_PC], 0x0800_0000);
+        assert_eq!(runtime.cpu.r[REG_SP], 0x0300_7f00);
+        assert_eq!(runtime.mode(), CpuMode::System);
     }
 }

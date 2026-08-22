@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use gba_recompiler::{
@@ -8,6 +9,11 @@ use gba_recompiler::{
     ROM_BASE,
 };
 use gba_runtime::{CPSR_C, CPSR_N, CPSR_V, CPSR_Z};
+
+fn generated_runner_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn arm_rom(words: &[u32]) -> Vec<u8> {
     words.iter().flat_map(|word| word.to_le_bytes()).collect()
@@ -20,12 +26,16 @@ fn thumb_rom(halfwords: &[u16]) -> Vec<u8> {
 }
 
 fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
+    let _guard = generated_runner_lock()
+        .lock()
+        .expect("generated runner lock must not be poisoned");
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
     let root = std::env::temp_dir().join(format!(
-        "gba-specialized-diff-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos()
+        "gba-specialized-diff-{stamp}-{}",
+        std::process::id()
     ));
     fs::create_dir_all(root.join("src")).expect("temporary test directory");
 
@@ -44,11 +54,12 @@ fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
 
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runtime_path = workspace_root.join("../gba-runtime");
+    let package_name = format!("gba-generated-specialized-diff-{stamp}");
     let manifest = format!(
-        "[package]\nname = \"gba-generated-specialized-diff\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\ngba-runtime = {{ path = \"{}\" }}\n",
+        "[package]\nname = \"{package_name}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\ngba-runtime = {{ path = \"{}\" }}\n",
         runtime_path.display()
     );
-    fs::write(&manifest_path, manifest).expect("temporary Cargo manifest");
+    fs::write(&manifest_path, &manifest).expect("temporary Cargo manifest");
 
     let output = Command::new("cargo")
         .arg("run")
@@ -59,9 +70,11 @@ fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
         .expect("cargo invocation");
     assert!(
         output.status.success(),
-        "generated Rust failed to compile or execute:\nstdout:\n{}\nstderr:\n{}\nsource:\n{}",
+        "generated Rust failed to compile or execute (status={}):\nstdout:\n{}\nstderr:\n{}\nmanifest:\n{}\nsource:\n{}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
+        manifest,
         source
     );
 
