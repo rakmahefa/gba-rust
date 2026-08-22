@@ -24,6 +24,8 @@ mod runtime_cpu;
 mod runtime_execution;
 #[path = "runtime_memory.rs"]
 mod runtime_memory;
+#[path = "runtime_dma.rs"]
+mod runtime_dma;
 
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
