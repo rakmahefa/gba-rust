@@ -13,6 +13,10 @@ pub fn decode(address: u32, raw: u16, class: ThumbClass) -> Instruction {
             rd: ((raw >> 8) & 7) as u8,
             imm: (raw & 0xFF) as u8,
         },
+        ThumbClass::CmpImmediate => ThumbOp::CmpImm {
+            rn: ((raw >> 8) & 7) as u8,
+            imm: (raw & 0xFF) as u8,
+        },
         ThumbClass::AddImmediate => ThumbOp::AddImm {
             rd: ((raw >> 8) & 7) as u8,
             rn: ((raw >> 8) & 7) as u8,
@@ -227,8 +231,8 @@ mod tests {
     #[test]
     fn family_decoders_cover_major_thumb_classes() {
         for raw in [
-            0x0000, 0x1800, 0x2000, 0x3000, 0x4000, 0x4400, 0x4700, 0x4800, 0x5000, 0x6000, 0x8000,
-            0x9000, 0xA000, 0xB000, 0xB400, 0xC000, 0xD000, 0xDF00, 0xE000,
+            0x0000, 0x1800, 0x2000, 0x2800, 0x3000, 0x4000, 0x4400, 0x4700, 0x4800, 0x5000,
+            0x6000, 0x8000, 0x9000, 0xA000, 0xB000, 0xB400, 0xC000, 0xD000, 0xDF00, 0xE000,
         ] {
             let class = classify_thumb(raw);
             let instruction = decode(0x0800_0000, raw, class);
@@ -237,5 +241,16 @@ mod tests {
                 "{raw:#06x}"
             );
         }
+    }
+
+    #[test]
+    fn decodes_thumb_cmp_immediate() {
+        let instruction = decode(0x0800_0990, 0x2A5F, ThumbClass::CmpImmediate);
+        assert_eq!(
+            instruction.kind,
+            InstructionKind::Thumb(ThumbOp::CmpImm { rn: 2, imm: 0x5F })
+        );
+        assert_eq!(instruction.raw, 0x2A5F);
+        assert_eq!(instruction.size, 2);
     }
 }

@@ -113,7 +113,7 @@ fn emit_software_interrupt(
 
     let _ = writeln!(
         out,
-        "    let bios_result = rt.execute_bios_swi_comment({comment:#010x}, {thumb})?;"
+        "    let bios_result = rt.execute_bios_swi_comment({comment:#010x}, {thumb}).map_err(|error| -> &'static str {{ Box::<str>::leak(error.into_boxed_str()) as &'static str }})?;"
     );
     let _ = writeln!(out, "    if bios_result.returned {{");
     if let Some((target, target_mode)) = source_successor(program, block) {
@@ -297,7 +297,8 @@ mod tests {
         let mut generated = String::new();
         emit_terminator(&mut generated, block, &program);
 
-        assert!(generated.contains("rt.execute_bios_swi_comment(0x00000002, false)?"));
+        assert!(generated.contains("rt.execute_bios_swi_comment(0x00000002, false).map_err"));
+        assert!(generated.contains("as &'static str"));
         assert!(generated.contains("bios_result.returned"));
         assert!(!generated.contains("software interrupt execution is not implemented"));
     }

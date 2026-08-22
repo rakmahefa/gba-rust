@@ -347,6 +347,7 @@ pub enum ThumbExtended {
 pub enum ThumbOp {
     Nop,
     MovImm { rd: u8, imm: u8 },
+    CmpImm { rn: u8, imm: u8 },
     AddImm { rd: u8, rn: u8, imm: u8 },
     SubImm { rd: u8, rn: u8, imm: u8 },
     LoadImm { rd: u8, rn: u8, word_offset: u8 },

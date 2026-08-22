@@ -62,6 +62,7 @@ pub enum ThumbClass {
     MoveShifted,
     AddSub,
     MovImmediate,
+    CmpImmediate,
     AddImmediate,
     SubImmediate,
     Alu,
@@ -96,9 +97,6 @@ pub fn classify_arm(raw: u32) -> ArmClass {
     if arm_matches(raw, BRANCH_MASK, BRANCH_PATTERN) {
         return ArmClass::Branch;
     }
-    // ARM7TDMI SWI uses bits [27:24] = 0b1111 with a valid condition code
-    // in bits [31:28]. Condition 0b1111 belongs to the separate ARMv5
-    // unconditional/extended encoding space and must not be treated as SWI.
     if (raw >> 28) != 0xF && arm_matches(raw, SWI_MASK, SWI_PATTERN) {
         return ArmClass::SoftwareInterrupt;
     }
@@ -153,6 +151,9 @@ pub fn classify_thumb(raw: u16) -> ThumbClass {
     if thumb_matches(raw, 0xF800, 0x2000) {
         return ThumbClass::MovImmediate;
     }
+    if thumb_matches(raw, 0xF800, 0x2800) {
+        return ThumbClass::CmpImmediate;
+    }
     if thumb_matches(raw, 0xF800, 0x3000) {
         return ThumbClass::AddImmediate;
     }
@@ -191,7 +192,7 @@ pub fn classify_thumb(raw: u16) -> ThumbClass {
     if thumb_matches(raw, 0xF000, 0xA000) {
         return ThumbClass::Address;
     }
-    if thumb_matches(raw, 0xFF80, 0xB000) {
+    if thumb_matches(raw, 0xFF00, 0xB000) {
         return ThumbClass::AddSp;
     }
     if thumb_matches(raw, 0xFE00, 0xB400) || thumb_matches(raw, 0xFE00, 0xBC00) {
@@ -227,5 +228,16 @@ mod tests {
         assert_eq!(classify_arm(0xEF00_0012), ArmClass::SoftwareInterrupt);
         assert_ne!(classify_arm(0xFF00_0012), ArmClass::SoftwareInterrupt);
         assert_eq!(classify_arm(0xFFFFFFFF), ArmClass::Unknown);
+    }
+
+    #[test]
+    fn classifies_thumb_cmp_immediate() {
+        assert_eq!(classify_thumb(0x2A5F), ThumbClass::CmpImmediate);
+    }
+
+    #[test]
+    fn classifies_thumb_add_sp_both_directions() {
+        assert_eq!(classify_thumb(0xB000), ThumbClass::AddSp);
+        assert_eq!(classify_thumb(0xB081), ThumbClass::AddSp);
     }
 }

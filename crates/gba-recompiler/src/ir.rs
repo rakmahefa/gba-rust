@@ -1033,6 +1033,10 @@ pub fn lower(ins: Instruction) -> IrInstruction {
             src: Value::Imm(imm as u32),
             set_flags: true,
         },
+        InstructionKind::Thumb(ThumbOp::CmpImm { rn, imm }) => IrOp::Cmp {
+            lhs: rn,
+            rhs: Value::Imm(imm as u32),
+        },
         InstructionKind::Thumb(ThumbOp::AddImm { rd, rn, imm }) => IrOp::Add {
             dst: rd,
             lhs: rn,
@@ -1154,5 +1158,26 @@ mod tests {
                 address_is_dynamic: true
             })
         );
+    }
+
+    #[test]
+    fn lower_thumb_cmp_immediate_to_ir_cmp() {
+        let instruction = lower(Instruction {
+            address: 0x0800_0990,
+            mode: Mode::Thumb,
+            raw: 0x2A5F,
+            size: 2,
+            condition: Condition::Al,
+            kind: InstructionKind::Thumb(ThumbOp::CmpImm { rn: 2, imm: 0x5F }),
+        });
+        assert_eq!(
+            instruction.ops,
+            vec![IrOp::Cmp {
+                lhs: 2,
+                rhs: Value::Imm(0x5F),
+            }]
+        );
+        let flags = instruction.flags();
+        assert!(flags.write_n && flags.write_z && flags.write_c && flags.write_v);
     }
 }
