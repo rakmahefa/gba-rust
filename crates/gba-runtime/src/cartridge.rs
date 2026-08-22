@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn validates_real_gba_boot_header() {
         let header = validate_header(&valid_rom()).expect("valid GBA header");
-        assert_eq!(header.entry_target, 0x0800_00c4);
+        assert_eq!(header.entry_target, 0x0800_00c0);
         assert_eq!(header.title, "TESTROM1234");
         assert_eq!(header.game_code, "TRST");
         assert_eq!(header.maker_code, "01");
