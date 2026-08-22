@@ -1,19 +1,57 @@
 use super::Runtime;
 use crate::arm7tdmi;
-use crate::bios::PowerState;
+use crate::bios::{PowerState, IRQ_DMA0, IRQ_HBLANK, IRQ_VBLANK, IRQ_VCOUNT};
 use crate::cpu::REG_PC;
+use crate::mmio::{
+    DISPSTAT_HBLANK, DISPSTAT_VBLANK, DISPSTAT_VCOUNT_IRQ, DISPSTAT_VCOUNT_MASK,
+};
+use crate::scheduler::{
+    EventKind, CYCLES_PER_SCANLINE, HBLANK_START_CYCLES, SCANLINES_PER_FRAME,
+    VBLANK_START_LINE,
+};
 
 impl Runtime {
+    /// Advance the machine clock and all time-driven devices to `target`.
+    ///
+    /// Device state is advanced in monotonic segments between queued events.
+    /// This makes CPU cycles, timers and asynchronous hardware observe exactly
+    /// the same timeline without injecting an IRQ in the middle of a generated
+    /// instruction.
+    pub fn advance_cycles(&mut self, cycles: u32) {
+        let target = self.scheduler.now().saturating_add(cycles as u64);
+
+        while let Some(event) = self.scheduler.next_event() {
+            if event.cycle > target {
+                break;
+            }
+
+            let delta = event.cycle.saturating_sub(self.scheduler.now());
+            self.tick_timers(delta as u32);
+            self.scheduler.advance_to(event.cycle);
+            self.cycles = event.cycle;
+            let event = self.scheduler.pop_event().expect("peeked event must exist");
+            self.process_timing_event(event.kind);
+        }
+
+        let delta = target.saturating_sub(self.scheduler.now());
+        self.tick_timers(delta as u32);
+        self.scheduler.advance_to(target);
+        self.cycles = target;
+    }
+
     pub fn step_recompiled(&mut self, cycles: u32) {
-        self.cycles = self.cycles.wrapping_add(cycles as u64);
-        self.tick_timers(cycles);
+        self.advance_cycles(cycles);
     }
 
     pub fn tick(&mut self, cycles: u32) {
-        self.step_recompiled(cycles);
+        self.advance_cycles(cycles);
     }
 
     fn tick_timers(&mut self, cycles: u32) {
+        if cycles == 0 {
+            return;
+        }
+
         let mut cascade_edges = 0u32;
         for index in 0..self.timers.len() {
             let cascade = index != 0 && self.timers[index].control().cascade;
@@ -23,22 +61,90 @@ impl Runtime {
                 self.timers[index].tick_cycles(cycles)
             };
 
+            cascade_edges = overflows;
             if overflows == 0 {
-                cascade_edges = 0;
                 continue;
             }
 
             if self.timers[index].control().irq {
                 let mask = 1 << (3 + index);
-                // Timer-generated IRQs become pending hardware state. The
-                // generated-block dispatcher consumes them at the next
-                // architectural boundary rather than mutating CPU mode inside
-                // an instruction.
-                self.interrupts.request(mask);
-                self.wake_from_interrupt(mask);
+                self.request_interrupt(mask);
             }
-            cascade_edges = overflows;
         }
+    }
+
+    fn process_timing_event(&mut self, event: EventKind) {
+        match event {
+            EventKind::PpuHBlankStart => {
+                self.dispstat |= DISPSTAT_HBLANK;
+                if self.dispstat & DISPSTAT_HBLANK != 0
+                    && self.dispstat & DISPSTAT_HBLANK != 0
+                    && self.dispstat & crate::mmio::DISPSTAT_STATUS_MASK != 0
+                {
+                    // Status and IRQ enable share DISPSTAT architecturally only
+                    // through the VBlank/HBlank/VCOUNT enable bits in the
+                    // corresponding control register; the runtime memory layer
+                    // remains responsible for preserving writable fields.
+                }
+                self.scheduler.schedule_in(
+                    CYCLES_PER_SCANLINE.saturating_sub(HBLANK_START_CYCLES),
+                    EventKind::PpuScanline,
+                );
+            }
+            EventKind::PpuScanline => {
+                self.dispstat &= !DISPSTAT_HBLANK;
+                self.vcount = self.vcount.wrapping_add(1);
+                if self.vcount >= SCANLINES_PER_FRAME {
+                    self.vcount = 0;
+                    self.dispstat &= !DISPSTAT_VBLANK;
+                    self.ppu.frame();
+                }
+
+                if self.vcount == VBLANK_START_LINE {
+                    self.dispstat |= DISPSTAT_VBLANK;
+                    self.request_interrupt(IRQ_VBLANK);
+                }
+
+                let compare = ((self.dispstat & DISPSTAT_VCOUNT_MASK) >> 8) as u16;
+                if self.vcount == compare {
+                    if self.dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
+                        self.request_interrupt(IRQ_VCOUNT);
+                    }
+                }
+
+                self.scheduler.schedule_in(
+                    HBLANK_START_CYCLES,
+                    EventKind::PpuHBlankStart,
+                );
+                self.scheduler.schedule_in(
+                    CYCLES_PER_SCANLINE,
+                    EventKind::PpuScanline,
+                );
+            }
+            EventKind::PpuVBlankStart => {
+                self.dispstat |= DISPSTAT_VBLANK;
+                self.request_interrupt(IRQ_VBLANK);
+            }
+            EventKind::DmaComplete { channel } => {
+                if channel < 4 {
+                    self.request_interrupt(IRQ_DMA0 << channel);
+                }
+            }
+            EventKind::IrqSample => {
+                let _ = self.service_interrupts();
+            }
+        }
+    }
+
+    pub fn schedule_dma_completion(&mut self, channel: u8, cycles_from_now: u64) {
+        assert!(channel < 4, "GBA has four DMA channels");
+        self.scheduler
+            .schedule_in(cycles_from_now, EventKind::DmaComplete { channel });
+    }
+
+    pub fn schedule_irq_sample(&mut self, cycles_from_now: u64) {
+        self.scheduler
+            .schedule_in(cycles_from_now, EventKind::IrqSample);
     }
 
     pub fn trace_recompiled(&mut self, _address: u32, _raw: u32) {
@@ -96,8 +202,8 @@ impl Runtime {
                 return Err("runtime is stopped");
             }
             if self.power == PowerState::Halted {
-                self.step_recompiled(1);
-                self.service_interrupts();
+                self.advance_cycles(1);
+                let _ = self.service_interrupts();
                 if self.power == PowerState::Halted {
                     return Err("runtime is halted");
                 }
