@@ -23,7 +23,7 @@ pub(super) fn discover_reachable(
     while let Some(key) = queue.pop_front() {
         let state = states.get(&key).copied().unwrap_or_default();
         let instruction = decode_at(rom, key.clone(), mapping)?;
-        let state_after = super::abstract_state::transfer_instruction(rom, instruction, state);
+        let state_after = super::abstract_state::transfer_instruction(rom, instruction, state, mapping);
         let successors = instruction_successors(rom, instruction, state_after, mapping);
 
         if !discovered.contains_key(&key) {
