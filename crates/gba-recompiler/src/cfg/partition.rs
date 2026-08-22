@@ -9,16 +9,34 @@ pub(super) fn collect_leaders(
     discovered: &HashMap<BlockKey, DiscoveredInstruction>,
     entry: &BlockKey,
 ) -> Vec<BlockKey> {
+    // A node is a basic-block leader when it is the entry point, has no
+    // predecessor, or has at least one non-fallthrough predecessor. Looking
+    // at incoming edges rather than only the successors of boundary nodes
+    // guarantees that every discovered instruction is owned by exactly one
+    // partitioned block, including joins reached by multiple control-flow
+    // paths.
+    let mut has_incoming = HashSet::<BlockKey>::new();
+    let mut has_non_fallthrough_incoming = HashSet::<BlockKey>::new();
+
+    for node in discovered.values() {
+        let fallthrough = is_fallthrough(node.instruction, &node.successors);
+        for successor in &node.successors {
+            if !discovered.contains_key(successor) {
+                continue;
+            }
+            has_incoming.insert(successor.clone());
+            if !fallthrough {
+                has_non_fallthrough_incoming.insert(successor.clone());
+            }
+        }
+    }
+
     let mut leaders = HashSet::<BlockKey>::new();
     leaders.insert(entry.clone());
 
-    for node in discovered.values() {
-        if !is_fallthrough(node.instruction, &node.successors) {
-            for successor in &node.successors {
-                if discovered.contains_key(successor) {
-                    leaders.insert(successor.clone());
-                }
-            }
+    for key in discovered.keys() {
+        if !has_incoming.contains(key) || has_non_fallthrough_incoming.contains(key) {
+            leaders.insert(key.clone());
         }
     }
 
