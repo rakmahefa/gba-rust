@@ -1,6 +1,7 @@
 use super::dma::{DmaController, DmaTrigger};
 use super::scheduler::EventKind;
 use super::Runtime;
+use crate::mmio_devices;
 
 const DMA_BASES: [u32; 4] = [0x0400_00b0, 0x0400_00bc, 0x0400_00c8, 0x0400_00d4];
 
@@ -116,4 +117,72 @@ impl Runtime {
 
     pub fn dma_controller(&self) -> &DmaController { &self.dma }
     pub fn dma_controller_mut(&mut self) -> &mut DmaController { &mut self.dma }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mmio_devices::{DMA0CNT_H, DMA0CNT_L, DMA0DAD, DMA0SAD};
+    use crate::{bus, IRQ_DMA0};
+
+    fn program_channel(runtime: &mut Runtime, base: u32, source: u32, destination: u32, count: u16, control: u16) {
+        runtime.write32(base, source);
+        runtime.write32(base + 4, destination);
+        runtime.write16(base + 8, count);
+        runtime.write16(base + 10, control);
+    }
+
+    #[test]
+    fn immediate_dma_copies_halfwords_and_disables_after_completion() {
+        let mut runtime = Runtime::new();
+        runtime.write16(bus::EWRAM_START, 0x1234);
+        runtime.write16(bus::EWRAM_START + 2, 0xabcd);
+        program_channel(&mut runtime, DMA0SAD.address, bus::EWRAM_START, bus::EWRAM_START + 0x100, 2, 0x8000 | 0x4000);
+
+        runtime.advance_cycles(2);
+        assert_eq!(runtime.read16(bus::EWRAM_START + 0x100), 0x1234);
+        assert_eq!(runtime.read16(bus::EWRAM_START + 0x102), 0xabcd);
+        assert_eq!(runtime.dma.active(), Some(0));
+        assert!(runtime.dma.busy_until() > runtime.scheduler.now());
+
+        let remaining = runtime.dma.busy_until() - runtime.scheduler.now();
+        runtime.advance_cycles(remaining as u32);
+        assert_eq!(runtime.dma.active(), None);
+        assert_eq!(runtime.read16(DMA0CNT_H.address), 0x0000);
+        assert_eq!(runtime.read32(DMA0SAD.address), bus::EWRAM_START + 4);
+        assert_eq!(runtime.read32(DMA0DAD.address), bus::EWRAM_START + 0x104);
+        assert_ne!(runtime.interrupts.iflags & IRQ_DMA0, 0);
+    }
+
+    #[test]
+    fn simultaneous_requests_are_granted_by_channel_priority() {
+        let mut runtime = Runtime::new();
+        runtime.write16(bus::EWRAM_START, 0x1111);
+        runtime.write16(bus::EWRAM_START + 2, 0x2222);
+        program_channel(&mut runtime, DMA0SAD.address, bus::EWRAM_START, bus::EWRAM_START + 0x100, 1, 0x8000);
+        program_channel(&mut runtime, DMA0SAD.address + 0x0c, bus::EWRAM_START + 2, bus::EWRAM_START + 0x102, 1, 0x8000);
+
+        runtime.advance_cycles(2);
+        assert_eq!(runtime.dma.active(), Some(0));
+        assert_eq!(runtime.read16(bus::EWRAM_START + 0x100), 0x1111);
+        let completion = runtime.dma.busy_until();
+        runtime.advance_cycles((completion - runtime.scheduler.now()) as u32);
+        assert_eq!(runtime.dma.active(), Some(1));
+        assert_eq!(runtime.read16(bus::EWRAM_START + 0x102), 0x2222);
+    }
+
+    #[test]
+    fn hblank_repeat_dma_retriggers_without_reenabling_the_channel() {
+        let mut runtime = Runtime::new();
+        runtime.write16(bus::EWRAM_START, 0xbeef);
+        let repeat_hblank = 0x8000 | 0x0200 | 0x2000 | 0x4000;
+        program_channel(&mut runtime, DMA0SAD.address, bus::EWRAM_START, bus::EWRAM_START + 0x200, 1, repeat_hblank);
+
+        runtime.advance_cycles(1006);
+        assert_eq!(runtime.read16(bus::EWRAM_START + 0x200), 0xbeef);
+        let first_completion = runtime.dma.busy_until();
+        runtime.advance_cycles((first_completion - runtime.scheduler.now()) as u32);
+        assert_eq!(runtime.dma.active(), None);
+        assert_ne!(runtime.read16(DMA0CNT_H.address) & 0x8000, 0);
+    }
 }
