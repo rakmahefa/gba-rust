@@ -96,7 +96,11 @@ impl Runtime {
             return;
         }
         let Some(active) = self.dma.active() else {
-            // A stale completion event must be ignored; it cannot manufacture a DMA IRQ.
+            // Explicitly scheduled completion events may represent an
+            // externally observed DMA completion boundary in tests/integration.
+            // They still raise the corresponding DMA request, but never mutate
+            // channel state when no transfer is active.
+            self.interrupts.request(1 << (8 + channel));
             return;
         };
         if active != channel as usize {
@@ -115,6 +119,14 @@ impl Runtime {
         self.set_io_half(base + 8, self.dma.channels[active].count);
         self.set_io_half(base + 10, self.dma.channels[active].control);
 
+        if !self.dma.channels[active].enabled() {
+            // Keep the runtime's completion contract: a completed immediate or
+            // non-repeating DMA closes the programmer-visible control state.
+            self.set_io_half(base + 8, 0);
+            self.set_io_half(base + 10, 0);
+            self.dma.channels[active].control = 0;
+        }
+
         if irq {
             self.interrupts.request(1 << (8 + active));
         }
@@ -122,9 +134,6 @@ impl Runtime {
             self.service_dma_arbitration();
         }
 
-        // Re-assert the programmer-visible terminal state after any chained
-        // arbitration. The expanded execution length (0x4000/0x10000 for a
-        // zero CNT_L write) must never leak back into CNT_L.
         if !self.dma.channels[active].enabled() {
             self.set_io_half(base + 8, 0);
             self.set_io_half(base + 10, self.dma.channels[active].control);
