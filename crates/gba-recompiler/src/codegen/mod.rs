@@ -45,7 +45,7 @@ pub fn generate_semantic(
 
     let _ = writeln!(
         out,
-        "pub fn {module_name}(rt: &mut Runtime) -> Result<gba_runtime::GeneratedExecutionResult, &'static str> {{\n    <Runtime as gba_runtime::RuntimeContract>::run_generated_contract(rt, {entry_address:#010x}, {entry_mode}, None, dispatch_block, is_linked_block)\n}}\n"
+        "#[allow(dead_code)]\npub fn {module_name}(rt: &mut Runtime) -> Result<gba_runtime::GeneratedExecutionResult, &'static str> {{\n    <Runtime as gba_runtime::RuntimeContract>::run_generated_contract(rt, {entry_address:#010x}, {entry_mode}, None, dispatch_block, is_linked_block)\n}}\n"
     );
     let _ = writeln!(
         out,
