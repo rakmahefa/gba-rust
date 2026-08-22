@@ -50,6 +50,31 @@ Device behavior remains separate from address classification. Video memory byte 
 
 Timing, waitstates, DMA arbitration and MMIO register completeness are deliberately not folded into the first bus layer; they build on this stable address contract.
 
+## Central event and timing scheduler
+
+`gba-runtime::TimingScheduler` is the single monotonic machine clock for time-driven hardware. Generated CPU execution advances the scheduler through `Runtime::advance_cycles(cycles)`. The scheduler does not execute CPU instructions itself; instead it identifies the next hardware boundary and lets the runtime advance continuous devices exactly up to that cycle before processing the event.
+
+The event queue is deterministic and ordered by `(cycle, insertion sequence, event kind)`. This gives CPU-visible hardware behavior a stable ordering when multiple devices become due on the same cycle.
+
+Current scheduler event classes are:
+
+- PPU HBlank start;
+- PPU scanline boundary and VBlank transition;
+- DMA channel completion boundaries;
+- explicit IRQ sampling boundaries.
+
+Timers are continuous time-driven devices on this same clock. When `advance_cycles` crosses an event boundary, all timer state is first advanced for the exact elapsed segment. Timer overflows therefore become pending IRQ hardware state at a precise cycle without forcing an exception transition in the middle of a generated instruction. The generated dispatcher or an explicit IRQ-sample event performs the architectural IRQ entry.
+
+PPU timing currently establishes HBlank, scanline, VBlank and VCOUNT interrupt boundaries without claiming that the complete renderer has been implemented. DMA completion events establish the timing contract for the future DMA engine; actual transfer arbitration and bus ownership remain separate work.
+
+This architecture deliberately separates three concepts:
+
+1. **time progression** — the scheduler clock;
+2. **hardware side effects** — timers, PPU, DMA and IRQ requests;
+3. **architectural CPU transitions** — generated-block dispatch, exception entry and exception return.
+
+This keeps asynchronous hardware deterministic while preserving the existing block-boundary exception model.
+
 ## Cartridge saves
 
 Battery-backed SRAM/Flash/EEPROM belongs to the cartridge model. It is persisted as `<game>.sav`; this is **not** a savestate. Writes are dirty-tracked, flushed atomically, and the previous save is retained as `<game>.sav.bak` when possible.
@@ -60,8 +85,9 @@ Battery-backed SRAM/Flash/EEPROM belongs to the cartridge model. It is persisted
 2. Introduce a typed IR and basic-block/function analysis.
 3. Generate executable Rust with explicit runtime calls for memory, branches, DMA, I/O and BIOS exception services.
 4. Establish the GBA bus and memory contract before layering timing-sensitive hardware devices.
-5. Implement PPU modes 0-5, sprites and windows.
-6. Implement APU, timers, DMA, IRQ and keypad.
-7. Complete SRAM/Flash/EEPROM protocols and save detection.
-8. Add egui frontend and deterministic regression tests against FireRed/Emerald.
-9. Add native-code-oriented optimizations: block chaining, constant propagation, memory specialization and hot-path inlining.
+5. Establish deterministic event/timing scheduling across CPU, timers, PPU, DMA and IRQ.
+6. Implement PPU modes 0-5, sprites and windows on the scheduler timeline.
+7. Implement DMA arbitration/transfer semantics, APU, keypad and remaining IRQ sources.
+8. Complete SRAM/Flash/EEPROM protocols and save detection.
+9. Add egui frontend and deterministic regression tests against FireRed/Emerald.
+10. Add native-code-oriented optimizations: block chaining, constant propagation, memory specialization and hot-path inlining.
