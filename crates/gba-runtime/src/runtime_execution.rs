@@ -4,7 +4,7 @@ use crate::bios::{PowerState, IRQ_DMA0, IRQ_HBLANK, IRQ_VBLANK, IRQ_VCOUNT};
 use crate::cpu::REG_PC;
 use crate::mmio::{
     DISPSTAT_HBLANK, DISPSTAT_HBLANK_IRQ, DISPSTAT_VBLANK, DISPSTAT_VBLANK_IRQ,
-    DISPSTAT_VCOUNT_IRQ, DISPSTAT_VCOUNT_MASK,
+    DISPSTAT_VCOUNT, DISPSTAT_VCOUNT_IRQ, DISPSTAT_VCOUNT_MASK,
 };
 use crate::scheduler::{
     EventKind, CYCLES_PER_SCANLINE, HBLANK_START_CYCLES, SCANLINES_PER_FRAME,
@@ -98,6 +98,14 @@ impl Runtime {
                     self.ppu.frame();
                 }
 
+                let compare = ((self.dispstat & DISPSTAT_VCOUNT_MASK) >> 8) as u16;
+                let vcount_match = self.vcount == compare;
+                if vcount_match {
+                    self.dispstat |= DISPSTAT_VCOUNT;
+                } else {
+                    self.dispstat &= !DISPSTAT_VCOUNT;
+                }
+
                 if self.vcount == VBLANK_START_LINE {
                     self.dispstat |= DISPSTAT_VBLANK;
                     if self.dispstat & DISPSTAT_VBLANK_IRQ != 0 {
@@ -105,8 +113,7 @@ impl Runtime {
                     }
                 }
 
-                let compare = ((self.dispstat & DISPSTAT_VCOUNT_MASK) >> 8) as u16;
-                if self.vcount == compare && self.dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
+                if vcount_match && self.dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
                     self.raise_hardware_interrupt(IRQ_VCOUNT);
                 }
 
