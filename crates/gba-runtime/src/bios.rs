@@ -1,4 +1,4 @@
-use crate::cpu::{CpuMode, ExceptionKind, REG_LR, REG_PC, REG_SP};
+use crate::cpu::{CpuMode, REG_LR, REG_PC, REG_SP};
 
 pub const BIOS_START: u32 = 0x0000_0000;
 pub const BIOS_END: u32 = 0x0000_3fff;
@@ -14,15 +14,13 @@ pub const VRAM_START: u32 = 0x0600_0000;
 pub const VRAM_END: u32 = 0x0601_7fff;
 pub const OAM_START: u32 = 0x0700_0000;
 pub const OAM_END: u32 = 0x0700_03ff;
-pub const OBJ_AFFINE_START: u32 = 0x0700_0060;
-pub const OBJ_AFFINE_END: u32 = 0x0700_03ff;
 
 pub const IE: u32 = 0x0400_0200;
 pub const IF: u32 = 0x0400_0202;
-pub const IME: u32 = 0x0400_0208;
 pub const WAITCNT: u32 = 0x0400_0204;
-pub const HALTCNT: u32 = 0x0400_0301;
+pub const IME: u32 = 0x0400_0208;
 pub const POSTFLG: u32 = 0x0400_0300;
+pub const HALTCNT: u32 = 0x0400_0301;
 pub const KEYINPUT: u32 = 0x0400_0130;
 pub const DISPSTAT: u32 = 0x0400_0004;
 
@@ -40,6 +38,9 @@ pub const IRQ_DMA2: u16 = 1 << 10;
 pub const IRQ_DMA3: u16 = 1 << 11;
 pub const IRQ_KEYPAD: u16 = 1 << 12;
 pub const IRQ_GAMEPAK: u16 = 1 << 13;
+
+const CPSR_I: u32 = 1 << 7;
+const CPSR_T: u32 = 1 << 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerState {
@@ -121,13 +122,13 @@ pub struct BiosResult {
 }
 
 impl BiosResult {
-    pub const returned: Self = Self {
+    pub const RETURNED: Self = Self {
         returned: true,
         next_pc: None,
         next_thumb: false,
     };
 
-    pub const non_returning: Self = Self {
+    pub const NON_RETURNING: Self = Self {
         returned: false,
         next_pc: None,
         next_thumb: false,
@@ -143,18 +144,19 @@ pub fn swi_number(raw: u32, thumb: bool) -> u8 {
 }
 
 pub fn reset_state(cpu: &mut crate::cpu::Cpu, power: &mut PowerState) {
+    let target_mode = CpuMode::System;
     cpu.switch_mode(CpuMode::Supervisor);
     cpu.r[REG_SP] = 0x0300_7fe0;
     cpu.r[REG_LR] = 0;
     cpu.switch_mode(CpuMode::Irq);
     cpu.r[REG_SP] = 0x0300_7fa0;
     cpu.r[REG_LR] = 0;
-    cpu.switch_mode(CpuMode::System);
+    cpu.switch_mode(target_mode);
     cpu.r[REG_SP] = 0x0300_7f00;
     cpu.r[0..13].fill(0);
     cpu.r[REG_PC] = 0x0800_0000;
     cpu.set_thumb(false);
-    cpu.cpsr = (cpu.cpsr & !(0xff | (1 << 5))) | CpuMode::System as u32;
+    cpu.cpsr = (cpu.cpsr & !(0xff | CPSR_T)) | CpuMode::System as u32;
     *power = PowerState::Running;
 }
 
@@ -173,12 +175,12 @@ pub fn execute_swi(
         BiosSwi::SoftReset => {
             let target_flag = iwram.get(0x7ffa).copied().unwrap_or(0);
             reset_state(cpu, power);
-            if target_flag == 0 {
-                cpu.r[REG_PC] = 0x0800_0000;
+            cpu.r[REG_PC] = if target_flag == 0 {
+                0x0800_0000
             } else {
-                cpu.r[REG_PC] = 0x0200_0000;
-            }
-            BiosResult::non_returning
+                0x0200_0000
+            };
+            BiosResult::NON_RETURNING
         }
         BiosSwi::RegisterRamReset => {
             let flags = cpu.r[0];
@@ -201,21 +203,18 @@ pub fn execute_swi(
                 interrupts.ie = 0;
                 interrupts.iflags = 0;
             }
-            if flags & 64 != 0 {
-                // Sound state is modeled by the runtime APU and reset by its owner.
-            }
             if flags & 128 != 0 {
                 interrupts.ime = false;
             }
-            BiosResult::returned
+            BiosResult::RETURNED
         }
         BiosSwi::Halt => {
             *power = PowerState::Halted;
-            BiosResult::non_returning
+            BiosResult::NON_RETURNING
         }
         BiosSwi::Stop => {
             *power = PowerState::Stopped;
-            BiosResult::non_returning
+            BiosResult::NON_RETURNING
         }
         BiosSwi::IntrWait => {
             let discard_old = cpu.r[0] != 0;
@@ -223,13 +222,13 @@ pub fn execute_swi(
             if discard_old {
                 interrupts.acknowledge(mask);
             }
-            interrupts.ime = true;
             if interrupts.pending() & mask != 0 {
                 interrupts.acknowledge(mask);
-                BiosResult::returned
+                *power = PowerState::Running;
+                BiosResult::RETURNED
             } else {
                 *power = PowerState::Halted;
-                BiosResult::non_returning
+                BiosResult::NON_RETURNING
             }
         }
         BiosSwi::VBlankIntrWait => {
@@ -250,22 +249,137 @@ pub fn execute_swi(
     }
 }
 
-pub fn service_pending_irq(cpu: &mut crate::cpu::Cpu, interrupts: &mut InterruptController) -> bool {
-    if !interrupts.irq_pending() || cpu.cpsr & (1 << 7) != 0 {
+pub fn service_pending_irq(cpu: &mut crate::cpu::Cpu, interrupts: &InterruptController) -> bool {
+    if !interrupts.irq_pending() || cpu.cpsr & CPSR_I != 0 {
         return false;
     }
     let return_address = cpu.r[REG_PC];
     let old_cpsr = cpu.cpsr;
     cpu.switch_mode(CpuMode::Irq);
     cpu.set_spsr(old_cpsr);
-    cpu.cpsr |= 1 << 7;
+    cpu.cpsr |= CPSR_I;
     cpu.set_thumb(false);
-    cpu.r[REG_LR] = return_address.wrapping_add(if old_cpsr & (1 << 5) != 0 { 4 } else { 0 });
+    cpu.r[REG_LR] = return_address;
     cpu.r[REG_PC] = 0x18;
-    *interrupts = InterruptController { iflags: interrupts.iflags, ..*interrupts };
     true
 }
 
 pub fn in_range(address: u32, start: u32, end: u32) -> bool {
     (start..=end).contains(&address)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cpu::{Cpu, CpuMode, REG_PC, REG_SP};
+
+    fn memory() -> ([u8; 0x100], [u8; 0x8000], [u8; 0x400], [u8; 0x18000], [u8; 0x400]) {
+        ([0; 0x100], [0; 0x8000], [0; 0x400], [0; 0x18000], [0; 0x400])
+    }
+
+    #[test]
+    fn swi_number_uses_gba_arm_and_thumb_encodings() {
+        assert_eq!(swi_number(0x0004_0000, false), 4);
+        assert_eq!(swi_number(0x0000_0005, true), 5);
+    }
+
+    #[test]
+    fn soft_reset_sets_the_three_gba_default_stacks() {
+        let mut cpu = Cpu::default();
+        let mut power = PowerState::Stopped;
+        reset_state(&mut cpu, &mut power);
+        assert_eq!(cpu.mode(), CpuMode::System);
+        assert_eq!(cpu.r[REG_SP], 0x0300_7f00);
+        assert_eq!(cpu.r[REG_PC], 0x0800_0000);
+        assert_eq!(power, PowerState::Running);
+    }
+
+    #[test]
+    fn register_ram_reset_preserves_the_bios_reserved_iwram_tail() {
+        let (mut ewram, mut iwram, mut palette, mut vram, mut oam) = memory();
+        iwram[0x7dff] = 0xaa;
+        iwram[0x7ffa] = 0x01;
+        let mut cpu = Cpu::default();
+        cpu.r[0] = 0x02;
+        let mut power = PowerState::Running;
+        let mut interrupts = InterruptController::default();
+        execute_swi(
+            &mut cpu,
+            &mut power,
+            &mut interrupts,
+            &mut ewram,
+            &mut iwram,
+            &mut palette,
+            &mut vram,
+            &mut oam,
+            BiosSwi::RegisterRamReset,
+        );
+        assert_eq!(iwram[0x7dff], 0);
+        assert_eq!(iwram[0x7ffa], 0x01);
+    }
+
+    #[test]
+    fn soft_reset_reads_the_boot_flag_before_register_ram_reset() {
+        let (mut ewram, mut iwram, mut palette, mut vram, mut oam) = memory();
+        iwram[0x7ffa] = 1;
+        let mut cpu = Cpu::default();
+        let mut power = PowerState::Running;
+        let mut interrupts = InterruptController::default();
+        let result = execute_swi(
+            &mut cpu,
+            &mut power,
+            &mut interrupts,
+            &mut ewram,
+            &mut iwram,
+            &mut palette,
+            &mut vram,
+            &mut oam,
+            BiosSwi::SoftReset,
+        );
+        assert_eq!(result, BiosResult::NON_RETURNING);
+        assert_eq!(cpu.r[REG_PC], 0x0200_0000);
+    }
+
+    #[test]
+    fn halt_wakes_when_the_requested_interrupt_is_pending() {
+        let (mut ewram, mut iwram, mut palette, mut vram, mut oam) = memory();
+        let mut cpu = Cpu::default();
+        cpu.r[0] = 0;
+        cpu.r[1] = IRQ_VBLANK as u32;
+        let mut power = PowerState::Halted;
+        let mut interrupts = InterruptController {
+            ie: IRQ_VBLANK,
+            iflags: IRQ_VBLANK,
+            ime: false,
+        };
+        let result = execute_swi(
+            &mut cpu,
+            &mut power,
+            &mut interrupts,
+            &mut ewram,
+            &mut iwram,
+            &mut palette,
+            &mut vram,
+            &mut oam,
+            BiosSwi::IntrWait,
+        );
+        assert_eq!(result, BiosResult::RETURNED);
+        assert_eq!(power, PowerState::Running);
+        assert_eq!(interrupts.iflags & IRQ_VBLANK, 0);
+    }
+
+    #[test]
+    fn irq_entry_switches_to_irq_mode_and_vectors_to_bios() {
+        let mut cpu = Cpu::default();
+        cpu.r[REG_PC] = 0x0800_0100;
+        let interrupts = InterruptController {
+            ie: IRQ_VBLANK,
+            iflags: IRQ_VBLANK,
+            ime: true,
+        };
+        assert!(service_pending_irq(&mut cpu, &interrupts));
+        assert_eq!(cpu.mode(), CpuMode::Irq);
+        assert_eq!(cpu.r[REG_PC], 0x18);
+        assert_eq!(cpu.r[REG_LR], 0x0800_0100);
+    }
 }
