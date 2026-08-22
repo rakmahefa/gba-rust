@@ -15,6 +15,14 @@ fn fallthrough_target(block: &SemanticBlock, program: &Program, target: u32) -> 
         .map(|successor| (successor.key.address, successor.key.mode))
 }
 
+fn source_successor(program: &Program, block: &SemanticBlock) -> Option<(u32, Mode)> {
+    let successors = &program.cfg.blocks[block.id.0].successors;
+    (successors.len() == 1).then(|| {
+        let successor = &program.cfg.blocks[successors[0].0];
+        (successor.key.address, successor.key.mode)
+    })
+}
+
 fn emit_direct_terminator(
     out: &mut String,
     block: &SemanticBlock,
@@ -57,7 +65,11 @@ pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Progra
             let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg(14)); return Ok(GeneratedBlockExit::return_to(target, thumb));");
         }
         SemanticTerminator::IndirectBranch { register } => {
-            let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));");
+            if let Some((target, thumb)) = source_successor(program, block) {
+                let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {}));", mode_bool(thumb));
+            } else {
+                let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));");
+            }
         }
         SemanticTerminator::IndirectCall { register, .. } => {
             let _ = writeln!(out, "    rt.link_from_instruction({address:#010x}, {size}, {}); let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));", mode_bool(block.mode));
@@ -82,5 +94,40 @@ pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Progra
         SemanticTerminator::Unknown => {
             let _ = writeln!(out, "    return Err(\"generated program reached an unknown terminator\");");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decoder::{Mode, ROM_BASE};
+    use crate::{analyze, build_semantic_program, discover_functions};
+
+    fn arm_rom(words: &[u32]) -> Vec<u8> {
+        words.iter().flat_map(|word| word.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn resolved_indirect_branch_is_emitted_as_linked_transition() {
+        let rom = arm_rom(&[
+            0xE59F_3000,
+            0xE12F_FF13,
+            ROM_BASE,
+        ]);
+        let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let block = semantic
+            .functions
+            .iter()
+            .flat_map(|function| function.blocks.iter())
+            .find(|block| block.terminator == SemanticTerminator::IndirectBranch { register: 3 })
+            .expect("resolved indirect branch block");
+
+        let mut generated = String::new();
+        emit_terminator(&mut generated, block, &program);
+
+        assert!(generated.contains("GeneratedBlockExit::continue_to(0x08000000, false)"));
+        assert!(!generated.contains("GeneratedBlockExit::dynamic_to"));
     }
 }
