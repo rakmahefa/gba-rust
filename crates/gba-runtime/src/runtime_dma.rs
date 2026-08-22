@@ -55,8 +55,12 @@ impl Runtime {
 
     pub(crate) fn service_dma_arbitration(&mut self) {
         self.sync_dma_registers();
-        if self.dma.active().is_some() { return; }
-        let Some(transfer) = self.dma.begin_selected(self.scheduler.now(), self.waitcnt) else { return; };
+        if self.dma.active().is_some() {
+            return;
+        }
+        let Some(transfer) = self.dma.begin_selected(self.scheduler.now(), self.waitcnt) else {
+            return;
+        };
         self.execute_dma_transfer(transfer.channel, transfer.source, transfer.destination, transfer.count, transfer.width);
         self.scheduler.schedule_at(
             self.dma.busy_until(),
@@ -64,34 +68,47 @@ impl Runtime {
         );
     }
 
-    fn execute_dma_transfer(&mut self, channel: usize, source: u32, destination: u32, count: u32, width: u32) {
+    fn execute_dma_transfer(
+        &mut self,
+        channel: usize,
+        source: u32,
+        destination: u32,
+        count: u32,
+        width: u32,
+    ) {
+        let mut current_source = source;
+        let mut current_destination = destination;
         for _ in 0..count {
             if width == 4 {
-                let value = self.read32(source);
-                self.write32(destination, value);
+                let value = self.read32(current_source);
+                self.write32(current_destination, value);
             } else {
-                let value = self.read16(source);
-                self.write16(destination, value);
+                let value = self.read16(current_source);
+                self.write16(current_destination, value);
             }
             self.dma.channels[channel].advance_addresses();
+            current_source = self.dma.channels[channel].current_source();
+            current_destination = self.dma.channels[channel].current_destination();
         }
 
-        let final_source = self.dma.channels[channel].current_source();
-        let final_destination = self.dma.channels[channel].current_destination();
-        self.dma.channels[channel].source = final_source;
-        self.dma.channels[channel].destination = final_destination;
+        self.dma.channels[channel].source = current_source;
+        self.dma.channels[channel].destination = current_destination;
         let base = DMA_BASES[channel];
-        self.set_io_word(base, final_source);
-        self.set_io_word(base + 4, final_destination);
+        self.set_io_word(base, current_source);
+        self.set_io_word(base + 4, current_destination);
     }
 
     pub(crate) fn complete_dma(&mut self, channel: u8) {
-        if channel >= 4 { return; }
+        if channel >= 4 {
+            return;
+        }
         let Some(active) = self.dma.active() else {
             self.interrupts.request(1 << (8 + channel));
             return;
         };
-        if active != channel as usize { return; }
+        if active != channel as usize {
+            return;
+        }
         let irq = self.dma.channels[active].control & 0x4000 != 0;
         self.dma.complete();
         let base = DMA_BASES[active];
@@ -114,8 +131,13 @@ impl Runtime {
         self.dma.is_busy(self.scheduler.now())
     }
 
-    pub fn dma_controller(&self) -> &DmaController { &self.dma }
-    pub fn dma_controller_mut(&mut self) -> &mut DmaController { &mut self.dma }
+    pub fn dma_controller(&self) -> &DmaController {
+        &self.dma
+    }
+
+    pub fn dma_controller_mut(&mut self) -> &mut DmaController {
+        &mut self.dma
+    }
 }
 
 #[cfg(test)]
