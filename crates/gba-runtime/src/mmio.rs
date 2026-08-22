@@ -9,6 +9,7 @@
 pub enum MmioWidth {
     Byte,
     Halfword,
+    Word,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
