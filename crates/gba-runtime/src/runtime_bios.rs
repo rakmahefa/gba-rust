@@ -55,8 +55,13 @@ impl Runtime {
         self.service_interrupts();
     }
 
-    pub fn generated_irq_pending(&self) -> bool {
-        self.interrupts.irq_pending() && self.cpu.cpsr & (1 << 7) == 0
+    pub fn generated_irq_pending(&mut self) -> bool {
+        let pending = self.interrupts.pending();
+        if pending == 0 {
+            return false;
+        }
+        self.wake_from_interrupt(pending);
+        self.interrupts.ime && self.cpu.cpsr & (1 << 7) == 0
     }
 
     pub fn service_interrupts(&mut self) -> bool {
