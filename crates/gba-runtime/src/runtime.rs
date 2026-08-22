@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::bios::{InterruptController, PowerState};
+use super::bios::{InterruptController, PowerState, IRQ_KEYPAD};
 use super::bios_memory::{Bios, BiosLoadError};
 use super::cartridge::Cartridge;
 use super::cpu::Cpu;
@@ -105,12 +105,51 @@ impl Default for Runtime {
 }
 
 impl Runtime {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn load_bios(&mut self, bytes: &[u8]) -> Result<(), BiosLoadError> {
         self.bios = Bios::from_bytes(bytes)?;
         Ok(())
     }
 
-    pub fn bios(&self) -> &Bios { &self.bios }
+    pub fn bios(&self) -> &Bios {
+        &self.bios
+    }
+
+    /// Update one of the GBA's 10 active-low keypad bits.
+    ///
+    /// Bits 0..9 map to A, B, Select, Start, Right, Left, Up, Down, R and L.
+    /// Pressing a key clears the corresponding KEYINPUT bit. A newly pressed
+    /// key may request the keypad IRQ when KEYCNT is enabled by the future MMIO
+    /// keypad device; the runtime keeps the state transition here deterministic.
+    pub fn set_key_pressed(&mut self, key: u8, pressed: bool) {
+        if key >= 10 {
+            return;
+        }
+        let bit = 1u16 << key;
+        let was_pressed = self.keyinput & bit == 0;
+        if pressed {
+            self.keyinput &= !bit;
+        } else {
+            self.keyinput |= bit;
+        }
+        if pressed && !was_pressed {
+            self.interrupts.request(IRQ_KEYPAD);
+            self.wake_from_interrupt(IRQ_KEYPAD);
+        }
+    }
+
+    /// Replace the complete active-low keypad state. Only the architectural
+    /// ten-button range is accepted; upper bits remain released/high.
+    pub fn set_key_input(&mut self, pressed_mask: u16) {
+        let next = KEYINPUT_DEFAULT & !(pressed_mask & 0x03ff);
+        let newly_pressed = self.keyinput & !next;
+        self.keyinput = next;
+        if newly_pressed != 0 {
+            self.interrupts.request(IRQ_KEYPAD);
+            self.wake_from_interrupt(IRQ_KEYPAD);
+        }
+    }
 }
