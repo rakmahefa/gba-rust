@@ -11,6 +11,7 @@ pub mod cpu;
 pub mod mmio;
 pub mod ppu;
 pub mod runtime;
+pub mod scheduler;
 pub mod timers;
 
 pub use apu::Apu;
@@ -32,6 +33,10 @@ pub use cpu::{
 pub use mmio::{DISPSTAT_HBLANK, DISPSTAT_VBLANK, DISPSTAT_VCOUNT_IRQ, VCOUNT};
 pub use ppu::Ppu;
 pub use runtime::Runtime;
+pub use scheduler::{
+    EventKind, ScheduledEvent, TimingScheduler, CYCLES_PER_SCANLINE, HBLANK_START_CYCLES,
+    SCANLINES_PER_FRAME, VBLANK_START_LINE,
+};
 pub use timers::{Timer, TimerControl, TimerState, TIMER_COUNT};
 
 pub use arm7tdmi::Nzcv;
