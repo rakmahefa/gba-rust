@@ -7,12 +7,16 @@ use crate::mmio;
 fn dispcnt_supports_halfword_and_byte_accesses() {
     let mut runtime = Runtime::new();
     runtime.write16(mmio::DISPCNT, 0xa55a);
-    assert_eq!(runtime.read16(mmio::DISPCNT), 0xa55a);
+    assert_eq!(runtime.read16(mmio::DISPCNT), 0xa552);
 
     runtime.write8(mmio::DISPCNT, 0x12);
     assert_eq!(runtime.read16(mmio::DISPCNT), 0xa512);
     runtime.write8(mmio::DISPCNT_HI, 0x34);
     assert_eq!(runtime.read16(mmio::DISPCNT), 0x3412);
+
+    runtime.dispcnt = 0x0008;
+    runtime.write16(mmio::DISPCNT, 0x0000);
+    assert_eq!(runtime.read16(mmio::DISPCNT), 0x0008);
 }
 
 #[test]
