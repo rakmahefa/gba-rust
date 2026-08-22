@@ -77,9 +77,15 @@ fn add_signed(base: u32, offset: i32) -> u32 {
     }
 }
 
-fn operand_value(state: AbstractState, operand: Operand2) -> AbstractValue {
+fn operand_value(state: AbstractState, instruction: Instruction, operand: Operand2) -> AbstractValue {
     match operand {
         Operand2::Imm(value) => AbstractValue::Constant(value),
+        Operand2::Reg {
+            rm: 15,
+            shift: 0,
+            by_register: false,
+            ..
+        } => AbstractValue::Constant(aligned_pc(instruction.address, instruction.mode)),
         Operand2::Reg {
             rm,
             shift: 0,
@@ -87,6 +93,14 @@ fn operand_value(state: AbstractState, operand: Operand2) -> AbstractValue {
             ..
         } => state.read(rm),
         Operand2::Reg { .. } => AbstractValue::Unknown,
+    }
+}
+
+fn source_value(state: AbstractState, instruction: Instruction, register: u8) -> AbstractValue {
+    if register == 15 {
+        AbstractValue::Constant(aligned_pc(instruction.address, instruction.mode))
+    } else {
+        state.read(register)
     }
 }
 
@@ -116,13 +130,19 @@ pub(super) fn transfer_instruction(
 ) -> AbstractState {
     match instruction.kind {
         InstructionKind::Arm(ArmOp::Mov { rd, op2 }) => {
-            state.write(rd, operand_value(state, op2));
+            state.write(rd, operand_value(state, instruction, op2));
         }
         InstructionKind::Arm(ArmOp::Add { rd, rn, op2 }) => {
-            state.write(rd, add_values(state.read(rn), operand_value(state, op2)));
+            state.write(
+                rd,
+                add_values(source_value(state, instruction, rn), operand_value(state, instruction, op2)),
+            );
         }
         InstructionKind::Arm(ArmOp::Sub { rd, rn, op2 }) => {
-            state.write(rd, sub_values(state.read(rn), operand_value(state, op2)));
+            state.write(
+                rd,
+                sub_values(source_value(state, instruction, rn), operand_value(state, instruction, op2)),
+            );
         }
         InstructionKind::Arm(ArmOp::Load { rd, rn: 15, offset, .. }) => {
             let address = add_signed(aligned_pc(instruction.address, Mode::Arm), offset);
@@ -139,13 +159,14 @@ pub(super) fn transfer_instruction(
         InstructionKind::Arm(ArmOp::Extended(ArmExtended::DataProcessing {
             op, rd, rn, op2, ..
         })) => {
-            let rhs = operand_value(state, op2);
+            let rhs = operand_value(state, instruction, op2);
+            let lhs = source_value(state, instruction, rn);
             let value = match op {
                 ArmDataOp::Mov => rhs,
                 ArmDataOp::Mvn => rhs.map_not(),
-                ArmDataOp::Add => add_values(state.read(rn), rhs),
-                ArmDataOp::Sub => sub_values(state.read(rn), rhs),
-                ArmDataOp::Rsb => sub_values(rhs, state.read(rn)),
+                ArmDataOp::Add => add_values(lhs, rhs),
+                ArmDataOp::Sub => sub_values(lhs, rhs),
+                ArmDataOp::Rsb => sub_values(rhs, lhs),
                 _ => AbstractValue::Unknown,
             };
             state.write(rd, value);
@@ -203,10 +224,16 @@ pub(super) fn transfer_instruction(
             state.write(rd, AbstractValue::Constant(imm as u32));
         }
         InstructionKind::Thumb(ThumbOp::AddImm { rd, rn, imm }) => {
-            state.write(rd, add_values(state.read(rn), AbstractValue::Constant(imm as u32)));
+            state.write(
+                rd,
+                add_values(source_value(state, instruction, rn), AbstractValue::Constant(imm as u32)),
+            );
         }
         InstructionKind::Thumb(ThumbOp::SubImm { rd, rn, imm }) => {
-            state.write(rd, sub_values(state.read(rn), AbstractValue::Constant(imm as u32)));
+            state.write(
+                rd,
+                sub_values(source_value(state, instruction, rn), AbstractValue::Constant(imm as u32)),
+            );
         }
         InstructionKind::Thumb(ThumbOp::LoadImm { rd, rn: 15, word_offset }) => {
             let address = aligned_pc(instruction.address, Mode::Thumb)
@@ -259,7 +286,7 @@ pub(super) fn transfer_instruction(
         })) => {
             state.write(
                 rd,
-                match state.read(rs) {
+                match source_value(state, instruction, rs) {
                     AbstractValue::Constant(value) => AbstractValue::Constant(value << offset),
                     AbstractValue::Unknown => AbstractValue::Unknown,
                 },
@@ -269,9 +296,9 @@ pub(super) fn transfer_instruction(
             sub, rd, rs, imm,
         })) => {
             let value = if sub {
-                sub_values(state.read(rs), AbstractValue::Constant(imm as u32))
+                sub_values(source_value(state, instruction, rs), AbstractValue::Constant(imm as u32))
             } else {
-                add_values(state.read(rs), AbstractValue::Constant(imm as u32))
+                add_values(source_value(state, instruction, rs), AbstractValue::Constant(imm as u32))
             };
             state.write(rd, value);
         }
@@ -279,9 +306,9 @@ pub(super) fn transfer_instruction(
             sub, rd, rs, rn,
         })) => {
             let value = if sub {
-                sub_values(state.read(rs), state.read(rn))
+                sub_values(source_value(state, instruction, rs), source_value(state, instruction, rn))
             } else {
-                add_values(state.read(rs), state.read(rn))
+                add_values(source_value(state, instruction, rs), source_value(state, instruction, rn))
             };
             state.write(rd, value);
         }
@@ -290,7 +317,7 @@ pub(super) fn transfer_instruction(
             rd,
             rs,
         })) => {
-            state.write(rd, state.read(rs));
+            state.write(rd, source_value(state, instruction, rs));
         }
         InstructionKind::Thumb(ThumbOp::Extended(ThumbExtended::HighRegister { rd, .. })) => {
             state.write(rd, AbstractValue::Unknown);
@@ -313,4 +340,23 @@ pub(super) fn resolved_exchange_target(
         Mode::Thumb => target & !1,
     };
     Some(BlockKey { address, mode })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decoder::decode_arm;
+
+    #[test]
+    fn arm_pc_reads_use_architectural_pipeline_offset() {
+        let instruction = decode_arm(0x0000_0114, 0xE28F_0001);
+        let mapping = ImageMapping::bios(0x4000);
+        let state = transfer_instruction(&[], instruction, AbstractState::default(), mapping);
+
+        assert_eq!(
+            state.read(0),
+            AbstractValue::Constant(0x0000_011d),
+            "ADD r0, pc, #1 must use ARM's architectural PC value of address + 8"
+        );
+    }
 }

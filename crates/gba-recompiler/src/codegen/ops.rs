@@ -35,7 +35,12 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
             emit_cmp_sub(out, &format!("rt.read_reg({lhs})"), &rhs);
         }
         IrOp::Load { dst, base, offset, byte } => {
-            let _ = writeln!(out, "    let address = rt.read_reg({base}).wrapping_add({offset}i32 as u32);");
+            let base_expr = if mode == Mode::Thumb && *base == 15 {
+                "(rt.read_reg(15) & !3)".to_string()
+            } else {
+                format!("rt.read_reg({base})")
+            };
+            let _ = writeln!(out, "    let address = {base_expr}.wrapping_add({offset}i32 as u32);");
             if *byte {
                 let _ = writeln!(out, "    rt.write_reg({dst}, rt.read8(address) as u32);");
             } else {
@@ -98,5 +103,23 @@ mod tests {
         let mut out = String::new();
         emit_cmp_sub(&mut out, "2u32", "1u32");
         assert!(out.contains("wrapping_sub"));
+    }
+
+    #[test]
+    fn thumb_pc_relative_generic_load_aligns_architectural_pc() {
+        let mut out = String::new();
+        emit_op(
+            &mut out,
+            0x0000_011e,
+            0x4800,
+            Mode::Thumb,
+            &IrOp::Load {
+                dst: 1,
+                base: 15,
+                offset: 0x160,
+                byte: false,
+            },
+        );
+        assert!(out.contains("let address = (rt.read_reg(15) & !3).wrapping_add(352i32 as u32);"));
     }
 }

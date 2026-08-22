@@ -1,3 +1,5 @@
+use std::env;
+
 use crate::{Runtime, REG_PC};
 
 pub const RUNTIME_CONTRACT_VERSION: u32 = 5;
@@ -7,6 +9,87 @@ pub const GENERATED_TARGET_DYNAMIC_UNRESOLVED: &str =
     "generated indirect target is unresolved or outside the statically linked CFG";
 pub const GENERATED_TARGET_MISALIGNED: &str =
     "generated target cannot be represented by the requested execution mode";
+
+const GENERATED_TRACE_ENV: &str = "GBA_GENERATED_TRACE";
+const GENERATED_TRACE_LIMIT_ENV: &str = "GBA_GENERATED_TRACE_LIMIT";
+const DEFAULT_GENERATED_TRACE_LIMIT: u64 = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GeneratedTraceConfig {
+    enabled: bool,
+    limit: u64,
+}
+impl GeneratedTraceConfig {
+    fn from_env() -> Self {
+        let enabled = env::var(GENERATED_TRACE_ENV)
+            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+        let limit = env::var(GENERATED_TRACE_LIMIT_ENV)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_GENERATED_TRACE_LIMIT);
+        Self { enabled, limit }
+    }
+
+    #[inline]
+    fn should_log(&self, step: u64) -> bool {
+        self.enabled && step < self.limit
+    }
+
+    #[inline]
+    fn log_transition(
+        &self,
+        step: u64,
+        source: GeneratedBlockKey,
+        exit: GeneratedBlockExit,
+        target: Option<GeneratedBlockKey>,
+        cycles: u64,
+    ) {
+        if !self.should_log(step) {
+            return;
+        }
+
+        eprintln!(
+            "[generated-trace] step={step} source={:#010x}/{} exit={exit:?} target={} cycles={cycles}",
+            source.address,
+            if source.thumb { "Thumb" } else { "Arm" },
+            match target {
+                Some(target) => format!(
+                    "{:#010x}/{}",
+                    target.address,
+                    if target.thumb { "Thumb" } else { "Arm" }
+                ),
+                None => "<none>".to_string(),
+            },
+        );
+    }
+
+    #[inline]
+    fn log_dispatch_error(&self, step: u64, source: GeneratedBlockKey, error: &'static str) {
+        if !self.should_log(step) {
+            return;
+        }
+        eprintln!(
+            "[generated-trace] step={step} source={:#010x}/{} dispatch_error={error}",
+            source.address,
+            if source.thumb { "Thumb" } else { "Arm" },
+        );
+    }
+
+    #[inline]
+    fn log_step_limit(&self, step: u64, next: GeneratedBlockKey) {
+        if !self.enabled {
+            return;
+        }
+        eprintln!(
+            "[generated-trace] step-limit steps={step} next={:#010x}/{} trace_limit={}",
+            next.address,
+            if next.thumb { "Thumb" } else { "Arm" },
+            self.limit,
+        );
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GeneratedBlockKey {
@@ -190,6 +273,7 @@ impl RuntimeContract for Runtime {
         F: FnMut(&mut Runtime, u32, bool) -> Result<GeneratedBlockExit, &'static str>,
         L: Fn(u32, bool) -> bool,
     {
+        let trace = GeneratedTraceConfig::from_env();
         let mut next = GeneratedBlockKey::new(address, thumb);
         let mut steps = 0u64;
         loop {
@@ -197,6 +281,7 @@ impl RuntimeContract for Runtime {
                 if steps >= limit {
                     self.cpu.set_thumb(next.thumb);
                     self.cpu.r[REG_PC] = next.address;
+                    trace.log_step_limit(steps, next);
                     return Ok(GeneratedExecutionResult {
                         exit: GeneratedExecutionExit::StepLimitExceeded {
                             address: next.address,
@@ -210,7 +295,14 @@ impl RuntimeContract for Runtime {
 
             self.cpu.set_thumb(next.thumb);
             self.cpu.r[REG_PC] = next.address;
-            let exit = dispatch(self, next.address, next.thumb)?;
+            let source = next;
+            let exit = match dispatch(self, next.address, next.thumb) {
+                Ok(exit) => exit,
+                Err(error) => {
+                    trace.log_dispatch_error(steps, source, error);
+                    return Err(error);
+                }
+            };
             steps = steps.saturating_add(1);
 
             let checked = |address: u32, thumb: bool| -> Result<GeneratedBlockKey, &'static str> {
@@ -223,6 +315,7 @@ impl RuntimeContract for Runtime {
             match exit {
                 GeneratedBlockExit::Continue { address, thumb } => {
                     let target = checked(address, thumb)?;
+                    trace.log_transition(steps - 1, source, exit, Some(target), self.cycles);
                     if !is_linked(target.address, target.thumb) {
                         return Err(GENERATED_TARGET_OUTSIDE_CFG);
                     }
@@ -230,6 +323,7 @@ impl RuntimeContract for Runtime {
                 }
                 GeneratedBlockExit::Dynamic { address, thumb } => {
                     let target = checked(address, thumb)?;
+                    trace.log_transition(steps - 1, source, exit, Some(target), self.cycles);
                     if !is_linked(target.address, target.thumb) {
                         return Err(GENERATED_TARGET_DYNAMIC_UNRESOLVED);
                     }
@@ -237,6 +331,7 @@ impl RuntimeContract for Runtime {
                 }
                 GeneratedBlockExit::Return { address, thumb } => {
                     let target = checked(address, thumb)?;
+                    trace.log_transition(steps - 1, source, exit, Some(target), self.cycles);
                     self.cpu.set_thumb(target.thumb);
                     self.cpu.r[REG_PC] = target.address;
                     if is_linked(target.address, target.thumb) {
@@ -254,6 +349,7 @@ impl RuntimeContract for Runtime {
                 }
                 GeneratedBlockExit::Halt { address, thumb } => {
                     let target = checked(address, thumb)?;
+                    trace.log_transition(steps - 1, source, exit, Some(target), self.cycles);
                     self.cpu.set_thumb(target.thumb);
                     self.cpu.r[REG_PC] = target.address;
                     return Ok(GeneratedExecutionResult {
@@ -267,5 +363,22 @@ impl RuntimeContract for Runtime {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_config_is_disabled_by_default_without_environment() {
+        let config = GeneratedTraceConfig::from_env();
+        assert!(!config.enabled || config.limit > 0);
+    }
+
+    #[test]
+    fn generated_block_key_trace_identity_preserves_mode() {
+        let key = GeneratedBlockKey::new(0x120, true);
+        assert_eq!(key.tuple(), (0x120, true));
     }
 }

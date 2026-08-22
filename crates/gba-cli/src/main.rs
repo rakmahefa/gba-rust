@@ -21,6 +21,13 @@ impl ImageArg {
             other => Err(format!("unknown --image kind: {other} (expected rom or bios)").into()),
         }
     }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Rom => "rom",
+            Self::Bios => "bios",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -111,21 +118,34 @@ use std::{env, fs, path::PathBuf};
 
 use gba_runtime::{Cartridge, GeneratedExecutionExit, Runtime};
 
+fn load_bios(runtime: &mut Runtime, bios: &[u8]) {
+    for (offset, byte) in bios.iter().copied().enumerate() {
+        runtime.io.insert(offset as u32, byte);
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
-    let rom_path = PathBuf::from(args.next().ok_or("missing ROM path")?);
+    let image_kind = args.next().ok_or("missing image kind")?;
+    let image_path = PathBuf::from(args.next().ok_or("missing image path")?);
     let max_steps: u64 = args
         .next()
         .ok_or("missing max step count")?
         .parse()?;
 
-    let rom = fs::read(&rom_path)?;
+    let image = fs::read(&image_path)?;
     let mut runtime = Runtime::new();
-    runtime.load_cartridge(Cartridge::from_rom(rom, "saves"));
+
+    match image_kind.as_str() {
+        "rom" => runtime.load_cartridge(Cartridge::from_rom(image, "saves")),
+        "bios" => load_bios(&mut runtime, &image),
+        other => return Err(format!("unsupported image kind: {other}").into()),
+    }
 
     let result = gba_generated::gba_entry_with_limit(&mut runtime, max_steps)
         .map_err(|error| format!("generated execution failed: {error}"))?;
 
+    println!("generated execution: image={image_kind}");
     println!("generated execution: steps={}", result.steps);
     println!("generated execution: pc={:#010x}", result.state.pc());
     println!("generated execution: thumb={}", result.state.thumb);
@@ -151,9 +171,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(root)
 }
 
-fn execute_generated_rom(
+fn execute_generated_image(
     generated_source: &str,
-    rom_path: &Path,
+    image_path: &Path,
+    image: ImageArg,
     max_steps: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runner = write_generated_runner(generated_source)?;
@@ -163,12 +184,13 @@ fn execute_generated_rom(
         .arg("--manifest-path")
         .arg(runner.join("Cargo.toml"))
         .arg("--")
-        .arg(rom_path)
+        .arg(image.as_str())
+        .arg(image_path)
         .arg(max_steps.to_string())
         .status()?;
 
     if !status.success() {
-        return Err(format!("generated ROM runner exited with {status}").into());
+        return Err(format!("generated image runner exited with {status}").into());
     }
     Ok(())
 }
@@ -200,16 +222,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("generated Rust: {generated_path}");
 
     if args.execute {
-        if args.image == ImageArg::Bios {
-            return Err(
-                "BIOS generated execution is not enabled yet: gba-runtime must map BIOS bytes into the GBA address space first".into(),
-            );
-        }
         println!(
-            "executing generated ROM: max_steps={}, dispatcher=linked CFG",
-            args.max_steps
+            "executing generated image: image={:?}, max_steps={}, dispatcher=linked CFG",
+            args.image, args.max_steps
         );
-        execute_generated_rom(&generated.source, &args.rom_path, args.max_steps)?;
+        execute_generated_image(&generated.source, &args.rom_path, args.image, args.max_steps)?;
         return Ok(());
     }
 
@@ -222,8 +239,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             runtime.cartridge.as_ref().unwrap().rom.len()
         );
     } else {
-        println!("runtime: BIOS mapping recorded; BIOS-backed execution remains disabled");
+        let mapped = image.len().min(0x4000);
+        let mut runtime = Runtime::new();
+        for (offset, byte) in image.iter().copied().enumerate().take(0x4000) {
+            runtime.io.insert(offset as u32, byte);
+        }
+        println!("runtime ready: BIOS mapped bytes={mapped}, entry=0x0");
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bios_mapping_keeps_entry_at_zero() {
+        let mapping = image_mapping(ImageArg::Bios, 0x4000);
+        assert_eq!(mapping.kind, ImageKind::Bios);
+        assert_eq!(mapping.base, 0);
+        assert_eq!(mapping.entry, 0);
+        assert_eq!(mapping.entry_mode, gba_recompiler::Mode::Arm);
+    }
 }
