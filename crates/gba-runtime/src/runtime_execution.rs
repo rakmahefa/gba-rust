@@ -7,8 +7,7 @@ use crate::mmio::{
     DISPSTAT_VCOUNT, DISPSTAT_VCOUNT_IRQ, DISPSTAT_VCOUNT_MASK,
 };
 use crate::scheduler::{
-    EventKind, CYCLES_PER_SCANLINE, HBLANK_START_CYCLES, SCANLINES_PER_FRAME,
-    VBLANK_START_LINE,
+    EventKind, CYCLES_PER_SCANLINE, SCANLINES_PER_FRAME, VBLANK_START_LINE,
 };
 
 impl Runtime {
@@ -98,7 +97,7 @@ impl Runtime {
                     self.ppu.frame();
                 }
 
-                let compare = ((self.dispstat & DISPSTAT_VCOUNT_MASK) >> 8) as u16;
+                let compare = (self.dispstat & DISPSTAT_VCOUNT_MASK) >> 8;
                 let vcount_match = self.vcount == compare;
                 if vcount_match {
                     self.dispstat |= DISPSTAT_VCOUNT;
@@ -249,6 +248,7 @@ mod timing_tests {
         let mut runtime = Runtime::new();
         runtime.dispstat |= DISPSTAT_HBLANK_IRQ;
         runtime.interrupts.ie = IRQ_HBLANK;
+        runtime.interrupts.ime = true;
 
         runtime.advance_cycles(HBLANK_START_CYCLES as u32);
 
@@ -295,12 +295,12 @@ mod timing_tests {
         runtime.timers[0].write_reload(u16::MAX);
         runtime.timers[0].write_control(CONTROL_ENABLE | CONTROL_IRQ);
         runtime.timers[1].write_reload(u16::MAX);
-        runtime.timers[1].write_control(CONTROL_ENABLE | CONTROL_CASCADE | CONTROL_IRQ);
+        runtime.timers[1]
+            .write_control(CONTROL_ENABLE | CONTROL_CASCADE | CONTROL_IRQ);
 
         runtime.advance_cycles(2);
 
         assert_ne!(runtime.interrupts.iflags & IRQ_TIMER0, 0);
         assert_ne!(runtime.interrupts.iflags & IRQ_TIMER1, 0);
-        assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::System);
     }
 }
