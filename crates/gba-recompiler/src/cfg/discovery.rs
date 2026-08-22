@@ -9,19 +9,45 @@ use super::model::{BlockKey, DiscoveredInstruction};
 
 const DEBUG_ABSTRACT_STATE_ADDRESS: u32 = 0x0000_0118;
 
+fn debug_address(key: &BlockKey) -> bool {
+    key.address == DEBUG_ABSTRACT_STATE_ADDRESS
+}
+
 fn debug_abstract_state(
     key: &BlockKey,
     state_before: AbstractState,
     state_after: AbstractState,
     successors: &[BlockKey],
 ) {
-    if key.address != DEBUG_ABSTRACT_STATE_ADDRESS {
+    if !debug_address(key) {
         return;
     }
 
     eprintln!(
-        "[cfg-debug] abstract state: address={:#010x} mode={:?} before={state_before:?} after={state_after:?} successors={successors:?}",
+        "[cfg-debug] visit target: address={:#010x} mode={:?}\n    state_before={state_before:?}\n    state_after ={state_after:?}\n    successors  ={successors:?}",
         key.address, key.mode
+    );
+}
+
+fn debug_incoming_edge(
+    source: &BlockKey,
+    successor: &BlockKey,
+    state_after: AbstractState,
+    existing: Option<AbstractState>,
+    joined: AbstractState,
+    enqueued: bool,
+) {
+    if !debug_address(successor) {
+        return;
+    }
+
+    eprintln!(
+        "[cfg-debug] incoming edge:\n    source={:#010x}/{:?}\n    target={:#010x}/{:?}\n    source_state_after={state_after:?}\n    target_state_before={existing:?}\n    joined_state={joined:?}\n    decision={}",
+        source.address,
+        source.mode,
+        successor.address,
+        successor.mode,
+        if enqueued { "enqueue" } else { "skip" }
     );
 }
 
@@ -68,23 +94,27 @@ pub(super) fn discover_reachable(
                 continue;
             }
 
-            let should_queue = match states.get(&successor).copied() {
+            let existing = states.get(&successor).copied();
+            let (joined, should_queue) = match existing {
                 Some(existing) => {
                     let joined = existing.join(state_after);
-                    if joined != existing {
-                        states.insert(successor.clone(), joined);
-                        true
-                    } else {
-                        edges_changed
-                    }
+                    let changed = joined != existing;
+                    (joined, changed || edges_changed)
                 }
-                None => {
-                    states.insert(successor.clone(), state_after);
-                    true
-                }
+                None => (state_after, true),
             };
 
+            debug_incoming_edge(
+                &key,
+                &successor,
+                state_after,
+                existing,
+                joined,
+                should_queue,
+            );
+
             if should_queue {
+                states.insert(successor.clone(), joined);
                 queue.push_back(successor);
             }
         }
