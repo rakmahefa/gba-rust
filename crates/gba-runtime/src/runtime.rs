@@ -142,3 +142,27 @@ impl Runtime {
         self.keyinput = KEYINPUT_DEFAULT & !(pressed_mask & 0x03ff);
     }
 }
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn key_input_is_active_low() {
+        let mut runtime = Runtime::new();
+        assert_eq!(runtime.keyinput, 0x03ff);
+        runtime.set_key_pressed(0, true);
+        assert_eq!(runtime.keyinput & 1, 0);
+        runtime.set_key_pressed(0, false);
+        assert_ne!(runtime.keyinput & 1, 0);
+    }
+
+    #[test]
+    fn key_input_ignores_non_architectural_bits() {
+        let mut runtime = Runtime::new();
+        runtime.set_key_input(0xffff);
+        assert_eq!(runtime.keyinput, 0);
+        runtime.set_key_pressed(10, true);
+        assert_eq!(runtime.keyinput, 0);
+    }
+}
