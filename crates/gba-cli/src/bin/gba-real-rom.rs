@@ -7,7 +7,7 @@ use std::{
 };
 
 use gba_recompiler::{analyze_with_mapping, generate, ImageKind, ImageMapping, Mode};
-use gba_runtime::{validate_header, Cartridge, CpuMode, GeneratedExecutionExit};
+use gba_runtime::validate_header;
 
 const CARTRIDGE_BASE: u32 = 0x0800_0000;
 const DEFAULT_MAX_STEPS: u64 = 512;
