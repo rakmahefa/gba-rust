@@ -74,6 +74,16 @@ impl Runtime {
                 self.dispstat |= DISPSTAT_HBLANK;
                 self.ppu.sync_registers(&self.io);
                 self.ppu.render_scanline(self.dispcnt, self.vcount, &self.vram, &self.palette);
+                let mode = self.dispcnt & 0x7;
+                if mode == 1 || mode == 2 {
+                    self.ppu.render_affine_mode_scanline(
+                        self.dispcnt,
+                        self.vcount,
+                        &self.vram,
+                        &self.palette,
+                        &self.io,
+                    );
+                }
                 if self.dispstat & DISPSTAT_HBLANK_IRQ != 0 {
                     self.raise_hardware_interrupt(IRQ_HBLANK);
                 }
