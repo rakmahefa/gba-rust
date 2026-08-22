@@ -48,7 +48,7 @@ impl Ppu {
         }
 
         let row = vcount as usize * WIDTH;
-        let backdrop = read16(palette, 0);
+        let backdrop = read16_from_slice(palette, 0);
         self.framebuffer[row..row + WIDTH].fill(bgr555_to_rgba(backdrop));
         let mut priority = [4u8; WIDTH];
 
