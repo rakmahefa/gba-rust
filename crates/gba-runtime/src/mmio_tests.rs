@@ -2,6 +2,7 @@ use super::Runtime;
 use crate::bios::{HALTCNT, IE, IF};
 use crate::cpu::CpuMode;
 use crate::mmio;
+use crate::mmio_devices;
 
 #[test]
 fn dispcnt_supports_halfword_and_byte_accesses() {
@@ -117,4 +118,69 @@ fn enabling_interrupts_via_mmio_still_enters_irq_at_the_existing_boundary() {
 
     assert_eq!(runtime.mode(), CpuMode::Irq);
     assert_eq!(runtime.read_reg(crate::cpu::REG_PC), 0x18);
+}
+
+#[test]
+fn peripheral_contract_masks_generic_halfword_registers() {
+    let mut runtime = Runtime::new();
+
+    runtime.write16(mmio_devices::DMA0CNT_L.address, 0xffff);
+    assert_eq!(runtime.read16(mmio_devices::DMA0CNT_L.address), mmio_devices::DMA_COUNT_MASK);
+
+    runtime.write16(mmio_devices::BG0CNT.address, 0xffff);
+    assert_eq!(runtime.read16(mmio_devices::BG0CNT.address), mmio_devices::BG_TEXT_CONTROL_MASK);
+
+    runtime.write16(mmio_devices::WININ.address, 0xffff);
+    assert_eq!(runtime.read16(mmio_devices::WININ.address), mmio_devices::WINDOW_CONTROL_MASK);
+}
+
+#[test]
+fn peripheral_contract_masks_generic_word_registers() {
+    let mut runtime = Runtime::new();
+
+    runtime.write32(mmio_devices::DMA0SAD.address, 0xffff_ffff);
+    assert_eq!(runtime.read32(mmio_devices::DMA0SAD.address), mmio_devices::DMA_ADDRESS_MASK);
+
+    runtime.write32(mmio_devices::BG2X.address, 0x89ab_cdef);
+    assert_eq!(runtime.read32(mmio_devices::BG2X.address), 0x89ab_cdef);
+}
+
+#[test]
+fn peripheral_write_only_registers_reject_reads_but_accept_masked_writes() {
+    let mut runtime = Runtime::new();
+
+    runtime.write16(mmio_devices::BG0HOFS.address, 0xffff);
+    assert_eq!(runtime.read16(mmio_devices::BG0HOFS.address), 0);
+
+    runtime.write16(mmio_devices::BLDY.address, 0xffff);
+    assert_eq!(runtime.read16(mmio_devices::BLDY.address), 0);
+}
+
+#[test]
+fn peripheral_byte_aliases_share_the_same_contract_mask() {
+    let mut runtime = Runtime::new();
+    let address = mmio_devices::DMA0CNT_L.address;
+
+    runtime.write8(address, 0xff);
+    runtime.write8(address + 1, 0xff);
+
+    assert_eq!(runtime.read8(address), 0xff);
+    assert_eq!(runtime.read8(address + 1), 0x3f);
+}
+
+#[test]
+fn peripheral_contract_masks_are_enforced_for_32_bit_composed_byte_writes() {
+    let mut runtime = Runtime::new();
+    let address = mmio_devices::DMA0SAD.address;
+
+    for (offset, value) in [
+        (0, 0xff),
+        (1, 0xff),
+        (2, 0xff),
+        (3, 0xff),
+    ] {
+        runtime.write8(address + offset, value);
+    }
+
+    assert_eq!(runtime.read32(address), mmio_devices::DMA_ADDRESS_MASK);
 }
