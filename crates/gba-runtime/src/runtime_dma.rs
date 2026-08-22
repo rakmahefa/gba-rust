@@ -1,7 +1,6 @@
 use super::dma::{DmaController, DmaTrigger};
 use super::scheduler::EventKind;
 use super::Runtime;
-use crate::mmio_devices;
 
 const DMA_BASES: [u32; 4] = [0x0400_00b0, 0x0400_00bc, 0x0400_00c8, 0x0400_00d4];
 
@@ -9,16 +8,16 @@ impl Runtime {
     fn io_word(&self, address: u32) -> u32 {
         u32::from_le_bytes([
             *self.io.get(&address).unwrap_or(&0),
-            *self.io.get(&address.wrapping_add(1)).unwrap_or(&0),
-            *self.io.get(&address.wrapping_add(2)).unwrap_or(&0),
-            *self.io.get(&address.wrapping_add(3)).unwrap_or(&0),
+            *self.io.get(&(address + 1)).unwrap_or(&0),
+            *self.io.get(&(address + 2)).unwrap_or(&0),
+            *self.io.get(&(address + 3)).unwrap_or(&0),
         ])
     }
 
     fn io_half(&self, address: u32) -> u16 {
         u16::from_le_bytes([
             *self.io.get(&address).unwrap_or(&0),
-            *self.io.get(&address.wrapping_add(1)).unwrap_or(&0),
+            *self.io.get(&(address + 1)).unwrap_or(&0),
         ])
     }
 
@@ -34,7 +33,7 @@ impl Runtime {
         }
     }
 
-    fn sync_dma_registers(&mut self) {
+    pub(crate) fn sync_dma_registers(&mut self) {
         for (channel, base) in DMA_BASES.into_iter().enumerate() {
             let source = self.io_word(base);
             let destination = self.io_word(base + 4);
@@ -49,26 +48,9 @@ impl Runtime {
             let became_enabled = previous_control & 0x8000 == 0 && control & 0x8000 != 0;
             if became_enabled && matches!(self.dma.channels[channel].trigger(), DmaTrigger::Immediate) {
                 self.dma.request_immediate(channel);
+                self.scheduler.schedule_in(2, EventKind::DmaArbitrate);
             }
         }
-    }
-
-    fn schedule_dma_arbitration(&mut self, delay: u64) {
-        if !self.scheduler_has_dma_arbitration_at(self.scheduler.now().saturating_add(delay)) {
-            self.scheduler.schedule_in(delay, EventKind::DmaArbitrate);
-        }
-    }
-
-    fn scheduler_has_dma_arbitration_at(&self, cycle: u64) -> bool {
-        let mut current = self.scheduler.next_event();
-        while let Some(event) = current {
-            if event.cycle > cycle { return false; }
-            if event.cycle == cycle && matches!(event.kind, EventKind::DmaArbitrate) { return true; }
-            // The scheduler is intentionally opaque; a bounded public query is
-            // not available, so the next queued event is the only one visible.
-            return false;
-        }
-        false
     }
 
     pub(crate) fn service_dma_arbitration(&mut self) {
@@ -76,7 +58,10 @@ impl Runtime {
         if self.dma.active().is_some() { return; }
         let Some(transfer) = self.dma.begin_selected(self.scheduler.now(), self.waitcnt) else { return; };
         self.execute_dma_transfer(transfer.channel, transfer.source, transfer.destination, transfer.count, transfer.width);
-        self.scheduler.schedule_at(self.dma.busy_until(), EventKind::DmaComplete { channel: transfer.channel as u8 });
+        self.scheduler.schedule_at(
+            self.dma.busy_until(),
+            EventKind::DmaComplete { channel: transfer.channel as u8 },
+        );
     }
 
     fn execute_dma_transfer(&mut self, channel: usize, source: u32, destination: u32, count: u32, width: u32) {
@@ -127,9 +112,4 @@ impl Runtime {
 
     pub fn dma_controller(&self) -> &DmaController { &self.dma }
     pub fn dma_controller_mut(&mut self) -> &mut DmaController { &mut self.dma }
-
-    #[allow(dead_code)]
-    fn dma_contract_addresses_are_canonical() {
-        let _ = mmio_devices::DMA0SAD.address;
-    }
 }
