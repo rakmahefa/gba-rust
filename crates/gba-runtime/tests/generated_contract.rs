@@ -1,4 +1,6 @@
-use gba_runtime::{GeneratedBlockExit, GeneratedExecutionExit, Runtime, RuntimeContract};
+use gba_runtime::{
+    CpuMode, ExceptionKind, GeneratedBlockExit, GeneratedExecutionExit, Runtime, RuntimeContract,
+};
 
 #[test]
 fn max_steps_counts_blocks_not_runtime_cycles() {
@@ -50,4 +52,29 @@ fn continue_target_rejects_misaligned_arm_address() {
     );
 
     assert_eq!(error, Err(gba_runtime::GENERATED_TARGET_MISALIGNED));
+}
+
+#[test]
+fn exception_exit_delivers_an_unlinked_exception_vector() {
+    let mut runtime = Runtime::new();
+    let result = runtime
+        .run_generated_contract(
+            0x0800_0000,
+            false,
+            Some(1),
+            |_, _, _| Ok(GeneratedBlockExit::exception(ExceptionKind::Irq)),
+            |_, _| false,
+        )
+        .expect("exception vector should be an execution result");
+
+    assert_eq!(result.steps, 1);
+    assert_eq!(runtime.mode(), CpuMode::Irq);
+    assert!(matches!(
+        result.exit,
+        GeneratedExecutionExit::ExceptionVector {
+            kind: ExceptionKind::Irq,
+            address: 0x18,
+            thumb: false,
+        }
+    ));
 }
