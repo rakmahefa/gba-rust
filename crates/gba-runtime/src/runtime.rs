@@ -342,8 +342,7 @@ impl Runtime {
         match address {
             0x0400_0004 => self.dispstat = (self.dispstat & 0xff00) | value as u16,
             0x0400_0005 => self.dispstat = (self.dispstat & 0x00ff) | ((value as u16) << 8),
-            KEYINPUT => {}
-            KEYINPUT_HIGH => {}
+            KEYINPUT | KEYINPUT_HIGH => {}
             IE => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
             0x0400_0201 => {
                 self.interrupts.ie = (self.interrupts.ie & 0x00ff) | ((value as u16) << 8)
@@ -575,7 +574,9 @@ mod tests {
         runtime.write_reg(REG_SP, 0x3000);
         runtime.write_reg(REG_LR, 0x4000);
         assert_eq!(runtime.cpu.spsr(), Some(old));
-        let result = runtime.exception_return(0x0800_0104).expect("exception return");
+        let result = runtime
+            .exception_return(0x0800_0104)
+            .expect("exception return");
         assert_eq!(result, (0x0800_0104, false));
         assert_eq!(runtime.mode(), CpuMode::System);
         assert_eq!(runtime.read_reg(REG_SP), 0x1000);
@@ -585,14 +586,19 @@ mod tests {
     #[test]
     fn generated_engine_dispatches_iteratively_without_recursive_calls() {
         let mut runtime = Runtime::new();
-        let result = runtime.run_generated(0x0800_0000, false, Some(10_000), |rt, address, thumb| {
-            rt.tick(1);
-            if rt.cycles == 10_000 {
-                Err("done")
-            } else {
-                Ok((address, thumb))
-            }
-        });
+        let result = runtime.run_generated(
+            0x0800_0000,
+            false,
+            Some(10_000),
+            |rt, address, thumb| {
+                rt.tick(1);
+                if rt.cycles == 10_000 {
+                    Err("done")
+                } else {
+                    Ok((address, thumb))
+                }
+            },
+        );
         assert_eq!(result, Err("done"));
         assert_eq!(runtime.cycles, 10_000);
     }
