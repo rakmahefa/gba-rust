@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::model::{BasicBlock, BlockId, BlockKey, ControlFlowGraph};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ValidationError {
+pub enum ValidationError {
     EmptyGraph,
     InvalidEntry(BlockId),
     NonContiguousBlockId { expected: BlockId, actual: BlockId },
@@ -23,11 +23,7 @@ fn validate_block(block: &BasicBlock, block_count: usize, owners: &mut HashMap<B
         return Err(ValidationError::EmptyBlock(block.id));
     }
     if block.instructions.len() != block.ir.len() {
-        return Err(ValidationError::InstructionIrMismatch {
-            block: block.id,
-            instructions: block.instructions.len(),
-            ir: block.ir.len(),
-        });
+        return Err(ValidationError::InstructionIrMismatch { block: block.id, instructions: block.instructions.len(), ir: block.ir.len() });
     }
     let first = block.instructions[0];
     let expected = BlockKey { address: first.address, mode: first.mode };
@@ -36,7 +32,7 @@ fn validate_block(block: &BasicBlock, block_count: usize, owners: &mut HashMap<B
     }
     for (index, instruction) in block.instructions.iter().enumerate() {
         let key = BlockKey { address: instruction.address, mode: instruction.mode };
-        if owners.insert(key.clone(), block.id).is_some() {
+        if owners.insert(key, block.id).is_some() {
             return Err(ValidationError::DuplicateInstruction { address: instruction.address, mode: instruction.mode });
         }
         if let Some(next) = block.instructions.get(index + 1) {
@@ -44,7 +40,7 @@ fn validate_block(block: &BasicBlock, block_count: usize, owners: &mut HashMap<B
                 return Err(ValidationError::NonContiguousInstructions { block: block.id, previous: instruction.address, next: next.address });
             }
             if instruction.mode != next.mode {
-                return Err(ValidationError::ModeChangedWithinBlock { block: block.id, previous: instruction.mode, next: next.mode });
+                return Err(ValidationError::ModeChangedWithinBlock { block: block.id, previous: instruction.mode, next: instruction.mode });
             }
         }
     }
@@ -87,16 +83,9 @@ pub(crate) fn validate_cfg(cfg: &ControlFlowGraph, expected_instruction_count: u
 mod tests {
     use super::*;
     use crate::decoder::Mode;
-    use crate::ir::IrInstruction;
 
     fn empty_block(id: usize, address: u32) -> BasicBlock {
-        BasicBlock {
-            id: BlockId(id),
-            key: BlockKey { address, mode: Mode::Arm },
-            instructions: Vec::new(),
-            ir: Vec::<IrInstruction>::new(),
-            successors: Vec::new(),
-        }
+        BasicBlock { id: BlockId(id), key: BlockKey { address, mode: Mode::Arm }, instructions: Vec::new(), ir: Vec::new(), successors: Vec::new() }
     }
 
     #[test]
