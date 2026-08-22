@@ -16,10 +16,11 @@ impl Runtime {
     fn tick_timers(&mut self, cycles: u32) {
         let mut cascade_edges = 0u32;
         for index in 0..self.timers.len() {
-            let overflows = if index == 0 {
-                self.timers[index].tick_cycles(cycles)
-            } else {
+            let cascade = index != 0 && self.timers[index].control().cascade;
+            let overflows = if cascade {
                 self.timers[index].tick_cascade(cascade_edges)
+            } else {
+                self.timers[index].tick_cycles(cycles)
             };
 
             if overflows == 0 {
