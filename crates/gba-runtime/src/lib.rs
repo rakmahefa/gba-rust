@@ -4,6 +4,7 @@ mod bios_memory;
 mod contract;
 mod dma;
 mod execution;
+mod ppu_affine;
 
 pub mod apu;
 pub mod bus;
