@@ -148,6 +148,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         GeneratedExecutionExit::Halted { address, thumb } => {
             println!("generated execution: halted={address:#010x} thumb={thumb}");
         }
+        GeneratedExecutionExit::ExceptionVector {
+            kind,
+            address,
+            thumb,
+        } => {
+            println!(
+                "generated execution: exception_vector={kind:?} {address:#010x} thumb={thumb}"
+            );
+        }
         GeneratedExecutionExit::StepLimitExceeded { address, thumb } => {
             println!("generated execution: step_limit={address:#010x} thumb={thumb}");
         }
