@@ -4,6 +4,7 @@ use super::bios::{InterruptController, PowerState};
 use super::bios_memory::{Bios, BiosLoadError};
 use super::cartridge::Cartridge;
 use super::cpu::Cpu;
+use super::dma::DmaController;
 use super::scheduler::TimingScheduler;
 use super::timers::{Timer, TIMER_COUNT};
 use super::{Apu, Ppu};
@@ -49,6 +50,7 @@ pub struct Runtime {
     pub oam: [u8; OAM_LEN],
     pub interrupts: InterruptController,
     pub timers: [Timer; TIMER_COUNT],
+    pub dma: DmaController,
     pub power: PowerState,
     pub dispcnt: u16,
     pub waitcnt: u16,
@@ -86,6 +88,7 @@ impl Default for Runtime {
             oam: [0; OAM_LEN],
             interrupts: InterruptController::default(),
             timers: std::array::from_fn(|_| Timer::default()),
+            dma: DmaController::default(),
             power: PowerState::default(),
             dispcnt: 0,
             waitcnt: 0,
@@ -100,16 +103,12 @@ impl Default for Runtime {
 }
 
 impl Runtime {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     pub fn load_bios(&mut self, bytes: &[u8]) -> Result<(), BiosLoadError> {
         self.bios = Bios::from_bytes(bytes)?;
         Ok(())
     }
 
-    pub fn bios(&self) -> &Bios {
-        &self.bios
-    }
+    pub fn bios(&self) -> &Bios { &self.bios }
 }
