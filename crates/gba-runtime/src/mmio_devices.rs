@@ -24,11 +24,11 @@ pub const BLEND_ALPHA_MASK: u16 = 0x1f1f;
 pub const BLEND_Y_MASK: u16 = 0x001f;
 
 const fn dma_address(address: u32) -> MmioRegister {
-    MmioRegister::new(address, MmioWidth::Word, MmioAccess::WriteOnly, DMA_ADDRESS_MASK)
+    MmioRegister::new(address, MmioWidth::Word, MmioAccess::ReadWrite, DMA_ADDRESS_MASK)
 }
 
 const fn dma_count(address: u32, mask: u16) -> MmioRegister {
-    MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::WriteOnly, mask as u32)
+    MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::ReadWrite, mask as u32)
 }
 
 const fn dma_control(address: u32, mask: u16) -> MmioRegister {
@@ -194,7 +194,8 @@ mod tests {
     #[test]
     fn dma_registers_preserve_width_and_access_direction() {
         assert_eq!(DMA0SAD.width, MmioWidth::Word);
-        assert_eq!(DMA0SAD.access, MmioAccess::WriteOnly);
+        assert_eq!(DMA0SAD.access, MmioAccess::ReadWrite);
+        assert_eq!(DMA0CNT_L.access, MmioAccess::ReadWrite);
         assert_eq!(DMA0CNT_L.writable_mask, DMA_COUNT_MASK as u32);
         assert_eq!(DMA3CNT_L.writable_mask, DMA3_COUNT_MASK as u32);
         assert_eq!(DMA3CNT_H.writable_mask, DMA3_CONTROL_MASK as u32);
