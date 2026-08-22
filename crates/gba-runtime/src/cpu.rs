@@ -184,16 +184,32 @@ impl Cpu {
 
     pub fn set_nzcv_masked(&mut self, flags: Nzcv, mask: u8) {
         if mask & 1 != 0 {
-            if flags.n { self.cpsr |= CPSR_N } else { self.cpsr &= !CPSR_N }
+            if flags.n {
+                self.cpsr |= CPSR_N
+            } else {
+                self.cpsr &= !CPSR_N
+            }
         }
         if mask & 2 != 0 {
-            if flags.z { self.cpsr |= CPSR_Z } else { self.cpsr &= !CPSR_Z }
+            if flags.z {
+                self.cpsr |= CPSR_Z
+            } else {
+                self.cpsr &= !CPSR_Z
+            }
         }
         if mask & 4 != 0 {
-            if flags.c { self.cpsr |= CPSR_C } else { self.cpsr &= !CPSR_C }
+            if flags.c {
+                self.cpsr |= CPSR_C
+            } else {
+                self.cpsr &= !CPSR_C
+            }
         }
         if mask & 8 != 0 {
-            if flags.v { self.cpsr |= CPSR_V } else { self.cpsr &= !CPSR_V }
+            if flags.v {
+                self.cpsr |= CPSR_V
+            } else {
+                self.cpsr &= !CPSR_V
+            }
         }
     }
 
