@@ -7,10 +7,11 @@ use super::abstract_state::AbstractState;
 use super::edges::{decode_at, in_image, instruction_successors};
 use super::model::{BlockKey, DiscoveredInstruction};
 
-const DEBUG_ABSTRACT_STATE_ADDRESS: u32 = 0x0000_0118;
+const DEBUG_ABSTRACT_STATE_START: u32 = 0x0000_0100;
+const DEBUG_ABSTRACT_STATE_END: u32 = 0x0000_0118;
 
 fn debug_address(key: &BlockKey) -> bool {
-    key.address == DEBUG_ABSTRACT_STATE_ADDRESS
+    (DEBUG_ABSTRACT_STATE_START..=DEBUG_ABSTRACT_STATE_END).contains(&key.address)
 }
 
 fn debug_abstract_state(
@@ -24,7 +25,7 @@ fn debug_abstract_state(
     }
 
     eprintln!(
-        "[cfg-debug] visit target: address={:#010x} mode={:?}\n    state_before={state_before:?}\n    state_after ={state_after:?}\n    successors  ={successors:?}",
+        "[cfg-debug] instruction-state: address={:#010x} mode={:?}\n    state_before={state_before:?}\n    state_after ={state_after:?}\n    successors  ={successors:?}",
         key.address, key.mode
     );
 }
@@ -37,7 +38,7 @@ fn debug_incoming_edge(
     joined: AbstractState,
     enqueued: bool,
 ) {
-    if !debug_address(successor) {
+    if successor.address != DEBUG_ABSTRACT_STATE_END {
         return;
     }
 
