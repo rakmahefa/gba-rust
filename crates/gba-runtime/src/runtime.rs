@@ -1,9 +1,20 @@
 use std::collections::HashMap;
 
 use super::arm7tdmi::{self, Nzcv, ShiftKind, ShiftResult};
+use super::bios::{
+    execute_swi as execute_bios_swi, service_pending_irq, BiosMemory, BiosResult, BiosSwi,
+    InterruptController, PowerState, HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT,
+};
 use super::cartridge::Cartridge;
 use super::cpu::{Cpu, CpuMode, ExceptionKind, REG_LR, REG_PC};
 use super::{Apu, Ppu};
+
+const EWRAM_LEN: usize = 0x40000;
+const IWRAM_LEN: usize = 0x8000;
+const PALETTE_LEN: usize = 0x400;
+const VRAM_LEN: usize = 0x18000;
+const OAM_LEN: usize = 0x400;
+const KEYINPUT_DEFAULT: u16 = 0x03ff;
 
 #[derive(Debug, Default)]
 pub struct Runtime {
@@ -12,12 +23,25 @@ pub struct Runtime {
     pub apu: Apu,
     pub cartridge: Option<Cartridge>,
     pub io: HashMap<u32, u8>,
+    pub ewram: [u8; EWRAM_LEN],
+    pub iwram: [u8; IWRAM_LEN],
+    pub palette: [u8; PALETTE_LEN],
+    pub vram: [u8; VRAM_LEN],
+    pub oam: [u8; OAM_LEN],
+    pub interrupts: InterruptController,
+    pub power: PowerState,
+    pub waitcnt: u16,
+    pub postflg: u8,
+    pub keyinput: u16,
+    pub dispstat: u16,
     pub cycles: u64,
 }
 
 impl Runtime {
     pub fn new() -> Self {
-        Self::default()
+        let mut runtime = Self::default();
+        runtime.keyinput = KEYINPUT_DEFAULT;
+        runtime
     }
 
     pub fn load_cartridge(&mut self, cartridge: Cartridge) {
@@ -155,8 +179,45 @@ impl Runtime {
         (kind.vector(), false)
     }
 
+    pub fn bios_swi(&mut self, swi: BiosSwi) -> BiosResult {
+        let mut memory = BiosMemory {
+            ewram: &mut self.ewram,
+            iwram: &mut self.iwram,
+            palette: &mut self.palette,
+            vram: &mut self.vram,
+            oam: &mut self.oam,
+        };
+        execute_bios_swi(&mut self.cpu, &mut self.power, &mut self.interrupts, &mut memory, swi)
+    }
+
+    pub fn bios_swi_number(&mut self, raw: u32, thumb: bool) -> Option<BiosResult> {
+        BiosSwi::from_number(super::bios::swi_number(raw, thumb)).map(|swi| self.bios_swi(swi))
+    }
+
+    pub fn request_interrupt(&mut self, mask: u16) {
+        self.interrupts.request(mask);
+        self.wake_from_interrupt(mask);
+        self.service_interrupts();
+    }
+
+    pub fn service_interrupts(&mut self) -> bool {
+        if self.power == PowerState::Stopped {
+            return false;
+        }
+        service_pending_irq(&mut self.cpu, &self.interrupts)
+    }
+
+    pub fn wake_from_interrupt(&mut self, mask: u16) {
+        if self.power == PowerState::Halted && self.interrupts.ie & mask != 0 {
+            self.power = PowerState::Running;
+        }
+    }
+
     pub fn step_recompiled(&mut self, cycles: u32) {
         self.cycles = self.cycles.wrapping_add(cycles as u64);
+        if self.power != PowerState::Stopped {
+            self.service_interrupts();
+        }
     }
 
     pub fn tick(&mut self, cycles: u32) {
@@ -169,27 +230,65 @@ impl Runtime {
 
     pub fn frame(&mut self) {
         self.ppu.frame();
+        self.request_interrupt(super::bios::IRQ_VBLANK);
     }
 
     pub fn read8(&self, address: u32) -> u8 {
-        if (0x0800_0000..0x0E00_0000).contains(&address) {
+        if (0x0000_0000..=0x0000_3fff).contains(&address) {
+            0xff
+        } else if (0x0200_0000..=0x0203_ffff).contains(&address) {
+            self.ewram[(address - 0x0200_0000) as usize]
+        } else if (0x0300_0000..=0x0300_7fff).contains(&address) {
+            self.iwram[(address - 0x0300_0000) as usize]
+        } else if (0x0400_0000..=0x0400_03ff).contains(&address) {
+            self.read_mmio8(address)
+        } else if (0x0500_0000..=0x0500_03ff).contains(&address) {
+            self.palette[(address - 0x0500_0000) as usize]
+        } else if (0x0600_0000..=0x0601_7fff).contains(&address) {
+            self.vram[(address - 0x0600_0000) as usize]
+        } else if (0x0700_0000..=0x0700_03ff).contains(&address) {
+            self.oam[(address - 0x0700_0000) as usize]
+        } else if (0x0800_0000..0x0e00_0000).contains(&address) {
             self.cartridge
                 .as_ref()
                 .and_then(|c| c.rom.get((address - 0x0800_0000) as usize))
                 .copied()
                 .unwrap_or(0xff)
-        } else if (0x0E00_0000..=0x0E00_FFFF).contains(&address) {
+        } else if (0x0e00_0000..=0x0e00_ffff).contains(&address) {
             self.cartridge
                 .as_ref()
-                .map(|c| c.save.read((address - 0x0E00_0000) as usize))
+                .map(|c| c.save.read((address - 0x0e00_0000) as usize))
                 .unwrap_or(0xff)
         } else {
             *self.io.get(&address).unwrap_or(&0)
         }
     }
 
+    fn read_mmio8(&self, address: u32) -> u8 {
+        match address {
+            0x0400_0004 => self.dispstat as u8,
+            0x0400_0005 => (self.dispstat >> 8) as u8,
+            0x0400_0130 => self.keyinput as u8,
+            0x0400_0131 => (self.keyinput >> 8) as u8,
+            0x0400_0200 => self.interrupts.ie as u8,
+            0x0400_0201 => (self.interrupts.ie >> 8) as u8,
+            0x0400_0202 => self.interrupts.iflags as u8,
+            0x0400_0203 => (self.interrupts.iflags >> 8) as u8,
+            0x0400_0204 => self.waitcnt as u8,
+            0x0400_0205 => (self.waitcnt >> 8) as u8,
+            0x0400_0208 => u8::from(self.interrupts.ime),
+            0x0400_0300 => self.postflg,
+            0x0400_0301 => 0,
+            _ => *self.io.get(&address).unwrap_or(&0),
+        }
+    }
+
     pub fn read16(&self, address: u32) -> u16 {
-        u16::from_le_bytes([self.read8(address), self.read8(address.wrapping_add(1))])
+        if (0x0400_0000..=0x0400_03ff).contains(&address) {
+            u16::from_le_bytes([self.read_mmio8(address), self.read_mmio8(address.wrapping_add(1))])
+        } else {
+            u16::from_le_bytes([self.read8(address), self.read8(address.wrapping_add(1))])
+        }
     }
 
     pub fn read32(&self, address: u32) -> u32 {
@@ -204,26 +303,85 @@ impl Runtime {
     }
 
     pub fn write8(&mut self, address: u32, value: u8) {
-        if (0x0E00_0000..=0x0E00_FFFF).contains(&address) {
+        if (0x0200_0000..=0x0203_ffff).contains(&address) {
+            self.ewram[(address - 0x0200_0000) as usize] = value;
+        } else if (0x0300_0000..=0x0300_7fff).contains(&address) {
+            self.iwram[(address - 0x0300_0000) as usize] = value;
+        } else if (0x0400_0000..=0x0400_03ff).contains(&address) {
+            self.write_mmio8(address, value);
+        } else if (0x0500_0000..=0x0500_03ff).contains(&address) {
+            self.palette[(address - 0x0500_0000) as usize] = value;
+        } else if (0x0600_0000..=0x0601_7fff).contains(&address) {
+            self.vram[(address - 0x0600_0000) as usize] = value;
+        } else if (0x0700_0000..=0x0700_03ff).contains(&address) {
+            self.oam[(address - 0x0700_0000) as usize] = value;
+        } else if (0x0e00_0000..=0x0e00_ffff).contains(&address) {
             if let Some(cartridge) = self.cartridge.as_mut() {
                 cartridge
                     .save
-                    .write((address - 0x0E00_0000) as usize, value);
+                    .write((address - 0x0e00_0000) as usize, value);
             }
         } else {
             self.io.insert(address, value);
         }
     }
 
+    fn write_mmio8(&mut self, address: u32, value: u8) {
+        match address {
+            0x0400_0004 => self.dispstat = (self.dispstat & 0xff00) | value as u16,
+            0x0400_0005 => self.dispstat = (self.dispstat & 0x00ff) | ((value as u16) << 8),
+            0x0400_0130 | 0x0400_0131 => {}
+            0x0400_0200 => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
+            0x0400_0201 => self.interrupts.ie = (self.interrupts.ie & 0x00ff) | ((value as u16) << 8),
+            0x0400_0202 => self.interrupts.acknowledge(value as u16),
+            0x0400_0203 => self.interrupts.acknowledge((value as u16) << 8),
+            0x0400_0204 => self.waitcnt = (self.waitcnt & 0xff00) | value as u16,
+            0x0400_0205 => self.waitcnt = (self.waitcnt & 0x00ff) | ((value as u16) << 8),
+            0x0400_0208 => {
+                self.interrupts.ime = value & 1 != 0;
+                if self.interrupts.ime {
+                    self.service_interrupts();
+                }
+            }
+            0x0400_0300 => self.postflg = value & 1,
+            HALTCNT => {
+                if value & 0x80 != 0 {
+                    self.power = PowerState::Stopped;
+                } else {
+                    self.power = PowerState::Halted;
+                }
+            }
+            _ => {
+                self.io.insert(address, value);
+            }
+        }
+    }
+
     pub fn write16(&mut self, address: u32, value: u16) {
+        if address == IF {
+            self.interrupts.acknowledge(value);
+            return;
+        }
+        if address == IE {
+            self.interrupts.ie = value;
+            self.service_interrupts();
+            return;
+        }
+        if address == IME {
+            self.interrupts.ime = value & 1 != 0;
+            if self.interrupts.ime {
+                self.service_interrupts();
+            }
+            return;
+        }
         for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
-            self.write8(address.wrapping_add(i as u32), byte)
+            self.write8(address.wrapping_add(i as u32), byte);
         }
     }
 
     pub fn write32(&mut self, address: u32, value: u32) {
         for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
-            self.write8(address.wrapping_add(i as u32), byte)
+            self.write8(address.wrapping_add(i as u32), byte);
         }
     }
 
@@ -248,6 +406,7 @@ impl Runtime {
     }
 
     pub fn halt(&mut self) -> ! {
+        self.power = PowerState::Halted;
         panic!("recompiled program halted")
     }
 
@@ -273,6 +432,15 @@ impl Runtime {
                     return Err("generated execution step limit exceeded");
                 }
             }
+            if self.power == PowerState::Stopped {
+                return Err("runtime is stopped");
+            }
+            if self.power == PowerState::Halted {
+                self.step_recompiled(1);
+                if self.power == PowerState::Halted {
+                    return Err("runtime is halted");
+                }
+            }
             self.cpu.set_thumb(next.1);
             self.cpu.r[REG_PC] = next.0;
             next = dispatch(self, next.0, next.1)?;
@@ -291,6 +459,7 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bios::{BiosSwi, IRQ_VBLANK};
     use crate::cpu::{CPSR_C, CPSR_N, CPSR_V, CPSR_Z, CpuMode, REG_LR, REG_PC, REG_SP};
 
     #[test]
@@ -415,5 +584,58 @@ mod tests {
         assert_eq!(runtime.exchange_target_for_dispatch(0x0800_0101), (0x0800_0100, true));
         assert!(runtime.cpu.thumb);
         assert_eq!(runtime.read_reg(REG_PC), 0x0800_0100);
+    }
+
+    #[test]
+    fn mmio_interrupt_registers_are_backed_by_runtime_state() {
+        let mut runtime = Runtime::new();
+        runtime.write16(IE, IRQ_VBLANK);
+        runtime.write16(IME, 1);
+        runtime.write16(IF, IRQ_VBLANK);
+        assert_eq!(runtime.read16(IE), IRQ_VBLANK);
+        assert_eq!(runtime.read16(IF), 0);
+        assert!(runtime.mode() == CpuMode::Irq);
+        assert_eq!(runtime.read_reg(REG_PC), 0x18);
+    }
+
+    #[test]
+    fn mmio_if_write_acknowledges_only_requested_bits() {
+        let mut runtime = Runtime::new();
+        runtime.interrupts.iflags = IRQ_VBLANK | crate::bios::IRQ_HBLANK;
+        runtime.write16(IF, IRQ_VBLANK);
+        assert_eq!(runtime.read16(IF), crate::bios::IRQ_HBLANK);
+    }
+
+    #[test]
+    fn halt_and_stop_mmio_change_runtime_power_state() {
+        let mut runtime = Runtime::new();
+        runtime.write8(HALTCNT, 0);
+        assert_eq!(runtime.power, PowerState::Halted);
+        runtime.request_interrupt(IRQ_VBLANK);
+        assert_eq!(runtime.power, PowerState::Running);
+        runtime.write8(HALTCNT, 0x80);
+        assert_eq!(runtime.power, PowerState::Stopped);
+    }
+
+    #[test]
+    fn bios_swi_updates_runtime_power_and_memory() {
+        let mut runtime = Runtime::new();
+        runtime.iwram[0x0100] = 0xaa;
+        runtime.cpu.r[0] = 2;
+        let result = runtime.bios_swi(BiosSwi::RegisterRamReset);
+        assert_eq!(result, BiosResult::RETURNED);
+        assert_eq!(runtime.iwram[0x0100], 0);
+        runtime.bios_swi(BiosSwi::Halt);
+        assert_eq!(runtime.power, PowerState::Halted);
+    }
+
+    #[test]
+    fn vblank_frame_request_reaches_the_integrated_irq_path() {
+        let mut runtime = Runtime::new();
+        runtime.write16(IE, IRQ_VBLANK);
+        runtime.write16(IME, 1);
+        runtime.frame();
+        assert_eq!(runtime.mode(), CpuMode::Irq);
+        assert_eq!(runtime.read_reg(REG_PC), 0x18);
     }
 }
