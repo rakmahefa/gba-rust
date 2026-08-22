@@ -31,19 +31,10 @@ impl Runtime {
         }
     }
 
-    fn read_timer8(&self, address: u32) -> Option<u8> {
-        let index = timer_index(address)?;
-        if timer_register_is_control(address) {
-            Some((self.timers[index].read_control() >> 8) as u8)
-        } else {
-            Some((self.timers[index].counter() & 0xff) as u8)
-        }
-    }
-
     fn read_mmio8(&self, address: u32) -> u8 {
         if let Some(index) = timer_index(address) {
             if timer_register_is_control(address) {
-                return (self.timers[index].read_control() >> 8) as u8;
+                return self.timers[index].read_control() as u8;
             }
             return self.timers[index].counter() as u8;
         }
@@ -69,21 +60,14 @@ impl Runtime {
         }
     }
 
-    fn write_timer8(&mut self, address: u32, value: u8) -> bool {
-        let Some(index) = timer_index(address) else {
-            return false;
-        };
-        if timer_register_is_control(address) {
-            self.timers[index].write_control(u16::from(value) << 8);
-        } else {
-            let current = self.timers[index].reload();
-            self.timers[index].write_reload((current & 0xff00) | value as u16);
-        }
-        true
-    }
-
     fn write_mmio8(&mut self, address: u32, value: u8) {
-        if self.write_timer8(address, value) {
+        if let Some(index) = timer_index(address) {
+            if timer_register_is_control(address) {
+                self.timers[index].write_control(value as u16);
+            } else {
+                let current = self.timers[index].reload();
+                self.timers[index].write_reload((current & 0xff00) | value as u16);
+            }
             return;
         }
 
@@ -94,8 +78,10 @@ impl Runtime {
             mmio::DISPSTAT + 1 => {
                 self.dispstat = (self.dispstat & 0x00ff) | (u16::from(value) << 8);
             }
-            mmio::VCOUNT | (mmio::VCOUNT + 1) => {}
-            mmio::KEYINPUT | (mmio::KEYINPUT + 1) => {}
+            mmio::VCOUNT => {}
+            mmio::VCOUNT + 1 => {}
+            mmio::KEYINPUT => {}
+            mmio::KEYINPUT + 1 => {}
             mmio::IE => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
             mmio::IE + 1 => {
                 self.interrupts.ie = (self.interrupts.ie & 0x00ff) | (u16::from(value) << 8)
@@ -265,11 +251,5 @@ impl Runtime {
     #[allow(dead_code)]
     fn _timer_base_for_tests(&self, index: usize) -> Option<u32> {
         timers::timer_base(index)
-    }
-
-    #[allow(dead_code)]
-    fn read_timer_low_for_tests(&self, index: usize) -> u8 {
-        self.read_timer8(timers::timer_base(index).unwrap())
-            .unwrap()
     }
 }
