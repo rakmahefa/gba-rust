@@ -23,7 +23,7 @@ pub enum AnalysisError {
     Decode(#[from] DecodeError),
     #[error("entry {0:#x} is outside the cartridge ROM")]
     InvalidEntry(u32),
-    #[error("CFG invariant violation: {0:?}")]
+    #[error("CFG invariant violation: {0}")]
     InvalidCfg(#[from] ValidationError),
 }
 
