@@ -63,8 +63,8 @@ pub const IF_HI: u32 = IF + 1;
 pub const WAITCNT_HI: u32 = WAITCNT + 1;
 pub const IME_HI: u32 = IME + 1;
 
-/// DISPCNT has sixteen architectural control bits.
-pub const DISPCNT_WRITABLE_MASK: u16 = 0xffff;
+/// DISPCNT bit 3 is read-only on the GBA; the other control bits are writable.
+pub const DISPCNT_WRITABLE_MASK: u16 = 0xfff7;
 /// DISPSTAT status bits 0..2 are hardware-owned; bits 3..5 and 8..15 are writable.
 pub const DISPSTAT_WRITABLE_MASK: u16 = 0xff38;
 /// Interrupt controller exposes fourteen interrupt sources.
@@ -208,6 +208,7 @@ mod tests {
         assert_eq!(register(DISPCNT_HI), Some(DISPCNT_REGISTER));
         assert_eq!(register(VCOUNT).unwrap().access, MmioAccess::ReadOnly);
         assert_eq!(register(HALTCNT).unwrap().access, MmioAccess::WriteOnly);
+        assert_eq!(register(DISPCNT).unwrap().writable_mask, 0xfff7);
         assert_eq!(register(DISPSTAT).unwrap().writable_mask, 0xff38);
         assert_eq!(register(IE).unwrap().writable_mask, 0x3fff);
         assert_eq!(register(WAITCNT).unwrap().writable_mask, 0x5fff);
