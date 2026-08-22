@@ -51,7 +51,7 @@ pub struct ExceptionGraphEdge {
     pub address: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ExceptionGraphNode {
     pub kind: ExceptionVectorKind,
     pub vector: u32,
@@ -59,7 +59,7 @@ pub struct ExceptionGraphNode {
     pub exception_return_sites: Vec<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ExceptionGraph {
     pub image: ImageMapping,
     pub nodes: Vec<ExceptionGraphNode>,
@@ -123,12 +123,14 @@ pub fn analyze_exception_graph(
     if mapping.kind != ImageKind::Bios {
         mapping.kind = ImageKind::Bios;
     }
+    let graph_image = mapping;
 
     let mut nodes = Vec::with_capacity(ExceptionVectorKind::ALL.len());
     for kind in ExceptionVectorKind::ALL {
-        mapping.entry = kind.vector();
-        mapping.entry_mode = Mode::Arm;
-        let program = analyze_with_mapping(image, mapping)?;
+        let mut node_mapping = mapping;
+        node_mapping.entry = kind.vector();
+        node_mapping.entry_mode = Mode::Arm;
+        let program = analyze_with_mapping(image, node_mapping)?;
         let exception_return_sites = exception_return_sites(&program);
         nodes.push(ExceptionGraphNode {
             kind,
@@ -170,7 +172,7 @@ pub fn analyze_exception_graph(
     edges.dedup();
 
     Ok(ExceptionGraph {
-        image: mapping,
+        image: graph_image,
         nodes,
         edges,
     })
@@ -208,6 +210,7 @@ mod tests {
         assert_eq!(graph.vector_keys().len(), ExceptionVectorKind::ALL.len());
         assert!(graph.node(ExceptionVectorKind::Irq).is_some());
         assert!(graph.node(ExceptionVectorKind::Fiq).is_some());
+        assert_eq!(graph.image.entry, 0);
     }
 
     #[test]
