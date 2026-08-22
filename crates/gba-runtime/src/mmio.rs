@@ -19,6 +19,18 @@ pub enum MmioAccess {
     WriteOnly,
 }
 
+impl MmioAccess {
+    #[inline]
+    pub const fn can_read(self) -> bool {
+        matches!(self, Self::ReadOnly | Self::ReadWrite)
+    }
+
+    #[inline]
+    pub const fn can_write(self) -> bool {
+        matches!(self, Self::ReadWrite | Self::WriteOnly)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MmioRegister {
     pub address: u32,
@@ -40,6 +52,28 @@ impl MmioRegister {
             access,
             writable_mask,
         }
+    }
+
+    /// The register width is the architectural storage width. The CPU bus may
+    /// still address an individual byte of a wider register.
+    #[inline]
+    pub const fn allows_bus_width(self, width: MmioWidth) -> bool {
+        match self.width {
+            MmioWidth::Byte => matches!(width, MmioWidth::Byte),
+            MmioWidth::Halfword => matches!(width, MmioWidth::Byte | MmioWidth::Halfword),
+            MmioWidth::Word => true,
+        }
+    }
+
+    /// Returns the writable bits belonging to one byte of this register.
+    /// Callers must pass the byte address already validated by `register()`.
+    #[inline]
+    pub const fn writable_byte_mask(self, address: u32) -> u8 {
+        let offset = address.wrapping_sub(self.address);
+        if offset >= 4 {
+            return 0;
+        }
+        ((self.writable_mask >> (offset * 8)) & 0xff) as u8
     }
 }
 
@@ -213,5 +247,22 @@ mod tests {
         assert_eq!(register(IE).unwrap().writable_mask, 0x3fff);
         assert_eq!(register(WAITCNT).unwrap().writable_mask, 0x5fff);
         assert!(register(0x0400_001f).is_none());
+    }
+
+    #[test]
+    fn register_contract_derives_cpu_byte_accesses_from_storage_width() {
+        assert!(DISPCNT_REGISTER.allows_bus_width(MmioWidth::Byte));
+        assert!(DISPCNT_REGISTER.allows_bus_width(MmioWidth::Halfword));
+        assert!(!DISPCNT_REGISTER.allows_bus_width(MmioWidth::Word));
+        assert!(HALTCNT_REGISTER.allows_bus_width(MmioWidth::Byte));
+        assert!(!HALTCNT_REGISTER.allows_bus_width(MmioWidth::Halfword));
+    }
+
+    #[test]
+    fn writable_byte_mask_selects_the_correct_register_byte() {
+        assert_eq!(DISPCNT_REGISTER.writable_byte_mask(DISPCNT), 0xf7);
+        assert_eq!(DISPCNT_REGISTER.writable_byte_mask(DISPCNT_HI), 0xff);
+        assert_eq!(WAITCNT_REGISTER.writable_byte_mask(WAITCNT), 0xff);
+        assert_eq!(WAITCNT_REGISTER.writable_byte_mask(WAITCNT_HI), 0x5f);
     }
 }
