@@ -17,10 +17,10 @@ pub fn arm_operand2(out: &mut String, raw: u32) -> (String, String) {
         let rm = raw & 0xf;
         let by_register = raw & 0x10 != 0;
         let kind = match (raw >> 5) & 3 {
-            0 => "ShiftKind::Lsl",
-            1 => "ShiftKind::Lsr",
-            2 => "ShiftKind::Asr",
-            _ => "ShiftKind::Ror",
+            0 => "gba_runtime::ShiftKind::Lsl",
+            1 => "gba_runtime::ShiftKind::Lsr",
+            2 => "gba_runtime::ShiftKind::Asr",
+            _ => "gba_runtime::ShiftKind::Ror",
         };
         let amount = if by_register {
             format!("(rt.read_reg({}) & 0xff) as u8", (raw >> 8) & 0xf)
@@ -46,10 +46,10 @@ pub fn structured_operand2(out: &mut String, operand: Operand2) -> (String, Stri
             shift_register,
         } => {
             let kind = match shift_kind {
-                0 => "ShiftKind::Lsl",
-                1 => "ShiftKind::Lsr",
-                2 => "ShiftKind::Asr",
-                _ => "ShiftKind::Ror",
+                0 => "gba_runtime::ShiftKind::Lsl",
+                1 => "gba_runtime::ShiftKind::Lsr",
+                2 => "gba_runtime::ShiftKind::Asr",
+                _ => "gba_runtime::ShiftKind::Ror",
             };
             let amount = if by_register {
                 format!("(rt.read_reg({shift_register}) & 0xff) as u8")

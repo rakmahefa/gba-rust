@@ -1,6 +1,7 @@
+use crate::address_space::ImageMapping;
 use crate::decoder::{
     ArmDataOp, ArmExtended, ArmOp, Instruction, InstructionKind, Mode, Operand2, ThumbExtended,
-    ThumbOp, ROM_BASE,
+    ThumbOp,
 };
 
 use super::model::BlockKey;
@@ -48,16 +49,17 @@ impl AbstractValue {
     }
 }
 
-fn in_rom(rom: &[u8], address: u32) -> bool {
-    address >= ROM_BASE && address - ROM_BASE < rom.len() as u32
-}
-
-fn read_rom32(rom: &[u8], address: u32) -> Option<u32> {
-    if !in_rom(rom, address) || address - ROM_BASE > rom.len().saturating_sub(4) as u32 {
+fn read_image32(image: &[u8], mapping: ImageMapping, address: u32) -> Option<u32> {
+    if !mapping.contains(address) || address.checked_add(4)? > mapping.range().end {
         return None;
     }
-    let offset = (address - ROM_BASE) as usize;
-    Some(u32::from_le_bytes(rom[offset..offset + 4].try_into().ok()?))
+    let offset = (address - mapping.base) as usize;
+    if offset.checked_add(4)? > image.len() {
+        return None;
+    }
+    Some(u32::from_le_bytes(
+        image[offset..offset + 4].try_into().ok()?,
+    ))
 }
 
 fn aligned_pc(address: u32, mode: Mode) -> u32 {
@@ -110,6 +112,7 @@ pub(super) fn transfer_instruction(
     rom: &[u8],
     instruction: Instruction,
     mut state: AbstractState,
+    mapping: ImageMapping,
 ) -> AbstractState {
     match instruction.kind {
         InstructionKind::Arm(ArmOp::Mov { rd, op2 }) => {
@@ -125,7 +128,7 @@ pub(super) fn transfer_instruction(
             let address = add_signed(aligned_pc(instruction.address, Mode::Arm), offset);
             state.write(
                 rd,
-                read_rom32(rom, address)
+                read_image32(rom, mapping, address)
                     .map(AbstractValue::Constant)
                     .unwrap_or_default(),
             );
@@ -161,7 +164,7 @@ pub(super) fn transfer_instruction(
             let address = add_signed(aligned_pc(instruction.address, Mode::Arm), signed_offset);
             state.write(
                 rd,
-                read_rom32(rom, address)
+                read_image32(rom, mapping, address)
                     .map(AbstractValue::Constant)
                     .unwrap_or_default(),
             );
@@ -210,7 +213,7 @@ pub(super) fn transfer_instruction(
                 .wrapping_add(word_offset as u32 * 4);
             state.write(
                 rd,
-                read_rom32(rom, address)
+                read_image32(rom, mapping, address)
                     .map(AbstractValue::Constant)
                     .unwrap_or_default(),
             );

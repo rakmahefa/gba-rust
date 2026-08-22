@@ -1,3 +1,4 @@
+use crate::address_space::{AddressSpace, ImageMapping};
 use crate::decoder::{Instruction, Mode};
 use crate::ir::IrInstruction;
 
@@ -25,10 +26,12 @@ pub struct ControlFlowGraph {
     pub blocks: Vec<BasicBlock>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub entry: BlockId,
     pub cfg: ControlFlowGraph,
+    pub image: ImageMapping,
+    pub address_space: AddressSpace,
 }
 
 #[derive(Debug, Clone)]

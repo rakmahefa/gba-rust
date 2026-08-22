@@ -1,3 +1,4 @@
+use crate::address_space::ImageMapping;
 use crate::decoder::{
     ArmExtended, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode,
     ThumbExtended, ThumbOp,
@@ -15,9 +16,8 @@ pub(super) fn next_key(instruction: Instruction) -> BlockKey {
     }
 }
 
-pub(super) fn in_rom(rom: &[u8], address: u32) -> bool {
-    address >= crate::decoder::ROM_BASE
-        && address - crate::decoder::ROM_BASE < rom.len() as u32
+pub(super) fn in_image(mapping: ImageMapping, address: u32) -> bool {
+    mapping.contains(address)
 }
 
 /// Whether an instruction is architecturally a basic-block control boundary.
@@ -42,9 +42,10 @@ pub(super) fn is_control_boundary(instruction: Instruction) -> bool {
 }
 
 pub(super) fn instruction_successors(
-    rom: &[u8],
+    _rom: &[u8],
     instruction: Instruction,
     state: AbstractState,
+    mapping: ImageMapping,
 ) -> Vec<BlockKey> {
     let next = next_key(instruction);
     match instruction.kind {
@@ -65,7 +66,7 @@ pub(super) fn instruction_successors(
         InstructionKind::Arm(ArmOp::BranchExchange { rm, link }) => {
             let mut successors = Vec::new();
             if let Some(target) = resolved_exchange_target(state, rm) {
-                if in_rom(rom, target.address) {
+                if in_image(mapping, target.address) {
                     successors.push(target);
                 }
             }
@@ -114,7 +115,7 @@ pub(super) fn instruction_successors(
             state,
             rm,
         )
-        .filter(|target| in_rom(rom, target.address))
+        .filter(|target| in_image(mapping, target.address))
         .into_iter()
         .collect(),
         InstructionKind::Arm(ArmOp::Unknown) | InstructionKind::Thumb(ThumbOp::Unknown) => {
@@ -146,16 +147,17 @@ pub(super) fn is_fallthrough(
 pub(super) fn decode_at(
     rom: &[u8],
     key: BlockKey,
+    mapping: ImageMapping,
 ) -> Result<Instruction, DecodeError> {
     match key.mode {
         Mode::Arm => Ok(crate::decoder::decode_arm(
             key.address,
-            crate::decoder::read_arm(rom, key.address)?,
+            crate::decoder::read_arm_at(rom, mapping.base, key.address)?,
         )),
         Mode::Thumb => {
-            let raw = crate::decoder::read_thumb(rom, key.address)?;
+            let raw = crate::decoder::read_thumb_at(rom, mapping.base, key.address)?;
             if (raw & 0xF800) == 0xF000 {
-                let (first, second) = crate::decoder::read_thumb_bl(rom, key.address)?;
+                let (first, second) = crate::decoder::read_thumb_bl_at(rom, mapping.base, key.address)?;
                 Ok(crate::decoder::decode_thumb_bl(key.address, first, second))
             } else {
                 Ok(crate::decoder::decode_thumb(key.address, raw))

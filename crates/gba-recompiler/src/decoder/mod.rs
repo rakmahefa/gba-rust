@@ -7,7 +7,10 @@ mod semantic_thumb;
 pub mod types;
 
 pub use classification::{classify_arm, classify_thumb, ArmClass, ThumbClass};
-pub use memory::{read_arm, read_thumb, read_thumb_bl, DecodeError, ROM_BASE};
+pub use memory::{
+    read_arm, read_arm_at, read_thumb, read_thumb_at, read_thumb_bl, read_thumb_bl_at,
+    DecodeError, ROM_BASE,
+};
 pub use semantic::{
     decode_arm, decode_arm_from_rom, decode_thumb, decode_thumb_bl, decode_thumb_bl_from_rom,
     decode_thumb_from_rom,
@@ -108,5 +111,12 @@ mod tests {
             instruction.kind,
             InstructionKind::Thumb(ThumbOp::BranchLink { .. })
         ));
+    }
+
+    #[test]
+    fn mapped_readers_support_zero_based_bios_images() {
+        let rom = 0xE3A0_0001u32.to_le_bytes();
+        assert_eq!(read_arm_at(&rom, 0, 0).unwrap(), 0xE3A0_0001);
+        assert!(read_arm(&rom, 0).is_err());
     }
 }
