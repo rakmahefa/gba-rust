@@ -27,6 +27,11 @@ pub(super) fn is_control_boundary(instruction: Instruction) -> bool {
         InstructionKind::Arm(ArmOp::Branch { .. })
             | InstructionKind::Arm(ArmOp::BranchExchange { .. })
             | InstructionKind::Arm(ArmOp::Extended(ArmExtended::SoftwareInterrupt { .. }))
+            | InstructionKind::Arm(ArmOp::Extended(
+                ArmExtended::CoprocessorRegisterTransfer { .. }
+                    | ArmExtended::CoprocessorTransfer { .. }
+                    | ArmExtended::CoprocessorData { .. }
+            ))
             | InstructionKind::Thumb(ThumbOp::Branch { .. })
             | InstructionKind::Thumb(ThumbOp::BranchLink { .. })
             | InstructionKind::Thumb(ThumbOp::BranchExchange { .. })
@@ -75,6 +80,16 @@ pub(super) fn instruction_successors(
             // return continuation. Keep that continuation in the CFG while
             // forcing a block boundary at the SWI instruction itself.
             vec![next]
+        }
+        InstructionKind::Arm(ArmOp::Extended(
+            ArmExtended::CoprocessorRegisterTransfer { .. }
+                | ArmExtended::CoprocessorTransfer { .. }
+                | ArmExtended::CoprocessorData { .. },
+        )) => {
+            // The GBA ARM7TDMI has no executable coprocessor implementation in
+            // this runtime. Keep these instructions as decoded IR, but do not
+            // invent an executable fallthrough edge.
+            Vec::new()
         }
         InstructionKind::Thumb(ThumbOp::Branch { target, condition }) => {
             let mut successors = vec![BlockKey {
