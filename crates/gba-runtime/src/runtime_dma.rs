@@ -68,14 +68,7 @@ impl Runtime {
         );
     }
 
-    fn execute_dma_transfer(
-        &mut self,
-        channel: usize,
-        source: u32,
-        destination: u32,
-        count: u32,
-        width: u32,
-    ) {
+    fn execute_dma_transfer(&mut self, channel: usize, source: u32, destination: u32, count: u32, width: u32) {
         let mut current_source = source;
         let mut current_destination = destination;
         for _ in 0..count {
@@ -118,6 +111,10 @@ impl Runtime {
         let base = DMA_BASES[active];
         self.set_io_half(base + 8, self.dma.channels[active].count);
         self.set_io_half(base + 10, self.dma.channels[active].control);
+        if !self.dma.channels[active].enabled() {
+            self.io.insert(base + 8, 0);
+            self.io.insert(base + 9, 0);
+        }
 
         if irq {
             self.interrupts.request(1 << (8 + active));
@@ -137,13 +134,8 @@ impl Runtime {
         self.dma.is_busy(self.scheduler.now())
     }
 
-    pub fn dma_controller(&self) -> &DmaController {
-        &self.dma
-    }
-
-    pub fn dma_controller_mut(&mut self) -> &mut DmaController {
-        &mut self.dma
-    }
+    pub fn dma_controller(&self) -> &DmaController { &self.dma }
+    pub fn dma_controller_mut(&mut self) -> &mut DmaController { &mut self.dma }
 }
 
 #[cfg(test)]
