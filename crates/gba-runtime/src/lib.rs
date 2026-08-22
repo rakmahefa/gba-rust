@@ -2,6 +2,7 @@ mod arm7tdmi;
 mod bios;
 mod bios_memory;
 mod contract;
+mod dma;
 mod execution;
 
 pub mod apu;
@@ -31,6 +32,7 @@ pub use cpu::{
     BankedRegisters, Cpu, CpuMode, ExceptionKind, CPSR_C, CPSR_N, CPSR_V, CPSR_Z, REG_LR, REG_PC,
     REG_SP,
 };
+pub use dma::{DmaAddressMode, DmaChannel, DmaController, DmaTrigger, DmaTransfer};
 pub use mmio::{DISPSTAT_HBLANK, DISPSTAT_VBLANK, DISPSTAT_VCOUNT_IRQ, VCOUNT};
 pub use ppu::Ppu;
 pub use runtime::Runtime;
