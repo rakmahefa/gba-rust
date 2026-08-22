@@ -1,14 +1,16 @@
 use std::collections::{HashMap, VecDeque};
 
+use crate::address_space::ImageMapping;
 use crate::decoder::{DecodeError, Mode};
 
 use super::abstract_state::AbstractState;
-use super::edges::{decode_at, in_rom, instruction_successors};
+use super::edges::{decode_at, in_image, instruction_successors};
 use super::model::{BlockKey, DiscoveredInstruction};
 
 pub(super) fn discover_reachable(
     rom: &[u8],
     entry: BlockKey,
+    mapping: ImageMapping,
 ) -> Result<(Vec<BlockKey>, HashMap<BlockKey, DiscoveredInstruction>), DecodeError> {
     let mut order = Vec::new();
     let mut discovered = HashMap::<BlockKey, DiscoveredInstruction>::new();
@@ -20,9 +22,9 @@ pub(super) fn discover_reachable(
 
     while let Some(key) = queue.pop_front() {
         let state = states.get(&key).copied().unwrap_or_default();
-        let instruction = decode_at(rom, key.clone())?;
+        let instruction = decode_at(rom, key.clone(), mapping)?;
         let state_after = super::abstract_state::transfer_instruction(rom, instruction, state);
-        let successors = instruction_successors(rom, instruction, state_after);
+        let successors = instruction_successors(rom, instruction, state_after, mapping);
 
         if !discovered.contains_key(&key) {
             order.push(key.clone());
@@ -41,7 +43,7 @@ pub(super) fn discover_reachable(
             .unwrap_or(true);
 
         for successor in successors {
-            if !in_rom(rom, successor.address) {
+            if !in_image(mapping, successor.address) {
                 continue;
             }
 
