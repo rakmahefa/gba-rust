@@ -26,6 +26,9 @@ mod runtime_memory;
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "timer_tests.rs"]
+mod timer_tests;
 
 #[derive(Debug)]
 pub struct Runtime {
