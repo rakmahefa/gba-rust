@@ -82,12 +82,12 @@ fn arm_single_transfer_and_unaligned_word_follow_bus_rules() {
 #[test]
 fn arm_halfword_signed_loads_are_sign_extended() {
     let mut rt = Runtime::new();
-    rt.write16(0x0400_0010, 0x80ff);
-    rt.write8(0x0400_0020, 0x80);
-    rt.write_reg(1, 0x0400_0010);
+    rt.write16(0x0200_0010, 0x80ff);
+    rt.write8(0x0200_0020, 0x80);
+    rt.write_reg(1, 0x0200_0010);
     rt.execute_arm_instruction(0xE1D1_00B0);
     assert_eq!(rt.read_reg(0), 0x0000_80ff);
-    rt.write_reg(1, 0x0400_0020);
+    rt.write_reg(1, 0x0200_0020);
     rt.execute_arm_instruction(0xE1D1_00D0);
     assert_eq!(rt.read_reg(0), 0xffff_ff80);
 }
