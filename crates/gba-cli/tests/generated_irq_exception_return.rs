@@ -8,7 +8,7 @@ fn unique_runner_dir() -> PathBuf {
 }
 
 #[test]
-fn generated_irq_handler_restores_cpsr_and_resumes_caller_target() {
+fn generated_irq_is_injected_at_a_block_boundary_and_returns_into_linked_cfg() {
     let root = unique_runner_dir();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("create generated runner");
@@ -16,37 +16,43 @@ fn generated_irq_handler_restores_cpsr_and_resumes_caller_target() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("resolve workspace root");
     let runtime_path = workspace_root.join("crates/gba-runtime").canonicalize().expect("resolve runtime crate");
 
-    // IRQ vector 0x18: SUBS PC, LR, #4. This is the architectural ARM IRQ return form.
+    // 0x00: B 0x18, making the IRQ vector part of the static CFG.
+    // 0x18: SUBS PC, LR, #4, the architectural ARM IRQ return form.
     let mut bios = vec![0u8; 0x1c];
+    bios[0x00..0x04].copy_from_slice(&0xEA00_0004u32.to_le_bytes());
     bios[0x18..0x1c].copy_from_slice(&0xE25E_F004u32.to_le_bytes());
     let bios_path = root.join("bios.bin");
     fs::write(&bios_path, &bios).expect("write BIOS fixture");
 
-    let mapping = ImageMapping::new(ImageKind::Bios, 0, bios.len() as u32, 0x18, Mode::Arm);
+    let mapping = ImageMapping::new(ImageKind::Bios, 0, bios.len() as u32, 0, Mode::Arm);
     let program = analyze_with_mapping(&bios, mapping).expect("BIOS IRQ fixture must analyze");
-    let generated = generate(&program, "gba_irq_entry");
+    let generated = generate(&program, "gba_entry");
+    assert!(generated.source.contains("generated_irq_pending"));
     assert!(generated.source.contains("return_from_exception"));
 
     fs::write(src.join("gba_generated.rs"), generated.source).expect("write generated Rust");
     fs::write(root.join("Cargo.toml"), format!("[package]\nname = \"gba-generated-irq-return\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n\n[dependencies]\ngba-runtime = {{ path = \"{}\" }}\n", runtime_path.display())).expect("write manifest");
     fs::write(src.join("main.rs"), r#"mod gba_generated;
 
-use gba_runtime::{CpuMode, ExceptionKind, GeneratedExecutionExit, Runtime, REG_PC};
+use gba_runtime::{CpuMode, GeneratedExecutionExit, Runtime};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut runtime = Runtime::new();
-    runtime.enter_instruction(0x0800_0100, false);
+    runtime.interrupts.ie = 1;
+    runtime.interrupts.ime = true;
+    runtime.interrupts.request(1);
+
     let caller_cpsr = runtime.cpu.cpsr;
+    let result = gba_generated::gba_entry_with_limit(&mut runtime, 2)?;
 
-    runtime.raise_exception(ExceptionKind::Irq);
-    assert_eq!(runtime.mode(), CpuMode::Irq);
-    assert_eq!(runtime.read_reg(14), 0x0800_0104);
-
-    let result = gba_generated::gba_irq_entry_with_limit(&mut runtime, 2)?;
-
-    assert!(matches!(result.exit, GeneratedExecutionExit::Returned { address: 0x0800_0100, thumb: false }));
-    assert_eq!(result.state.pc(), 0x0800_0100);
-    assert_eq!(runtime.read_reg(REG_PC), 0x0800_0100);
+    // Step 1: dispatcher observes the pending IRQ before executing block 0.
+    // Step 2: the linked IRQ vector executes SUBS PC,LR,#4 and restores the caller state.
+    assert!(matches!(
+        result.exit,
+        GeneratedExecutionExit::StepLimitExceeded { address: 0x0000_0000, thumb: false }
+    ));
+    assert_eq!(result.steps, 2);
+    assert_eq!(result.state.pc(), 0x0000_0000);
     assert_eq!(runtime.mode(), CpuMode::System);
     assert_eq!(runtime.cpu.cpsr, caller_cpsr);
     assert!(!runtime.cpu.thumb);
