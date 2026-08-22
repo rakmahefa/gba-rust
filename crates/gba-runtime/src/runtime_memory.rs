@@ -90,7 +90,7 @@ impl Runtime {
             // VCOUNT and KEYINPUT are read-only hardware state.
             mmio::VCOUNT | mmio::VCOUNT_HI | mmio::KEYINPUT | mmio::KEYINPUT_HI => {}
             mmio::IE => {
-                self.interrupts.ie = (self.interrupts.ie & 0x3f00) | (u16::from(value) & 0x3f);
+                self.interrupts.ie = (self.interrupts.ie & 0x3f00) | u16::from(value);
                 self.service_interrupts();
             }
             mmio::IE_HI => {
@@ -243,7 +243,9 @@ impl Runtime {
                 }
             }
             _ if address == mmio::POSTFLG => {
-                self.postflg = (value as u8) & mmio::POSTFLG_WRITABLE_MASK;
+                let bytes = value.to_le_bytes();
+                self.write8(mmio::POSTFLG, bytes[0]);
+                self.write8(mmio::HALTCNT, bytes[1]);
             }
             _ if address == mmio::HALTCNT => {
                 self.write8(address, value as u8);
