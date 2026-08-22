@@ -1,5 +1,7 @@
 use super::*;
-use crate::bios::{BiosResult, BiosSwi, IRQ_HBLANK, IRQ_VBLANK};
+use crate::bios::{
+    BiosResult, BiosSwi, HALTCNT, IE, IF, IME, IRQ_HBLANK, IRQ_VBLANK,
+};
 use crate::cpu::{
     CPSR_C, CPSR_N, CPSR_V, CPSR_Z, CpuMode, ExceptionKind, REG_LR, REG_PC, REG_SP,
 };
