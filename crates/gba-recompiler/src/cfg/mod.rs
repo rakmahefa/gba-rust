@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::address_space::ImageMapping;
+use crate::address_space::{AddressSpace, ImageMapping};
 use crate::decoder::{DecodeError, Mode};
 
 mod abstract_state;
@@ -24,8 +24,8 @@ pub enum AnalysisError {
     Decode(#[from] DecodeError),
     #[error("entry {0:#x} is outside the mapped image")]
     InvalidEntry(u32),
-    #[error("image mapping entry {entry:#x} does not match the requested analysis entry {requested:#x}")]
-    EntryMismatch { entry: u32, requested: u32 },
+    #[error("image mapping entry {entry:#x} is not represented in the recovered CFG")]
+    EntryMismatch { entry: u32 },
     #[error("CFG invariant violation: {0}")]
     InvalidCfg(#[from] ValidationError),
 }
@@ -65,7 +65,6 @@ pub fn analyze_with_mapping(
         .get(&entry_key)
         .ok_or(AnalysisError::EntryMismatch {
             entry: mapping.entry,
-            requested: mapping.entry,
         })?;
 
     let cfg = ControlFlowGraph {
@@ -74,9 +73,18 @@ pub fn analyze_with_mapping(
     };
     validate_cfg(&cfg, discovered_order.len())?;
 
+    let mut address_space = AddressSpace::default();
+    if mapping.kind == crate::address_space::ImageKind::Bios {
+        // The default GBA map already describes the BIOS region; the mapping
+        // identifies which bytes are the image backing that region.
+        debug_assert!(in_image(mapping, mapping.entry));
+    }
+
     Ok(Program {
         entry: entry_id,
         cfg,
+        image: mapping,
+        address_space,
     })
 }
 
@@ -85,7 +93,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::address_space::{ImageKind, ImageMapping};
+    use crate::address_space::{AddressRegion, ImageKind, ImageMapping};
     use crate::decoder::ROM_BASE;
 
     fn arm_rom(words: &[u32]) -> Vec<u8> {
@@ -105,6 +113,8 @@ mod tests {
         let mapping = ImageMapping::new(ImageKind::Bios, 0, image.len() as u32, 0, Mode::Arm);
         let program = analyze_with_mapping(&image, mapping).unwrap();
         assert_eq!(program.cfg.blocks[0].key.address, 0);
+        assert_eq!(program.image.kind, ImageKind::Bios);
+        assert_eq!(program.address_space.region_at(0), AddressRegion::Bios);
     }
 
     #[test]
