@@ -114,6 +114,14 @@ impl Runtime {
         arm7tdmi::condition_holds(self.cpu.cpsr, code)
     }
 
+    pub fn enter_exception(&mut self, kind: ExceptionKind) -> (u32, bool) {
+        self.raise_exception(kind)
+    }
+
+    pub fn return_from_exception(&mut self, target: u32) -> Option<(u32, bool)> {
+        self.exception_return(target)
+    }
+
     pub fn exception_return(&mut self, target: u32) -> Option<(u32, bool)> {
         let spsr = self.cpu.spsr()?;
         self.cpu.restore_exception_state(spsr);
