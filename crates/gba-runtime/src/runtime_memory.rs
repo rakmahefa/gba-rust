@@ -3,6 +3,7 @@ use crate::arm7tdmi;
 use crate::bios::PowerState;
 use crate::bus::{self, BusRegion};
 use crate::mmio;
+use crate::mmio_devices;
 use crate::timers::{timer_index, timer_register_is_control};
 
 impl Runtime {
@@ -31,6 +32,10 @@ impl Runtime {
         }
     }
 
+    fn contract_for_mmio(address: u32) -> Option<mmio::MmioRegister> {
+        mmio::register(address).or_else(|| mmio_devices::register(address))
+    }
+
     fn read_mmio8(&self, address: u32) -> u8 {
         if let Some(index) = timer_index(address) {
             if timer_register_is_control(address) {
@@ -40,6 +45,8 @@ impl Runtime {
         }
 
         match address {
+            mmio::DISPCNT => self.dispcnt as u8,
+            mmio::DISPCNT_HI => (self.dispcnt >> 8) as u8,
             mmio::DISPSTAT => self.dispstat as u8,
             mmio::DISPSTAT_HI => (self.dispstat >> 8) as u8,
             mmio::VCOUNT => self.vcount as u8,
@@ -56,7 +63,15 @@ impl Runtime {
             mmio::IME_HI => 0,
             mmio::POSTFLG => self.postflg,
             mmio::HALTCNT => 0,
-            _ => *self.io.get(&address).unwrap_or(&0),
+            _ => {
+                if let Some(register) = Self::contract_for_mmio(address) {
+                    if !register.access.can_read() {
+                        return 0;
+                    }
+                    return *self.io.get(&address).unwrap_or(&0);
+                }
+                *self.io.get(&address).unwrap_or(&0)
+            }
         }
     }
 
@@ -72,23 +87,42 @@ impl Runtime {
         }
 
         match address {
+            mmio::DISPCNT => {
+                // Only bit 3 is read-only in the low byte; preserve all high-byte state.
+                let writable = u16::from(value) & 0x00f7;
+                self.dispcnt = (self.dispcnt & !0x00f7) | writable;
+            }
+            mmio::DISPCNT_HI => {
+                self.dispcnt = (self.dispcnt & 0x00ff) | (u16::from(value) << 8);
+            }
             mmio::DISPSTAT => {
-                self.dispstat = (self.dispstat & 0xff07) | (u16::from(value) & 0xf8);
+                self.dispstat = (self.dispstat & 0xff07) | (u16::from(value) & 0x38);
             }
             mmio::DISPSTAT_HI => {
                 self.dispstat = (self.dispstat & 0x00ff) | (u16::from(value) << 8);
             }
-            mmio::VCOUNT | mmio::VCOUNT_HI => {}
-            mmio::KEYINPUT | mmio::KEYINPUT_HI => {}
-            mmio::IE => self.interrupts.ie = (self.interrupts.ie & 0xff00) | value as u16,
-            mmio::IE_HI => {
-                self.interrupts.ie = (self.interrupts.ie & 0x00ff) | (u16::from(value) << 8)
+            mmio::VCOUNT | mmio::VCOUNT_HI | mmio::KEYINPUT | mmio::KEYINPUT_HI => {}
+            mmio::IE => {
+                self.interrupts.ie = (self.interrupts.ie & 0x3f00) | u16::from(value);
+                self.service_interrupts();
             }
-            mmio::IF => self.interrupts.acknowledge(value as u16),
-            mmio::IF_HI => self.interrupts.acknowledge((u16::from(value)) << 8),
-            mmio::WAITCNT => self.waitcnt = (self.waitcnt & 0xff00) | value as u16,
+            mmio::IE_HI => {
+                self.interrupts.ie =
+                    (self.interrupts.ie & 0x00ff) | ((u16::from(value) << 8) & 0x3f00);
+                self.service_interrupts();
+            }
+            mmio::IF => self
+                .interrupts
+                .acknowledge(u16::from(value) & mmio::INTERRUPT_SOURCE_MASK),
+            mmio::IF_HI => self
+                .interrupts
+                .acknowledge((u16::from(value) << 8) & mmio::INTERRUPT_SOURCE_MASK),
+            mmio::WAITCNT => {
+                self.waitcnt = (self.waitcnt & 0xff00) | u16::from(value);
+            }
             mmio::WAITCNT_HI => {
-                self.waitcnt = (self.waitcnt & 0x00ff) | (u16::from(value) << 8)
+                self.waitcnt =
+                    (self.waitcnt & 0x00ff) | ((u16::from(value) << 8) & 0x5000) | (self.waitcnt & 0x8000);
             }
             mmio::IME => {
                 self.interrupts.ime = value & 1 != 0;
@@ -97,7 +131,7 @@ impl Runtime {
                 }
             }
             mmio::IME_HI => {}
-            mmio::POSTFLG => self.postflg = value & 1,
+            mmio::POSTFLG => self.postflg = value & mmio::POSTFLG_WRITABLE_MASK,
             mmio::HALTCNT => {
                 self.power = if value & 0x80 != 0 {
                     PowerState::Stopped
@@ -106,6 +140,19 @@ impl Runtime {
                 }
             }
             _ => {
+                if let Some(register) = Self::contract_for_mmio(address) {
+                    if !register.access.can_write() {
+                        return;
+                    }
+                    let mask = register.writable_byte_mask(address);
+                    if mask == 0 {
+                        return;
+                    }
+                    let current = *self.io.get(&address).unwrap_or(&0);
+                    self.io
+                        .insert(address, (current & !mask) | (value & mask));
+                    return;
+                }
                 self.io.insert(address, value);
             }
         }
@@ -196,21 +243,39 @@ impl Runtime {
                 self.oam[o..o + 2].copy_from_slice(&value.to_le_bytes());
             }
             BusRegion::CartridgeSave => self.write8(address, value.to_le_bytes()[0]),
-            _ if address == mmio::IF => self.interrupts.acknowledge(value),
+            _ if address == mmio::DISPCNT => {
+                self.dispcnt = (self.dispcnt & !mmio::DISPCNT_WRITABLE_MASK)
+                    | (value & mmio::DISPCNT_WRITABLE_MASK);
+            }
+            _ if address == mmio::DISPSTAT => {
+                self.dispstat = (self.dispstat & mmio::DISPSTAT_STATUS_MASK)
+                    | (value & mmio::DISPSTAT_WRITABLE_MASK);
+            }
+            _ if address == mmio::VCOUNT => {}
+            _ if address == mmio::KEYINPUT => {}
             _ if address == mmio::IE => {
-                self.interrupts.ie = value;
+                self.interrupts.ie = value & mmio::INTERRUPT_SOURCE_MASK;
                 self.service_interrupts();
             }
+            _ if address == mmio::IF => self
+                .interrupts
+                .acknowledge(value & mmio::INTERRUPT_SOURCE_MASK),
+            _ if address == mmio::WAITCNT => {
+                self.waitcnt = (self.waitcnt & 0x8000)
+                    | (value & mmio::WAITCNT_WRITABLE_MASK);
+            }
             _ if address == mmio::IME => {
-                self.interrupts.ime = value & 1 != 0;
+                self.interrupts.ime = value & mmio::IME_WRITABLE_MASK != 0;
                 if self.interrupts.ime {
                     self.service_interrupts();
                 }
             }
-            _ if address == mmio::DISPSTAT => {
-                self.dispstat = (self.dispstat & 0x0007) | (value & 0xfff8);
+            _ if address == mmio::POSTFLG => {
+                let bytes = value.to_le_bytes();
+                self.write8(mmio::POSTFLG, bytes[0]);
+                self.write8(mmio::HALTCNT, bytes[1]);
             }
-            _ if address == mmio::VCOUNT => {}
+            _ if address == mmio::HALTCNT => self.write8(address, value as u8),
             _ => {
                 for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
                     self.write8(address.wrapping_add(i as u32), byte);

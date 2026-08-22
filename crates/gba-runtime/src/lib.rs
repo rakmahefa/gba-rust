@@ -9,6 +9,7 @@ pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 pub mod mmio;
+pub mod mmio_devices;
 pub mod ppu;
 pub mod runtime;
 pub mod scheduler;

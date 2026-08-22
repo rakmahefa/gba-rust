@@ -28,6 +28,9 @@ mod runtime_memory;
 #[path = "runtime_tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "mmio_tests.rs"]
+mod mmio_tests;
+#[cfg(test)]
 #[path = "timer_tests.rs"]
 mod timer_tests;
 
@@ -47,6 +50,7 @@ pub struct Runtime {
     pub interrupts: InterruptController,
     pub timers: [Timer; TIMER_COUNT],
     pub power: PowerState,
+    pub dispcnt: u16,
     pub waitcnt: u16,
     pub postflg: u8,
     pub keyinput: u16,
@@ -83,6 +87,7 @@ impl Default for Runtime {
             interrupts: InterruptController::default(),
             timers: std::array::from_fn(|_| Timer::default()),
             power: PowerState::default(),
+            dispcnt: 0,
             waitcnt: 0,
             postflg: 0,
             keyinput: KEYINPUT_DEFAULT,
