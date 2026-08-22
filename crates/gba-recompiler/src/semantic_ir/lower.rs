@@ -99,7 +99,7 @@ fn semantic_successors(
     }
 }
 
-pub(crate) fn build_semantic_program(
+pub fn build_semantic_program(
     program: &Program,
     functions: &FunctionControlFlowGraph,
 ) -> Result<SemanticProgram, String> {
