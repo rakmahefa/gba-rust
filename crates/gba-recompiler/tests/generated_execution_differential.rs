@@ -99,11 +99,17 @@ impl ReferenceState {
         self.regs[rd] = u32::from_le_bytes(bytes);
     }
 
+    fn arm_imm(raw: u32) -> u32 {
+        let imm8 = raw & 0xff;
+        let rotate = ((raw >> 8) & 0xf) * 2;
+        imm8.rotate_right(rotate)
+    }
+
     fn apply_arm(&mut self, raw: u32) -> Option<(u32, bool)> {
         let opcode = raw & 0x0fe0_0000;
         let rn = ((raw >> 16) & 0xf) as usize;
         let rd = ((raw >> 12) & 0xf) as usize;
-        let imm = raw & 0xff;
+        let imm = Self::arm_imm(raw);
         let set_flags = raw & (1 << 20) != 0;
 
         match opcode {
