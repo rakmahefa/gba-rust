@@ -59,6 +59,7 @@ pub enum SemanticTerminator {
     IndirectCall { register: u8, mode: Mode },
     IndirectBranch { register: u8 },
     Return,
+    SoftwareInterrupt { comment: u32 },
     Unknown,
 }
 
