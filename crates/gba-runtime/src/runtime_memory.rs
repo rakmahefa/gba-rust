@@ -39,9 +39,19 @@ impl Runtime {
     fn read_mmio8(&self, address: u32) -> u8 {
         if let Some(index) = timer_index(address) {
             if timer_register_is_control(address) {
-                return self.timers[index].read_control() as u8;
+                let value = self.timers[index].read_control();
+                return if address & 1 == 0 {
+                    value as u8
+                } else {
+                    (value >> 8) as u8
+                };
             }
-            return self.timers[index].counter() as u8;
+            let value = self.timers[index].counter();
+            return if address & 1 == 0 {
+                value as u8
+            } else {
+                (value >> 8) as u8
+            };
         }
 
         match address {
@@ -78,17 +88,27 @@ impl Runtime {
     fn write_mmio8(&mut self, address: u32, value: u8) {
         if let Some(index) = timer_index(address) {
             if timer_register_is_control(address) {
-                self.timers[index].write_control(value as u16);
+                let current = self.timers[index].read_control();
+                let next = if address & 1 == 0 {
+                    (current & 0xff00) | u16::from(value)
+                } else {
+                    (current & 0x00ff) | (u16::from(value) << 8)
+                };
+                self.timers[index].write_control(next);
             } else {
                 let current = self.timers[index].reload();
-                self.timers[index].write_reload((current & 0xff00) | value as u16);
+                let next = if address & 1 == 0 {
+                    (current & 0xff00) | u16::from(value)
+                } else {
+                    (current & 0x00ff) | (u16::from(value) << 8)
+                };
+                self.timers[index].write_reload(next);
             }
             return;
         }
 
         match address {
             mmio::DISPCNT => {
-                // Only bit 3 is read-only in the low byte; preserve all high-byte state.
                 let writable = u16::from(value) & 0x00f7;
                 self.dispcnt = (self.dispcnt & !0x00f7) | writable;
             }
@@ -151,6 +171,13 @@ impl Runtime {
                     let current = *self.io.get(&address).unwrap_or(&0);
                     self.io
                         .insert(address, (current & !mask) | (value & mask));
+
+                    // DMA register writes are architectural device writes, not
+                    // passive bytes. Reconcile the register block immediately so
+                    // immediate DMA can be scheduled at the control-enable write.
+                    if (0x0400_00b0..=0x0400_00df).contains(&address) {
+                        self.sync_dma_registers();
+                    }
                     return;
                 }
                 self.io.insert(address, value);
@@ -309,5 +336,54 @@ impl Runtime {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod mmio_device_tests {
+    use super::*;
+    use crate::bios::{IRQ_DMA0, IRQ_TIMER0};
+    use crate::mmio_devices::{DMA0CNT_H, DMA0CNT_L, DMA0DAD, DMA0SAD, TIMER0CNT_H, TIMER0CNT_L};
+    use crate::bus;
+
+    #[test]
+    fn dma_immediate_control_write_is_observable_as_a_device_trigger() {
+        let mut runtime = Runtime::new();
+        runtime.write16(bus::EWRAM_START, 0xbeef);
+        runtime.write32(DMA0SAD.address, bus::EWRAM_START);
+        runtime.write32(DMA0DAD.address, bus::EWRAM_START + 0x100);
+        runtime.write16(DMA0CNT_L.address, 1);
+        runtime.interrupts.ie = IRQ_DMA0;
+        runtime.write16(DMA0CNT_H.address, 0x8000 | 0x4000);
+
+        assert_eq!(runtime.dma.active(), None);
+        runtime.advance_cycles(2);
+        assert_eq!(runtime.read16(bus::EWRAM_START + 0x100), 0xbeef);
+        assert_eq!(runtime.dma.active(), Some(0));
+    }
+
+    #[test]
+    fn timer_byte_accesses_preserve_the_other_byte() {
+        let mut runtime = Runtime::new();
+        runtime.write8(TIMER0CNT_L, 0x34);
+        runtime.write8(TIMER0CNT_L + 1, 0x12);
+        assert_eq!(runtime.read16(TIMER0CNT_L), 0x1234);
+
+        runtime.write8(TIMER0CNT_H, 0x80);
+        runtime.write8(TIMER0CNT_H + 1, 0x00);
+        assert_eq!(runtime.read16(TIMER0CNT_H), 0x0080);
+        assert_eq!(runtime.read8(TIMER0CNT_H), 0x80);
+        assert_eq!(runtime.read8(TIMER0CNT_H + 1), 0x00);
+        assert_eq!(runtime.read16(TIMER0CNT_L), 0x1234);
+    }
+
+    #[test]
+    fn timer_irq_is_raised_from_mmio_programming_and_scheduler_cycles() {
+        let mut runtime = Runtime::new();
+        runtime.interrupts.ie = IRQ_TIMER0;
+        runtime.write16(TIMER0CNT_L, u16::MAX);
+        runtime.write16(TIMER0CNT_H, 0x00c0 | 0x0080);
+        runtime.advance_cycles(1);
+        assert_ne!(runtime.interrupts.iflags & IRQ_TIMER0, 0);
     }
 }
