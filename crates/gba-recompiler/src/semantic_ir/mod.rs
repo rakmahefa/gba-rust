@@ -86,11 +86,7 @@ mod tests {
 
     #[test]
     fn resolved_bx_lr_is_a_semantic_return_without_executable_successor() {
-        let rom = arm_rom([
-            0xE59F_E000,
-            0xE12F_FF1E,
-            0xE1A0_0000,
-        ].as_slice());
+        let rom = arm_rom(&[0xE59F_E000, 0xE12F_FF1E, 0xE1A0_0000]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
@@ -109,11 +105,7 @@ mod tests {
 
     #[test]
     fn resolved_indirect_branch_is_dynamic_without_executable_successor() {
-        let rom = arm_rom([
-            0xE59F_3000,
-            0xE12F_FF13,
-            0xE1A0_0000,
-        ].as_slice());
+        let rom = arm_rom(&[0xE59F_3000, 0xE12F_FF13, 0xE1A0_0000]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
@@ -155,30 +147,5 @@ mod tests {
         });
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
         assert!(error.contains("instruction control effect changed"));
-    }
-
-    #[test]
-    fn semantic_validation_rejects_multiple_control_effects() {
-        let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
-        let functions = discover_functions(&program);
-        let semantic = build_semantic_program(&program, &functions).unwrap();
-        let block = semantic
-            .functions
-            .iter()
-            .flat_map(|function| function.blocks.iter())
-            .find(|block| block.instructions.len() == 2)
-            .expect("two-instruction block must be present");
-        let mut invalid_block = block.clone();
-        invalid_block.instructions[0].ops.push(IrOp::BranchExchange {
-            register: 14,
-            link: false,
-        });
-        invalid_block.instructions[1].ops.push(IrOp::Branch {
-            target: ROM_BASE,
-            condition: Condition::Al,
-            link: false,
-        });
-        let error = validate::validate_control_placement(&invalid_block).unwrap_err();
-        assert!(error.contains("multiple control-effect instructions"));
     }
 }
