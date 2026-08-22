@@ -21,6 +21,14 @@ pub const DISPSTAT_VCOUNT_IRQ: u16 = 1 << 2;
 pub const DISPSTAT_VCOUNT_MASK: u16 = 0xff << 8;
 pub const DISPSTAT_STATUS_MASK: u16 = DISPSTAT_VBLANK | DISPSTAT_HBLANK;
 
+pub const DISPSTAT_HI: u32 = DISPSTAT + 1;
+pub const VCOUNT_HI: u32 = VCOUNT + 1;
+pub const KEYINPUT_HI: u32 = KEYINPUT + 1;
+pub const IE_HI: u32 = IE + 1;
+pub const IF_HI: u32 = IF + 1;
+pub const WAITCNT_HI: u32 = WAITCNT + 1;
+pub const IME_HI: u32 = IME + 1;
+
 #[inline]
 pub const fn dispstat_vcount(value: u16) -> u8 {
     ((value >> 8) & 0xff) as u8
