@@ -68,8 +68,8 @@ pub const DISPCNT_WRITABLE_MASK: u16 = 0xffff;
 pub const DISPSTAT_WRITABLE_MASK: u16 = 0xff38;
 /// Interrupt controller exposes fourteen interrupt sources.
 pub const INTERRUPT_SOURCE_MASK: u16 = 0x3fff;
-/// WAITCNT bit 15 (Game Pak type) is read-only on GBA hardware.
-pub const WAITCNT_WRITABLE_MASK: u16 = 0x7fff;
+/// WAITCNT bits 0..12 and 14 are writable; bit 13 is reserved and bit 15 is read-only.
+pub const WAITCNT_WRITABLE_MASK: u16 = 0x5fff;
 /// IME is a single-bit master interrupt enable register.
 pub const IME_WRITABLE_MASK: u16 = 0x0001;
 pub const POSTFLG_WRITABLE_MASK: u8 = 0x01;
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(register(HALTCNT).unwrap().access, MmioAccess::WriteOnly);
         assert_eq!(register(DISPSTAT).unwrap().writable_mask, 0xff38);
         assert_eq!(register(IE).unwrap().writable_mask, 0x3fff);
-        assert_eq!(register(WAITCNT).unwrap().writable_mask, 0x7fff);
+        assert_eq!(register(WAITCNT).unwrap().writable_mask, 0x5fff);
         assert!(register(0x0400_001f).is_none());
     }
 }
