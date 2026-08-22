@@ -459,7 +459,7 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bios::{BiosSwi, IRQ_VBLANK};
+    use crate::bios::{BiosSwi, IRQ_HBLANK, IRQ_VBLANK};
     use crate::cpu::{CPSR_C, CPSR_N, CPSR_V, CPSR_Z, CpuMode, REG_LR, REG_PC, REG_SP};
 
     #[test]
@@ -593,17 +593,17 @@ mod tests {
         runtime.write16(IME, 1);
         runtime.write16(IF, IRQ_VBLANK);
         assert_eq!(runtime.read16(IE), IRQ_VBLANK);
-        assert_eq!(runtime.read16(IF), 0);
-        assert!(runtime.mode() == CpuMode::Irq);
+        assert_eq!(runtime.read16(IF), IRQ_VBLANK);
+        assert_eq!(runtime.mode(), CpuMode::Irq);
         assert_eq!(runtime.read_reg(REG_PC), 0x18);
     }
 
     #[test]
     fn mmio_if_write_acknowledges_only_requested_bits() {
         let mut runtime = Runtime::new();
-        runtime.interrupts.iflags = IRQ_VBLANK | crate::bios::IRQ_HBLANK;
+        runtime.interrupts.iflags = IRQ_VBLANK | IRQ_HBLANK;
         runtime.write16(IF, IRQ_VBLANK);
-        assert_eq!(runtime.read16(IF), crate::bios::IRQ_HBLANK);
+        assert_eq!(runtime.read16(IF), IRQ_HBLANK);
     }
 
     #[test]
