@@ -61,11 +61,17 @@ fn validate_instruction(
     if source.address != semantic.address || source.size != semantic.size {
         return Err(format!("block {} instruction identity changed", block_id.0));
     }
-    if source.ops != semantic.ops {
-        return Err(format!("block {} instruction operations changed", block_id.0));
-    }
     if semantic.ops.is_empty() {
         return Err(format!("block {} contains an empty semantic instruction", block_id.0));
+    }
+    if source.control() != semantic.control_effect() {
+        return Err(format!(
+            "block {} instruction control effect changed",
+            block_id.0
+        ));
+    }
+    if source.ops != semantic.ops {
+        return Err(format!("block {} instruction operations changed", block_id.0));
     }
     if source.reads() != semantic.reads {
         return Err(format!("block {} instruction reads changed", block_id.0));
@@ -102,12 +108,6 @@ fn validate_instruction(
     if !same_memory(source.memory(), semantic.memory) {
         return Err(format!(
             "block {} instruction memory effects changed",
-            block_id.0
-        ));
-    }
-    if source.control() != semantic.control_effect() {
-        return Err(format!(
-            "block {} instruction control effect changed",
             block_id.0
         ));
     }
@@ -150,10 +150,7 @@ fn successor_matches_target(program: &Program, block: &SemanticBlock, target: u3
 
 fn validate_block_against_source(program: &Program, block: &SemanticBlock) -> Result<(), String> {
     let source = program.cfg.blocks.get(block.id.0).ok_or_else(|| {
-        format!(
-            "semantic block {} does not exist in source CFG",
-            block.id.0
-        )
+        format!("semantic block {} does not exist in source CFG", block.id.0)
     })?;
     if source.id != block.id {
         return Err(format!(
@@ -177,10 +174,7 @@ fn validate_block_against_source(program: &Program, block: &SemanticBlock) -> Re
         validate_instruction(source_ir, semantic_instruction, block.id)?;
     }
     if block.instructions.is_empty() {
-        return Err(format!(
-            "block {} contains no semantic instructions",
-            block.id.0
-        ));
+        return Err(format!("block {} contains no semantic instructions", block.id.0));
     }
     validate_control_placement(block)?;
     Ok(())
@@ -332,12 +326,13 @@ fn validate_function_metadata(
                 function.id.0
             ));
         }
-        let semantic_block_ids = function
-            .blocks
-            .iter()
-            .map(|block| block.id)
-            .collect::<Vec<_>>();
-        if semantic_block_ids != source.blocks {
+        if function.blocks.len() != source.blocks.len()
+            || function
+                .blocks
+                .iter()
+                .map(|block| block.id)
+                .ne(source.blocks.iter().copied())
+        {
             return Err(format!(
                 "semantic function {} block membership changed",
                 function.id.0
@@ -417,7 +412,10 @@ pub fn validate_semantic_program(
         .flat_map(|function| function.calls.iter())
     {
         if call.block.0 >= program.cfg.blocks.len() {
-            return Err(format!("call site references invalid block {}", call.block.0));
+            return Err(format!(
+                "call site references invalid block {}",
+                call.block.0
+            ));
         }
         if call.instruction_index >= program.cfg.blocks[call.block.0].ir.len() {
             return Err(format!(
@@ -451,7 +449,8 @@ pub fn validate_semantic_program(
         .flat_map(|function| function.returns.iter())
     {
         if return_site.block.0 >= program.cfg.blocks.len()
-            || return_site.instruction_index >= program.cfg.blocks[return_site.block.0].instructions.len()
+            || return_site.instruction_index
+                >= program.cfg.blocks[return_site.block.0].instructions.len()
         {
             return Err(format!(
                 "return site references invalid instruction {}:{}",
