@@ -3,6 +3,7 @@ use crate::arm7tdmi;
 use crate::bios::PowerState;
 use crate::bus::{self, BusRegion};
 use crate::mmio;
+use crate::mmio_devices;
 use crate::timers::{timer_index, timer_register_is_control};
 
 impl Runtime {
@@ -29,6 +30,10 @@ impl Runtime {
                 .unwrap_or(0xff),
             BusRegion::Unmapped => *self.io.get(&address).unwrap_or(&0),
         }
+    }
+
+    fn contract_for_mmio(address: u32) -> Option<mmio::MmioRegister> {
+        mmio::register(address).or_else(|| mmio_devices::register(address))
     }
 
     fn read_mmio8(&self, address: u32) -> u8 {
@@ -58,7 +63,15 @@ impl Runtime {
             mmio::IME_HI => 0,
             mmio::POSTFLG => self.postflg,
             mmio::HALTCNT => 0,
-            _ => *self.io.get(&address).unwrap_or(&0),
+            _ => {
+                if let Some(register) = Self::contract_for_mmio(address) {
+                    if !register.access.can_read() {
+                        return 0;
+                    }
+                    return *self.io.get(&address).unwrap_or(&0);
+                }
+                *self.io.get(&address).unwrap_or(&0)
+            }
         }
     }
 
@@ -98,7 +111,9 @@ impl Runtime {
                     (self.interrupts.ie & 0x00ff) | ((u16::from(value) << 8) & 0x3f00);
                 self.service_interrupts();
             }
-            mmio::IF => self.interrupts.acknowledge(u16::from(value) & mmio::INTERRUPT_SOURCE_MASK),
+            mmio::IF => self
+                .interrupts
+                .acknowledge(u16::from(value) & mmio::INTERRUPT_SOURCE_MASK),
             mmio::IF_HI => self
                 .interrupts
                 .acknowledge((u16::from(value) << 8) & mmio::INTERRUPT_SOURCE_MASK),
@@ -106,8 +121,8 @@ impl Runtime {
                 self.waitcnt = (self.waitcnt & 0xff00) | u16::from(value);
             }
             mmio::WAITCNT_HI => {
-                self.waitcnt = (self.waitcnt & 0x8000)
-                    | ((u16::from(value) << 8) & 0x5000);
+                self.waitcnt =
+                    (self.waitcnt & 0x00ff) | ((u16::from(value) << 8) & 0x5000) | (self.waitcnt & 0x8000);
             }
             mmio::IME => {
                 self.interrupts.ime = value & 1 != 0;
@@ -125,6 +140,19 @@ impl Runtime {
                 }
             }
             _ => {
+                if let Some(register) = Self::contract_for_mmio(address) {
+                    if !register.access.can_write() {
+                        return;
+                    }
+                    let mask = register.writable_byte_mask(address);
+                    if mask == 0 {
+                        return;
+                    }
+                    let current = *self.io.get(&address).unwrap_or(&0);
+                    self.io
+                        .insert(address, (current & !mask) | (value & mask));
+                    return;
+                }
                 self.io.insert(address, value);
             }
         }
