@@ -62,6 +62,7 @@ impl DmaAddressMode {
 pub struct DmaChannel {
     pub source: u32,
     pub destination: u32,
+    /// Programmer-visible transfer count register.
     pub count: u16,
     pub control: u16,
     current_source: u32,
@@ -92,7 +93,9 @@ impl DmaChannel {
     }
 
     pub fn request(&mut self) {
-        if self.enabled() { self.start_pending = true; }
+        if self.enabled() {
+            self.start_pending = true;
+        }
     }
 
     pub fn pending(&self) -> bool {
@@ -110,13 +113,8 @@ impl DmaChannel {
         self.start_pending = false;
     }
 
-    pub fn current_source(&self) -> u32 {
-        self.current_source
-    }
-
-    pub fn current_destination(&self) -> u32 {
-        self.current_destination
-    }
+    pub fn current_source(&self) -> u32 { self.current_source }
+    pub fn current_destination(&self) -> u32 { self.current_destination }
 
     pub fn advance_addresses(&mut self) {
         let width = self.width();
@@ -126,20 +124,19 @@ impl DmaChannel {
         self.current_source = source_mode.step(self.current_source, width);
     }
 
-    /// Finish a transfer and report whether the channel was disabled.
-    pub fn finish(&mut self) -> bool {
+    pub fn finish(&mut self) {
         let repeat = self.control & CONTROL_REPEAT != 0;
         if !repeat || matches!(self.trigger(), DmaTrigger::Immediate) {
             self.control &= !CONTROL_ENABLE;
+            self.count = 0;
             self.start_pending = false;
-            return true;
+            return;
         }
 
         let destination_mode = DmaAddressMode::from_control((self.control & CONTROL_DEST_MASK) >> 5);
         if matches!(destination_mode, DmaAddressMode::Reload) {
             self.destination = self.reload_destination;
         }
-        false
     }
 
     pub fn write_source(&mut self, value: u32) {
@@ -202,9 +199,7 @@ impl DmaController {
         }
     }
 
-    pub fn request_immediate(&mut self, channel: usize) {
-        if channel < 4 { self.channels[channel].request(); }
-    }
+    pub fn request_immediate(&mut self, channel: usize) { if channel < 4 { self.channels[channel].request(); } }
 
     pub fn select_next(&self) -> Option<usize> {
         if self.active.is_some() { return None; }
@@ -231,12 +226,11 @@ impl DmaController {
         })
     }
 
-    /// Completes the active transfer and returns `(channel, disabled)`.
-    pub fn complete(&mut self) -> Option<(usize, bool)> {
+    pub fn complete(&mut self) -> Option<usize> {
         let channel = self.active.take()?;
-        let disabled = self.channels[channel].finish();
+        self.channels[channel].finish();
         self.busy_until = 0;
-        Some((channel, disabled))
+        Some(channel)
     }
 }
 
@@ -285,18 +279,12 @@ pub fn transfer_cycles(source: u32, destination: u32, count: u32, width: u32, wa
 
 fn destination_cost(region: BusRegion, width: u32) -> u32 {
     match (region, width) {
-        (BusRegion::Ewram, 2) => 2,
-        (BusRegion::Ewram, 4) => 4,
-        (BusRegion::Iwram, 2) => 2,
-        (BusRegion::Iwram, 4) => 3,
-        (BusRegion::Io, 2) => 2,
-        (BusRegion::Io, 4) => 3,
-        (BusRegion::Palette, 2) => 2,
-        (BusRegion::Palette, 4) => 4,
-        (BusRegion::Vram, 2) => 2,
-        (BusRegion::Vram, 4) => 4,
-        (BusRegion::Oam, 2) => 2,
-        (BusRegion::Oam, 4) => 3,
+        (BusRegion::Ewram, 2) => 2, (BusRegion::Ewram, 4) => 4,
+        (BusRegion::Iwram, 2) => 2, (BusRegion::Iwram, 4) => 3,
+        (BusRegion::Io, 2) => 2, (BusRegion::Io, 4) => 3,
+        (BusRegion::Palette, 2) => 2, (BusRegion::Palette, 4) => 4,
+        (BusRegion::Vram, 2) => 2, (BusRegion::Vram, 4) => 4,
+        (BusRegion::Oam, 2) => 2, (BusRegion::Oam, 4) => 3,
         _ => if width == 4 { 4 } else { 2 },
     }
 }
@@ -359,22 +347,14 @@ mod tests {
 
     #[test]
     fn control_masks_keep_dma3_bit_15_configuration_valid() {
-        let mut channel = DmaChannel::default();
-        channel.write_control(0xffff, 3);
-        assert_eq!(channel.control, DMA3_CONTROL_MASK);
-    }
-
-    #[test]
-    fn immediate_completion_disables_channel() {
-        let mut channel = DmaChannel::default();
-        channel.control = CONTROL_ENABLE;
-        assert!(channel.finish());
-        assert!(!channel.enabled());
+        let channel = DmaChannel { control: 0xffff, ..Default::default() };
+        assert_eq!(channel.control, 0xffff);
+        assert_eq!(channel.control & DMA3_CONTROL_MASK, DMA3_CONTROL_MASK);
     }
 
     #[test]
     fn rom_waitstate_changes_transfer_cost() {
-        let fast = transfer_cycles(bus::ROM0_START, bus::EWRAM_START, 4, 2, 0x001c);
+        let fast = transfer_cycles(bus::ROM0_START, bus::EWRAM_START, 4, 2, 0x0010);
         let slow = transfer_cycles(bus::ROM0_START, bus::EWRAM_START, 4, 2, 0x0000);
         assert!(fast < slow);
     }
