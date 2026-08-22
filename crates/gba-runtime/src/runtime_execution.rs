@@ -103,10 +103,8 @@ impl Runtime {
                 }
 
                 let compare = ((self.dispstat & DISPSTAT_VCOUNT_MASK) >> 8) as u16;
-                if self.vcount == compare {
-                    if self.dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
-                        self.request_interrupt(IRQ_VCOUNT);
-                    }
+                if self.vcount == compare && self.dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
+                    self.request_interrupt(IRQ_VCOUNT);
                 }
 
                 self.scheduler.schedule_in(
@@ -215,5 +213,80 @@ impl Runtime {
         self.cpu.set_thumb(thumb);
         self.cpu.r[REG_PC] = address;
         (address, thumb)
+    }
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+    use crate::bios::{IRQ_TIMER0, IRQ_TIMER1};
+    use crate::mmio::{DISPSTAT_HBLANK_IRQ, DISPSTAT_VBLANK_IRQ};
+    use crate::timers::{CONTROL_ENABLE, CONTROL_IRQ, CONTROL_CASCADE};
+
+    #[test]
+    fn timer_advances_across_ppu_event_boundaries_without_losing_cycles() {
+        let mut runtime = Runtime::new();
+        runtime.timers[0].write_reload(0);
+        runtime.timers[0].write_control(CONTROL_ENABLE);
+
+        runtime.advance_cycles(CYCLES_PER_SCANLINE as u32);
+
+        assert_eq!(runtime.cycles, CYCLES_PER_SCANLINE);
+        assert_eq!(runtime.scheduler.now(), CYCLES_PER_SCANLINE);
+        assert_eq!(runtime.timers[0].counter(), CYCLES_PER_SCANLINE as u16);
+    }
+
+    #[test]
+    fn hblank_event_sets_status_and_can_request_hblank_irq() {
+        let mut runtime = Runtime::new();
+        runtime.dispstat |= DISPSTAT_HBLANK_IRQ;
+        runtime.interrupts.ie = IRQ_HBLANK;
+
+        runtime.advance_cycles(HBLANK_START_CYCLES as u32);
+
+        assert_ne!(runtime.dispstat & DISPSTAT_HBLANK, 0);
+        assert_ne!(runtime.interrupts.iflags & IRQ_HBLANK, 0);
+    }
+
+    #[test]
+    fn vblank_event_is_driven_by_scanline_timing() {
+        let mut runtime = Runtime::new();
+        runtime.dispstat |= DISPSTAT_VBLANK_IRQ;
+        runtime.interrupts.ie = IRQ_VBLANK;
+        let cycles = CYCLES_PER_SCANLINE * VBLANK_START_LINE as u64;
+
+        runtime.advance_cycles(cycles as u32);
+
+        assert_eq!(runtime.vcount, VBLANK_START_LINE);
+        assert_ne!(runtime.dispstat & DISPSTAT_VBLANK, 0);
+        assert_ne!(runtime.interrupts.iflags & IRQ_VBLANK, 0);
+    }
+
+    #[test]
+    fn dma_completion_is_an_event_on_the_same_machine_clock() {
+        let mut runtime = Runtime::new();
+        runtime.interrupts.ie = IRQ_DMA0;
+        runtime.schedule_dma_completion(0, 50);
+        runtime.advance_cycles(49);
+        assert_eq!(runtime.interrupts.iflags & IRQ_DMA0, 0);
+
+        runtime.advance_cycles(1);
+        assert_ne!(runtime.interrupts.iflags & IRQ_DMA0, 0);
+        assert_eq!(runtime.scheduler.now(), 50);
+    }
+
+    #[test]
+    fn timer_overflow_and_cascade_share_the_same_event_boundary() {
+        let mut runtime = Runtime::new();
+        runtime.interrupts.ie = IRQ_TIMER0 | IRQ_TIMER1;
+        runtime.timers[0].write_reload(u16::MAX);
+        runtime.timers[0].write_control(CONTROL_ENABLE | CONTROL_IRQ);
+        runtime.timers[1].write_reload(u16::MAX);
+        runtime.timers[1].write_control(CONTROL_ENABLE | CONTROL_CASCADE | CONTROL_IRQ);
+
+        runtime.advance_cycles(2);
+
+        assert_ne!(runtime.interrupts.iflags & IRQ_TIMER0, 0);
+        assert_ne!(runtime.interrupts.iflags & IRQ_TIMER1, 0);
     }
 }
