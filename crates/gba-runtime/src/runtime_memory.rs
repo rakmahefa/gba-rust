@@ -40,20 +40,11 @@ impl Runtime {
         if let Some(index) = timer_index(address) {
             if timer_register_is_control(address) {
                 let value = self.timers[index].read_control();
-                return if address & 1 == 0 {
-                    value as u8
-                } else {
-                    (value >> 8) as u8
-                };
+                return if address & 1 == 0 { value as u8 } else { (value >> 8) as u8 };
             }
             let value = self.timers[index].counter();
-            return if address & 1 == 0 {
-                value as u8
-            } else {
-                (value >> 8) as u8
-            };
+            return if address & 1 == 0 { value as u8 } else { (value >> 8) as u8 };
         }
-
         match address {
             mmio::DISPCNT => self.dispcnt as u8,
             mmio::DISPCNT_HI => (self.dispcnt >> 8) as u8,
@@ -75,9 +66,7 @@ impl Runtime {
             mmio::HALTCNT => 0,
             _ => {
                 if let Some(register) = Self::contract_for_mmio(address) {
-                    if !register.access.can_read() {
-                        return 0;
-                    }
+                    if !register.access.can_read() { return 0; }
                     return *self.io.get(&address).unwrap_or(&0);
                 }
                 *self.io.get(&address).unwrap_or(&0)
@@ -106,78 +95,42 @@ impl Runtime {
             }
             return;
         }
-
         match address {
             mmio::DISPCNT => {
                 let writable = u16::from(value) & 0x00f7;
                 self.dispcnt = (self.dispcnt & !0x00f7) | writable;
             }
-            mmio::DISPCNT_HI => {
-                self.dispcnt = (self.dispcnt & 0x00ff) | (u16::from(value) << 8);
-            }
-            mmio::DISPSTAT => {
-                self.dispstat = (self.dispstat & 0xff07) | (u16::from(value) & 0x38);
-            }
-            mmio::DISPSTAT_HI => {
-                self.dispstat = (self.dispstat & 0x00ff) | (u16::from(value) << 8);
-            }
+            mmio::DISPCNT_HI => self.dispcnt = (self.dispcnt & 0x00ff) | (u16::from(value) << 8),
+            mmio::DISPSTAT => self.dispstat = (self.dispstat & 0xff07) | (u16::from(value) & 0x38),
+            mmio::DISPSTAT_HI => self.dispstat = (self.dispstat & 0x00ff) | (u16::from(value) << 8),
             mmio::VCOUNT | mmio::VCOUNT_HI | mmio::KEYINPUT | mmio::KEYINPUT_HI => {}
             mmio::IE => {
                 self.interrupts.ie = (self.interrupts.ie & 0x3f00) | u16::from(value);
                 self.service_interrupts();
             }
             mmio::IE_HI => {
-                self.interrupts.ie =
-                    (self.interrupts.ie & 0x00ff) | ((u16::from(value) << 8) & 0x3f00);
+                self.interrupts.ie = (self.interrupts.ie & 0x00ff) | ((u16::from(value) << 8) & 0x3f00);
                 self.service_interrupts();
             }
-            mmio::IF => self
-                .interrupts
-                .acknowledge(u16::from(value) & mmio::INTERRUPT_SOURCE_MASK),
-            mmio::IF_HI => self
-                .interrupts
-                .acknowledge((u16::from(value) << 8) & mmio::INTERRUPT_SOURCE_MASK),
-            mmio::WAITCNT => {
-                self.waitcnt = (self.waitcnt & 0xff00) | u16::from(value);
-            }
-            mmio::WAITCNT_HI => {
-                self.waitcnt =
-                    (self.waitcnt & 0x00ff) | ((u16::from(value) << 8) & 0x5000) | (self.waitcnt & 0x8000);
-            }
+            mmio::IF => self.interrupts.acknowledge(u16::from(value) & mmio::INTERRUPT_SOURCE_MASK),
+            mmio::IF_HI => self.interrupts.acknowledge((u16::from(value) << 8) & mmio::INTERRUPT_SOURCE_MASK),
+            mmio::WAITCNT => self.waitcnt = (self.waitcnt & 0xff00) | u16::from(value),
+            mmio::WAITCNT_HI => self.waitcnt = (self.waitcnt & 0x00ff) | ((u16::from(value) << 8) & 0x5000) | (self.waitcnt & 0x8000),
             mmio::IME => {
                 self.interrupts.ime = value & 1 != 0;
-                if self.interrupts.ime {
-                    self.service_interrupts();
-                }
+                if self.interrupts.ime { self.service_interrupts(); }
             }
             mmio::IME_HI => {}
             mmio::POSTFLG => self.postflg = value & mmio::POSTFLG_WRITABLE_MASK,
-            mmio::HALTCNT => {
-                self.power = if value & 0x80 != 0 {
-                    PowerState::Stopped
-                } else {
-                    PowerState::Halted
-                }
-            }
+            mmio::HALTCNT => self.power = if value & 0x80 != 0 { PowerState::Stopped } else { PowerState::Halted },
             _ => {
                 if let Some(register) = Self::contract_for_mmio(address) {
-                    if !register.access.can_write() {
-                        return;
-                    }
+                    if !register.access.can_write() { return; }
                     let mask = register.writable_byte_mask(address);
-                    if mask == 0 {
-                        return;
-                    }
+                    if mask == 0 { return; }
                     let current = *self.io.get(&address).unwrap_or(&0);
-                    self.io
-                        .insert(address, (current & !mask) | (value & mask));
-
-                    // DMA register writes are architectural device writes, not
-                    // passive bytes. Reconcile the register block immediately so
-                    // immediate DMA can be scheduled at the control-enable write.
-                    if (0x0400_00b0..=0x0400_00df).contains(&address) {
-                        self.sync_dma_registers();
-                    }
+                    self.io.insert(address, (current & !mask) | (value & mask));
+                    if (0x0400_00b0..=0x0400_00df).contains(&address) { self.sync_dma_registers(); }
                     return;
                 }
                 self.io.insert(address, value);
@@ -191,11 +144,7 @@ impl Runtime {
             return u16::from_le_bytes([value, value]);
         }
         if let Some(index) = timer_index(address) {
-            return if timer_register_is_control(address) {
-                self.timers[index].read_control()
-            } else {
-                self.timers[index].counter()
-            };
+            return if timer_register_is_control(address) { self.timers[index].read_control() } else { self.timers[index].counter() };
         }
         u16::from_le_bytes([self.read8(address), self.read8(address.wrapping_add(1))])
     }
@@ -228,113 +177,48 @@ impl Runtime {
                     _ => unreachable!(),
                 };
                 let base = bus.offset & !1;
-                if base + 1 < memory.len() {
-                    memory[base] = value;
-                    memory[base + 1] = value;
-                }
+                if base + 1 < memory.len() { memory[base] = value; memory[base + 1] = value; }
             }
             BusRegion::Oam => {}
             BusRegion::CartridgeSave => {
-                if let Some(cartridge) = self.cartridge.as_mut() {
-                    cartridge.save.write(bus.offset, value);
-                }
+                if let Some(cartridge) = self.cartridge.as_mut() { cartridge.save.write(bus.offset, value); }
             }
             BusRegion::Bios | BusRegion::CartridgeRom => {}
-            BusRegion::Unmapped => {
-                self.io.insert(address, value);
-            }
+            BusRegion::Unmapped => { self.io.insert(address, value); }
         }
     }
 
     pub fn write16(&mut self, address: u32, value: u16) {
         if let Some(index) = timer_index(address) {
-            if timer_register_is_control(address) {
-                self.timers[index].write_control(value);
-            } else {
-                self.timers[index].write_reload(value);
-            }
+            if timer_register_is_control(address) { self.timers[index].write_control(value); } else { self.timers[index].write_reload(value); }
             return;
         }
-
         match bus::decode(address).region {
-            BusRegion::Palette => {
-                let o = bus::decode(address).offset & !1;
-                self.palette[o..o + 2].copy_from_slice(&value.to_le_bytes());
-            }
-            BusRegion::Vram => {
-                let o = bus::decode(address).offset & !1;
-                self.vram[o..o + 2].copy_from_slice(&value.to_le_bytes());
-            }
-            BusRegion::Oam => {
-                let o = bus::decode(address).offset & !1;
-                self.oam[o..o + 2].copy_from_slice(&value.to_le_bytes());
-            }
+            BusRegion::Palette => { let o = bus::decode(address).offset & !1; self.palette[o..o + 2].copy_from_slice(&value.to_le_bytes()); }
+            BusRegion::Vram => { let o = bus::decode(address).offset & !1; self.vram[o..o + 2].copy_from_slice(&value.to_le_bytes()); }
+            BusRegion::Oam => { let o = bus::decode(address).offset & !1; self.oam[o..o + 2].copy_from_slice(&value.to_le_bytes()); }
             BusRegion::CartridgeSave => self.write8(address, value.to_le_bytes()[0]),
-            _ if address == mmio::DISPCNT => {
-                self.dispcnt = (self.dispcnt & !mmio::DISPCNT_WRITABLE_MASK)
-                    | (value & mmio::DISPCNT_WRITABLE_MASK);
-            }
-            _ if address == mmio::DISPSTAT => {
-                self.dispstat = (self.dispstat & mmio::DISPSTAT_STATUS_MASK)
-                    | (value & mmio::DISPSTAT_WRITABLE_MASK);
-            }
+            _ if address == mmio::DISPCNT => self.dispcnt = (self.dispcnt & !mmio::DISPCNT_WRITABLE_MASK) | (value & mmio::DISPCNT_WRITABLE_MASK),
+            _ if address == mmio::DISPSTAT => self.dispstat = (self.dispstat & mmio::DISPSTAT_STATUS_MASK) | (value & mmio::DISPSTAT_WRITABLE_MASK),
             _ if address == mmio::VCOUNT => {}
             _ if address == mmio::KEYINPUT => {}
-            _ if address == mmio::IE => {
-                self.interrupts.ie = value & mmio::INTERRUPT_SOURCE_MASK;
-                self.service_interrupts();
-            }
-            _ if address == mmio::IF => self
-                .interrupts
-                .acknowledge(value & mmio::INTERRUPT_SOURCE_MASK),
-            _ if address == mmio::WAITCNT => {
-                self.waitcnt = (self.waitcnt & 0x8000)
-                    | (value & mmio::WAITCNT_WRITABLE_MASK);
-            }
-            _ if address == mmio::IME => {
-                self.interrupts.ime = value & mmio::IME_WRITABLE_MASK != 0;
-                if self.interrupts.ime {
-                    self.service_interrupts();
-                }
-            }
-            _ if address == mmio::POSTFLG => {
-                let bytes = value.to_le_bytes();
-                self.write8(mmio::POSTFLG, bytes[0]);
-                self.write8(mmio::HALTCNT, bytes[1]);
-            }
+            _ if address == mmio::IE => { self.interrupts.ie = value & mmio::INTERRUPT_SOURCE_MASK; self.service_interrupts(); }
+            _ if address == mmio::IF => self.interrupts.acknowledge(value & mmio::INTERRUPT_SOURCE_MASK),
+            _ if address == mmio::WAITCNT => self.waitcnt = (self.waitcnt & 0x8000) | (value & mmio::WAITCNT_WRITABLE_MASK),
+            _ if address == mmio::IME => { self.interrupts.ime = value & mmio::IME_WRITABLE_MASK != 0; if self.interrupts.ime { self.service_interrupts(); } }
+            _ if address == mmio::POSTFLG => { let bytes = value.to_le_bytes(); self.write8(mmio::POSTFLG, bytes[0]); self.write8(mmio::HALTCNT, bytes[1]); }
             _ if address == mmio::HALTCNT => self.write8(address, value as u8),
-            _ => {
-                for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
-                    self.write8(address.wrapping_add(i as u32), byte);
-                }
-            }
+            _ => { for (i, byte) in value.to_le_bytes().into_iter().enumerate() { self.write8(address.wrapping_add(i as u32), byte); } }
         }
     }
 
     pub fn write32(&mut self, address: u32, value: u32) {
-        let region = bus::decode(address).region;
-        match region {
-            BusRegion::Palette => {
-                let o = bus::decode(address).offset & !3;
-                self.palette[o..o + 4].copy_from_slice(&value.to_le_bytes());
-            }
-            BusRegion::Vram => {
-                let o = bus::decode(address).offset & !3;
-                self.vram[o..o + 4].copy_from_slice(&value.to_le_bytes());
-            }
-            BusRegion::Oam => {
-                let o = bus::decode(address).offset & !3;
-                self.oam[o..o + 4].copy_from_slice(&value.to_le_bytes());
-            }
-            BusRegion::CartridgeSave => {
-                let byte = value.rotate_right((address & 3) * 8) as u8;
-                self.write8(address, byte);
-            }
-            _ => {
-                for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
-                    self.write8(address.wrapping_add(i as u32), byte);
-                }
-            }
+        match bus::decode(address).region {
+            BusRegion::Palette => { let o = bus::decode(address).offset & !3; self.palette[o..o + 4].copy_from_slice(&value.to_le_bytes()); }
+            BusRegion::Vram => { let o = bus::decode(address).offset & !3; self.vram[o..o + 4].copy_from_slice(&value.to_le_bytes()); }
+            BusRegion::Oam => { let o = bus::decode(address).offset & !3; self.oam[o..o + 4].copy_from_slice(&value.to_le_bytes()); }
+            BusRegion::CartridgeSave => { let byte = value.rotate_right((address & 3) * 8) as u8; self.write8(address, byte); }
+            _ => { for (i, byte) in value.to_le_bytes().into_iter().enumerate() { self.write8(address.wrapping_add(i as u32), byte); } }
         }
     }
 }
@@ -355,7 +239,6 @@ mod mmio_device_tests {
         runtime.write16(DMA0CNT_L.address, 1);
         runtime.interrupts.ie = IRQ_DMA0;
         runtime.write16(DMA0CNT_H.address, 0x8000 | 0x4000);
-
         assert_eq!(runtime.dma.active(), None);
         runtime.advance_cycles(2);
         assert_eq!(runtime.read16(bus::EWRAM_START + 0x100), 0xbeef);
@@ -365,24 +248,23 @@ mod mmio_device_tests {
     #[test]
     fn timer_byte_accesses_preserve_the_other_byte() {
         let mut runtime = Runtime::new();
-        runtime.write8(TIMER0CNT_L, 0x34);
-        runtime.write8(TIMER0CNT_L + 1, 0x12);
-        assert_eq!(runtime.read16(TIMER0CNT_L), 0x1234);
-
-        runtime.write8(TIMER0CNT_H, 0x80);
-        runtime.write8(TIMER0CNT_H + 1, 0x00);
-        assert_eq!(runtime.read16(TIMER0CNT_H), 0x0080);
-        assert_eq!(runtime.read8(TIMER0CNT_H), 0x80);
-        assert_eq!(runtime.read8(TIMER0CNT_H + 1), 0x00);
-        assert_eq!(runtime.read16(TIMER0CNT_L), 0x1234);
+        runtime.write8(TIMER0CNT_L.address, 0x34);
+        runtime.write8(TIMER0CNT_L.address + 1, 0x12);
+        assert_eq!(runtime.read16(TIMER0CNT_L.address), 0x1234);
+        runtime.write8(TIMER0CNT_H.address, 0x80);
+        runtime.write8(TIMER0CNT_H.address + 1, 0x00);
+        assert_eq!(runtime.read16(TIMER0CNT_H.address), 0x0080);
+        assert_eq!(runtime.read8(TIMER0CNT_H.address), 0x80);
+        assert_eq!(runtime.read8(TIMER0CNT_H.address + 1), 0x00);
+        assert_eq!(runtime.read16(TIMER0CNT_L.address), 0x1234);
     }
 
     #[test]
     fn timer_irq_is_raised_from_mmio_programming_and_scheduler_cycles() {
         let mut runtime = Runtime::new();
         runtime.interrupts.ie = IRQ_TIMER0;
-        runtime.write16(TIMER0CNT_L, u16::MAX);
-        runtime.write16(TIMER0CNT_H, 0x00c0 | 0x0080);
+        runtime.write16(TIMER0CNT_L.address, u16::MAX);
+        runtime.write16(TIMER0CNT_H.address, 0x00c0 | 0x0080);
         runtime.advance_cycles(1);
         assert_ne!(runtime.interrupts.iflags & IRQ_TIMER0, 0);
     }
