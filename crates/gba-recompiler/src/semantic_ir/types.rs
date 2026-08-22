@@ -12,15 +12,43 @@ pub enum MemoryWidth {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryEffect {
-    Read { width: MemoryWidth, base: u8 },
-    Write { width: MemoryWidth, base: u8 },
-    ReadWrite { width: MemoryWidth, base: u8 },
+    Read {
+        width: MemoryWidth,
+        base: u8,
+        address_is_dynamic: bool,
+    },
+    Write {
+        width: MemoryWidth,
+        base: u8,
+        address_is_dynamic: bool,
+    },
+    ReadWrite {
+        width: MemoryWidth,
+        base: u8,
+        address_is_dynamic: bool,
+    },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FlagEffect {
-    pub read: bool,
-    pub write: bool,
+    pub read_n: bool,
+    pub read_z: bool,
+    pub read_c: bool,
+    pub read_v: bool,
+    pub write_n: bool,
+    pub write_z: bool,
+    pub write_c: bool,
+    pub write_v: bool,
+}
+
+impl FlagEffect {
+    pub fn reads_any(self) -> bool {
+        self.read_n || self.read_z || self.read_c || self.read_v
+    }
+
+    pub fn writes_any(self) -> bool {
+        self.write_n || self.write_z || self.write_c || self.write_v
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
