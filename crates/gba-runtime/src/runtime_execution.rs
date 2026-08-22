@@ -2,6 +2,7 @@ use super::Runtime;
 use crate::arm7tdmi;
 use crate::bios::{PowerState, IRQ_DMA0, IRQ_HBLANK, IRQ_VBLANK, IRQ_VCOUNT};
 use crate::cpu::REG_PC;
+use crate::dma::DmaTrigger;
 use crate::mmio::{
     DISPSTAT_HBLANK, DISPSTAT_HBLANK_IRQ, DISPSTAT_VBLANK, DISPSTAT_VBLANK_IRQ,
     DISPSTAT_VCOUNT, DISPSTAT_VCOUNT_IRQ, DISPSTAT_VCOUNT_MASK,
@@ -12,11 +13,10 @@ use crate::scheduler::{
 
 impl Runtime {
     pub fn advance_cycles(&mut self, cycles: u32) {
+        self.sync_dma_registers();
         let target = self.scheduler.now().saturating_add(cycles as u64);
         while let Some(event) = self.scheduler.next_event() {
-            if event.cycle > target {
-                break;
-            }
+            if event.cycle > target { break; }
             let delta = event.cycle.saturating_sub(self.scheduler.now());
             self.tick_timers(delta as u32);
             self.scheduler.advance_to(event.cycle);
@@ -64,6 +64,7 @@ impl Runtime {
                 if self.dispstat & DISPSTAT_HBLANK_IRQ != 0 {
                     self.raise_hardware_interrupt(IRQ_HBLANK);
                 }
+                self.trigger_dma(DmaTrigger::HBlank);
                 self.scheduler.schedule_in(CYCLES_PER_SCANLINE, EventKind::PpuHBlankStart);
             }
             EventKind::PpuScanline => {
@@ -83,6 +84,7 @@ impl Runtime {
                     if self.dispstat & DISPSTAT_VBLANK_IRQ != 0 {
                         self.raise_hardware_interrupt(IRQ_VBLANK);
                     }
+                    self.trigger_dma(DmaTrigger::VBlank);
                 }
                 if vcount_match && self.dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
                     self.raise_hardware_interrupt(IRQ_VCOUNT);
@@ -94,9 +96,14 @@ impl Runtime {
                 if self.dispstat & DISPSTAT_VBLANK_IRQ != 0 {
                     self.raise_hardware_interrupt(IRQ_VBLANK);
                 }
+                self.trigger_dma(DmaTrigger::VBlank);
             }
+            EventKind::DmaArbitrate => self.service_dma_arbitration(),
             EventKind::DmaComplete { channel } => {
-                if channel < 4 { self.raise_hardware_interrupt(IRQ_DMA0 << channel); }
+                self.complete_dma(channel);
+                if channel < 4 && self.interrupts.ie & (IRQ_DMA0 << channel) != 0 {
+                    self.wake_from_interrupt(IRQ_DMA0 << channel);
+                }
             }
             EventKind::IrqSample => { let _ = self.service_interrupts(); }
         }
@@ -140,6 +147,11 @@ impl Runtime {
         loop {
             if let Some(limit) = max_steps { if steps >= limit { return Err("generated execution step limit exceeded"); } }
             if self.power == PowerState::Stopped { return Err("runtime is stopped"); }
+            if self.dma_bus_busy() {
+                let remaining = self.dma.busy_until().saturating_sub(self.scheduler.now());
+                self.advance_cycles(remaining.min(u64::from(u32::MAX)) as u32);
+                continue;
+            }
             if self.power == PowerState::Halted {
                 self.advance_cycles(1);
                 let _ = self.service_interrupts();

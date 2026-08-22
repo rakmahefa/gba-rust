@@ -7,26 +7,18 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-/// GBA master cycles per scanline (1232 cycles at the nominal 16.78 MHz clock).
 pub const CYCLES_PER_SCANLINE: u64 = 1_232;
-/// Number of scanlines in one GBA frame.
 pub const SCANLINES_PER_FRAME: u16 = 228;
-/// First cycle in a scanline at which HBlank begins.
 pub const HBLANK_START_CYCLES: u64 = 1_006;
-/// First non-visible scanline of the frame.
 pub const VBLANK_START_LINE: u16 = 160;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventKind {
-    /// PPU enters HBlank for the current scanline.
     PpuHBlankStart,
-    /// PPU advances to the next scanline.
     PpuScanline,
-    /// PPU enters the VBlank region.
     PpuVBlankStart,
-    /// A DMA channel reaches its completion boundary.
+    DmaArbitrate,
     DmaComplete { channel: u8 },
-    /// A hardware event asks the interrupt controller to sample pending IRQs.
     IrqSample,
 }
 
@@ -61,50 +53,30 @@ pub struct TimingScheduler {
 }
 
 impl Default for TimingScheduler {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl TimingScheduler {
     pub fn new() -> Self {
-        Self {
-            now: 0,
-            next_sequence: 0,
-            queue: BinaryHeap::new(),
-        }
+        Self { now: 0, next_sequence: 0, queue: BinaryHeap::new() }
     }
 
-    pub fn now(&self) -> u64 {
-        self.now
-    }
-
-    pub fn pending_events(&self) -> usize {
-        self.queue.len()
-    }
+    pub fn now(&self) -> u64 { self.now }
+    pub fn pending_events(&self) -> usize { self.queue.len() }
 
     pub fn schedule_at(&mut self, cycle: u64, kind: EventKind) {
         assert!(cycle >= self.now, "cannot schedule an event in the past");
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.wrapping_add(1);
-        self.queue.push(ScheduledEvent {
-            cycle,
-            sequence,
-            kind,
-        });
+        self.queue.push(ScheduledEvent { cycle, sequence, kind });
     }
 
     pub fn schedule_in(&mut self, delta: u64, kind: EventKind) {
         self.schedule_at(self.now.saturating_add(delta), kind);
     }
 
-    pub fn next_event(&self) -> Option<ScheduledEvent> {
-        self.queue.peek().copied()
-    }
-
-    pub fn pop_event(&mut self) -> Option<ScheduledEvent> {
-        self.queue.pop()
-    }
+    pub fn next_event(&self) -> Option<ScheduledEvent> { self.queue.peek().copied() }
+    pub fn pop_event(&mut self) -> Option<ScheduledEvent> { self.queue.pop() }
 
     pub fn advance_to(&mut self, cycle: u64) {
         assert!(cycle >= self.now, "scheduler clock cannot move backwards");
@@ -122,13 +94,9 @@ mod tests {
         scheduler.schedule_at(20, EventKind::IrqSample);
         scheduler.schedule_at(10, EventKind::PpuScanline);
         scheduler.schedule_at(20, EventKind::DmaComplete { channel: 0 });
-
         assert_eq!(scheduler.pop_event().unwrap().cycle, 10);
         assert_eq!(scheduler.pop_event().unwrap().kind, EventKind::IrqSample);
-        assert_eq!(
-            scheduler.pop_event().unwrap().kind,
-            EventKind::DmaComplete { channel: 0 }
-        );
+        assert_eq!(scheduler.pop_event().unwrap().kind, EventKind::DmaComplete { channel: 0 });
     }
 
     #[test]
@@ -136,10 +104,7 @@ mod tests {
         let mut scheduler = TimingScheduler::new();
         scheduler.advance_to(123);
         assert_eq!(scheduler.now(), 123);
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            scheduler.advance_to(122);
-        }));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scheduler.advance_to(122)));
         assert!(result.is_err());
     }
 
