@@ -76,6 +76,9 @@ pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Progra
                 let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {}));", mode_bool(block.mode));
             }
         }
+        SemanticTerminator::SoftwareInterrupt { .. } => {
+            let _ = writeln!(out, "    return Err(\"software interrupt execution is not implemented\");");
+        }
         SemanticTerminator::Unknown => {
             let _ = writeln!(out, "    return Err(\"generated program reached an unknown terminator\");");
         }

@@ -1,10 +1,11 @@
 use crate::cfg::{BlockId, Program};
+use crate::decoder::{ArmExtended, ThumbExtended};
 use crate::function::FunctionControlFlowGraph;
 use crate::ir::{IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth};
 
 use super::{
-    FlagEffect, MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction,
-    SemanticProgram, SemanticTerminator,
+    MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram,
+    SemanticTerminator,
 };
 
 fn memory_width(width: IrMemoryWidth) -> MemoryWidth {
@@ -41,7 +42,7 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
         reads: ir.reads(),
         writes: ir.writes(),
         memory,
-        flags: FlagEffect {
+        flags: super::FlagEffect {
             read_n: flags.read_n,
             read_z: flags.read_z,
             read_c: flags.read_c,
@@ -54,6 +55,24 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
     }
 }
 
+fn software_interrupt_comment(block: &SemanticBlock) -> Option<u32> {
+    block
+        .instructions
+        .last()?
+        .ops
+        .iter()
+        .rev()
+        .find_map(|op| match op {
+            crate::ir::IrOp::ArmExtended {
+                op: ArmExtended::SoftwareInterrupt { comment },
+            } => Some(*comment),
+            crate::ir::IrOp::ThumbExtended {
+                op: ThumbExtended::SoftwareInterrupt { comment },
+            } => Some(u32::from(*comment)),
+            _ => None,
+        })
+}
+
 fn terminator(block: &SemanticBlock) -> SemanticTerminator {
     let Some(effect) = block
         .instructions
@@ -64,6 +83,7 @@ fn terminator(block: &SemanticBlock) -> SemanticTerminator {
     else {
         return SemanticTerminator::Fallthrough;
     };
+
     match effect {
         IrControlEffect::Branch {
             target,
@@ -90,7 +110,9 @@ fn terminator(block: &SemanticBlock) -> SemanticTerminator {
             register,
             link: false,
         } => SemanticTerminator::IndirectBranch { register },
-        IrControlEffect::Unknown => SemanticTerminator::Unknown,
+        IrControlEffect::Unknown => software_interrupt_comment(block)
+            .map(|comment| SemanticTerminator::SoftwareInterrupt { comment })
+            .unwrap_or(SemanticTerminator::Unknown),
         IrControlEffect::None => SemanticTerminator::Fallthrough,
     }
 }
@@ -103,7 +125,11 @@ fn semantic_successors(
         SemanticTerminator::Return
         | SemanticTerminator::IndirectBranch { .. }
         | SemanticTerminator::Unknown => Vec::new(),
-        _ => source_successors.to_vec(),
+        SemanticTerminator::SoftwareInterrupt { .. }
+        | SemanticTerminator::Fallthrough
+        | SemanticTerminator::Branch { .. }
+        | SemanticTerminator::Call { .. }
+        | SemanticTerminator::IndirectCall { .. } => source_successors.to_vec(),
     }
 }
 
@@ -119,7 +145,12 @@ pub fn build_semantic_program(
                 .cfg
                 .blocks
                 .get(block_id.0)
-                .ok_or_else(|| format!("function {} references missing block {}", function.id.0, block_id.0))?;
+                .ok_or_else(|| {
+                    format!(
+                        "function {} references missing block {}",
+                        function.id.0, block_id.0
+                    )
+                })?;
             let instructions = block.ir.iter().map(semantic_instruction).collect::<Vec<_>>();
             let mut semantic = SemanticBlock {
                 id: block.id,
