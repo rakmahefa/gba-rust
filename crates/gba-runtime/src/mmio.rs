@@ -17,9 +17,12 @@ pub const HALTCNT: u32 = 0x0400_0301;
 
 pub const DISPSTAT_VBLANK: u16 = 1 << 0;
 pub const DISPSTAT_HBLANK: u16 = 1 << 1;
-pub const DISPSTAT_VCOUNT_IRQ: u16 = 1 << 2;
+pub const DISPSTAT_VCOUNT: u16 = 1 << 2;
+pub const DISPSTAT_VBLANK_IRQ: u16 = 1 << 3;
+pub const DISPSTAT_HBLANK_IRQ: u16 = 1 << 4;
+pub const DISPSTAT_VCOUNT_IRQ: u16 = 1 << 5;
 pub const DISPSTAT_VCOUNT_MASK: u16 = 0xff << 8;
-pub const DISPSTAT_STATUS_MASK: u16 = DISPSTAT_VBLANK | DISPSTAT_HBLANK;
+pub const DISPSTAT_STATUS_MASK: u16 = DISPSTAT_VBLANK | DISPSTAT_HBLANK | DISPSTAT_VCOUNT;
 
 pub const DISPSTAT_HI: u32 = DISPSTAT + 1;
 pub const VCOUNT_HI: u32 = VCOUNT + 1;
@@ -56,5 +59,13 @@ mod tests {
         for address in [DISPCNT, DISPSTAT, VCOUNT, KEYINPUT, IE, IF, WAITCNT, IME, POSTFLG, HALTCNT] {
             assert!((0x0400_0000..=0x0400_03ff).contains(&address));
         }
+    }
+
+    #[test]
+    fn dispstat_irq_enables_are_distinct_from_status_bits() {
+        assert_eq!(
+            DISPSTAT_STATUS_MASK & (DISPSTAT_VBLANK_IRQ | DISPSTAT_HBLANK_IRQ | DISPSTAT_VCOUNT_IRQ),
+            0
+        );
     }
 }
