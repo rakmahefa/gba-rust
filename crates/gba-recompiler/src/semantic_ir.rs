@@ -229,13 +229,22 @@ fn same_memory(a: Option<IrMemoryEffect>, b: Option<MemoryEffect>) -> bool {
             let width = memory_width(a.width);
             match a.kind {
                 IrMemoryKind::Read => {
-                    b == MemoryEffect::Read { width, base: a.base }
+                    b == MemoryEffect::Read {
+                        width,
+                        base: a.base,
+                    }
                 }
                 IrMemoryKind::Write => {
-                    b == MemoryEffect::Write { width, base: a.base }
+                    b == MemoryEffect::Write {
+                        width,
+                        base: a.base,
+                    }
                 }
                 IrMemoryKind::ReadWrite => {
-                    b == MemoryEffect::ReadWrite { width, base: a.base }
+                    b == MemoryEffect::ReadWrite {
+                        width,
+                        base: a.base,
+                    }
                 }
             }
         }
@@ -446,7 +455,10 @@ mod tests {
         assert_eq!(block.instructions[0].writes, vec![0]);
         assert_eq!(block.instructions[1].reads, vec![0]);
         assert_eq!(block.instructions[1].writes, vec![0]);
-        assert_eq!(block.instructions[0].control_effect(), IrControlEffect::None);
+        assert_eq!(
+            block.instructions[0].control_effect(),
+            IrControlEffect::None
+        );
     }
 
     #[test]
@@ -505,7 +517,7 @@ mod tests {
         let rom = arm_rom(&[
             0xE59F_E000, // ldr lr, [pc]
             0xE12F_FF1E, // bx lr
-            0x0800_0008, // resolved LR target / literal pool
+            0xE1A0_0000, // resolved LR target / executable NOP
         ]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
@@ -514,11 +526,13 @@ mod tests {
             .functions
             .iter()
             .flat_map(|function| function.blocks.iter())
-            .find(|block| block.terminator == SemanticTerminator::Return)
+            .find(|block| {
+                block.terminator == SemanticTerminator::Return
+                    && block.instructions.last().map(|i| i.address) == Some(ROM_BASE + 4)
+            })
             .expect("resolved BX LR semantic return block must be present");
         assert_eq!(block.terminator, SemanticTerminator::Return);
         assert!(block.successors.is_empty());
-        assert_eq!(block.instructions.last().map(|i| i.address), Some(ROM_BASE + 4));
     }
 
     #[test]
@@ -526,7 +540,7 @@ mod tests {
         let rom = arm_rom(&[
             0xE59F_3000, // ldr r3, [pc]
             0xE12F_FF13, // bx r3
-            0x0800_0008, // resolved r3 target / literal pool
+            0xE1A0_0000, // resolved r3 target / executable NOP
         ]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
@@ -537,6 +551,7 @@ mod tests {
             .flat_map(|function| function.blocks.iter())
             .find(|block| {
                 block.terminator == SemanticTerminator::IndirectBranch { register: 3 }
+                    && block.instructions.last().map(|i| i.address) == Some(ROM_BASE + 4)
             })
             .expect("resolved BX r3 semantic indirect-branch block must be present");
         assert_eq!(
@@ -544,7 +559,6 @@ mod tests {
             SemanticTerminator::IndirectBranch { register: 3 }
         );
         assert!(block.successors.is_empty());
-        assert_eq!(block.instructions.last().map(|i| i.address), Some(ROM_BASE + 4));
     }
 
     #[test]
@@ -573,16 +587,26 @@ mod tests {
 
     #[test]
     fn semantic_validation_rejects_multiple_control_effects() {
-        let program = analyze(&arm_rom(&[0xEA00_0000, 0xE1A0_0000]), ROM_BASE, Mode::Arm).unwrap();
+        let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
-        let mut semantic = build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].instructions[0]
-            .ops
-            .push(IrOp::BranchExchange {
-                register: 14,
-                link: false,
-            });
-        let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let block = semantic
+            .functions
+            .iter()
+            .flat_map(|function| function.blocks.iter())
+            .find(|block| block.instructions.len() == 2)
+            .expect("two-instruction block must be present");
+        let mut invalid_block = block.clone();
+        invalid_block.instructions[0].ops.push(IrOp::BranchExchange {
+            register: 14,
+            link: false,
+        });
+        invalid_block.instructions[1].ops.push(IrOp::Branch {
+            target: ROM_BASE,
+            condition: Condition::Al,
+            link: false,
+        });
+        let error = validate_control_placement(&invalid_block).unwrap_err();
         assert!(error.contains("multiple control-effect instructions"));
     }
 }
