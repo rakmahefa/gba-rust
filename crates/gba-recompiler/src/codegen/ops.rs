@@ -8,9 +8,9 @@ use super::common::{emit_cmp_sub, emit_flags_from_logic, value_expr};
 use super::operands::arm_operand2;
 use super::thumb::emit_thumb_extended;
 
-fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) -> bool {
+fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
     match op {
-        IrOp::Nop => true,
+        IrOp::Nop => {}
         IrOp::Mov {
             dst,
             src,
@@ -25,7 +25,6 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) -> bool 
             if *set_flags {
                 emit_flags_from_logic(out, &rhs, &carry);
             }
-            true
         }
         IrOp::Add {
             dst,
@@ -42,7 +41,6 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) -> bool 
                 out,
                 "    rt.add({dst}, rt.read_reg({lhs}), {rhs}, {set_flags});"
             );
-            true
         }
         IrOp::Sub {
             dst,
@@ -59,7 +57,6 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) -> bool 
                 out,
                 "    rt.sub({dst}, rt.read_reg({lhs}), {rhs}, {set_flags});"
             );
-            true
         }
         IrOp::Cmp { lhs, rhs } => {
             let rhs = if mode == Mode::Arm {
@@ -68,7 +65,6 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) -> bool 
                 value_expr(rhs)
             };
             emit_cmp_sub(out, &format!("rt.read_reg({lhs})"), &rhs);
-            true
         }
         IrOp::Load {
             dst,
@@ -90,7 +86,6 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) -> bool 
             } else {
                 let _ = writeln!(out, "    rt.write_reg({dst}, rt.read32(address));");
             }
-            true
         }
         IrOp::Store {
             src,
@@ -107,25 +102,19 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) -> bool 
             } else {
                 let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({src}));");
             }
-            true
         }
-        IrOp::Branch { .. } | IrOp::BranchExchange { .. } => true,
-        IrOp::ArmExtended { op } => {
-            emit_arm_extended(out, *op);
-            true
-        }
-        IrOp::ThumbExtended { op } => {
-            emit_thumb_extended(out, *op);
-            true
-        }
-        IrOp::Unknown { address, raw, mode } => {
-            let _ = writeln!(
-                out,
-                "    return Err(format!(\"unsupported instruction in specialized codegen: pc={{:#010x}} mode={{:?}} raw={{:#010x}}\", {address:#010x}, {mode:?}, {raw:#010x}).leak());"
-            );
-            false
-        }
+        IrOp::Branch { .. } | IrOp::BranchExchange { .. } => {}
+        IrOp::ArmExtended { op } => emit_arm_extended(out, *op),
+        IrOp::ThumbExtended { op } => emit_thumb_extended(out, *op),
+        IrOp::Unknown { .. } => unreachable!("unknown IR op handled by emit_op"),
     }
+}
+
+fn emit_unknown_return(out: &mut String, address: u32, raw: u32, mode: Mode) {
+    let _ = writeln!(
+        out,
+        "    return Err(format!(\"unsupported instruction in specialized codegen: pc={{:#010x}} mode={{:?}} raw={{:#010x}}\", {address:#010x}, {mode:?}, {raw:#010x}).leak());"
+    );
 }
 
 fn is_software_interrupt(op: &IrOp) -> bool {
@@ -146,21 +135,27 @@ pub fn emit_op(out: &mut String, ins_address: u32, ins_raw: u32, mode: Mode, op:
         matches!(mode, Mode::Thumb)
     );
     if !is_software_interrupt(op) {
-        let emitted = if mode == Mode::Arm {
+        if mode == Mode::Arm {
             let condition = (ins_raw >> 28) & 0xf;
             if condition != 0xe {
                 let _ = writeln!(out, "    if rt.condition_code({condition}) {{");
-                let emitted = emit_inner_op(out, ins_raw, mode, op);
+                if let IrOp::Unknown { address, raw, mode } = op {
+                    emit_unknown_return(out, *address, *raw, *mode);
+                } else {
+                    emit_inner_op(out, ins_raw, mode, op);
+                }
                 let _ = writeln!(out, "    }}");
-                emitted
+                let _ = writeln!(out, "    rt.tick(1);");
+            } else if let IrOp::Unknown { address, raw, mode } = op {
+                emit_unknown_return(out, *address, *raw, *mode);
             } else {
-                emit_inner_op(out, ins_raw, mode, op)
+                emit_inner_op(out, ins_raw, mode, op);
+                let _ = writeln!(out, "    rt.tick(1);");
             }
+        } else if let IrOp::Unknown { address, raw, mode } = op {
+            emit_unknown_return(out, *address, *raw, *mode);
         } else {
-            emit_inner_op(out, ins_raw, mode, op)
-        };
-
-        if emitted {
+            emit_inner_op(out, ins_raw, mode, op);
             let _ = writeln!(out, "    rt.tick(1);");
         }
     } else {
@@ -228,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_instruction_emits_structured_diagnostic_without_unreachable_tick() {
+    fn unknown_arm_instruction_emits_structured_diagnostic_without_unreachable_tick() {
         let mut out = String::new();
         emit_op(
             &mut out,
@@ -245,6 +240,24 @@ mod tests {
         assert!(out.contains("0x08001234"));
         assert!(out.contains("0xe7ffff00"));
         assert!(out.contains("mode=Arm"));
-        assert_eq!(out.matches("rt.tick(1);").count(), 0);
+        assert!(!out.ends_with("rt.tick(1);\n"));
+    }
+
+    #[test]
+    fn unknown_conditional_arm_instruction_keeps_fallthrough_tick() {
+        let mut out = String::new();
+        emit_op(
+            &mut out,
+            0x0800_1234,
+            0x17FF_FF00,
+            Mode::Arm,
+            &IrOp::Unknown {
+                address: 0x0800_1234,
+                raw: 0x17FF_FF00,
+                mode: Mode::Arm,
+            },
+        );
+        assert!(out.contains("if rt.condition_code(1)"));
+        assert!(out.contains("rt.tick(1)"));
     }
 }
