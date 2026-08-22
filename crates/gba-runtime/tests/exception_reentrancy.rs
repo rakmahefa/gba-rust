@@ -36,11 +36,10 @@ fn irq_return_restores_thumb_caller_state_and_link_target() {
     let irq_lr = runtime.read_reg(REG_LR);
 
     assert_eq!(irq_lr, 0x0800_0302);
-    let target = irq_lr;
-    let restored = runtime.exception_return(target).expect("IRQ return must restore Thumb");
+    let restored = runtime.exception_return(irq_lr).expect("IRQ return must restore Thumb");
     assert_eq!(restored, (0x0800_0302, true));
     assert_eq!(runtime.mode(), CpuMode::System);
-    assert_eq!(runtime.cpu.thumb, true);
+    assert!(runtime.cpu.thumb);
     assert_eq!(runtime.read_reg(REG_PC), 0x0800_0302);
     assert_eq!(runtime.cpu.cpsr, caller_cpsr);
     assert_ne!(caller_pc, runtime.read_reg(REG_PC));
@@ -58,9 +57,9 @@ fn exception_return_requires_an_active_spsr() {
 #[test]
 fn generated_cycle_tick_does_not_switch_to_irq_mid_instruction() {
     let mut runtime = Runtime::new();
-    runtime.write16(0x0400_0200, 1);
-    runtime.write16(0x0400_0208, 1);
-    runtime.cpu.enter_instruction_for_test(0x0800_0100, false);
+    runtime.enter_instruction(0x0800_0100, false);
+    runtime.interrupts.ie = 1;
+    runtime.interrupts.ime = true;
     runtime.interrupts.request(1);
     let mode_before = runtime.mode();
     runtime.tick(1);
