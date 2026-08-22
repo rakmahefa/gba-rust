@@ -59,9 +59,11 @@ fn execute_generated(source: &str, setup: &str) -> [u64; 5] {
         .expect("cargo invocation");
     assert!(
         output.status.success(),
-        "generated Rust failed to compile or execute:\nstdout:\n{}\nstderr:\n{}\nsource:\n{}",
+        "generated Rust failed to compile or execute (status={}):\nstdout:\n{}\nstderr:\n{}\nmanifest:\n{}\nsource:\n{}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&fs::read(&manifest_path).expect("manifest bytes")),
         source
     );
 
