@@ -20,7 +20,15 @@ Architectural exceptions use the same boundary. `GeneratedBlockExit::Exception` 
 
 BIOS SWIs use this exception state as well: the runtime enters Supervisor mode before executing the modeled BIOS service, restores the caller's CPSR/banked registers for returning SWIs, and leaves the Supervisor state active for non-returning services such as HALT/STOP.
 
-Interrupt delivery is likewise centralized in the runtime. Enabled pending IRQs enter IRQ mode at vector `0x18`, save the interrupted CPSR in SPSR_irq, and can return through the same exception-return primitive. BIOS HALT/IntrWait explicitly unmask IRQs while waiting so an external interrupt can wake the runtime.
+### Phase 4: reentrant BIOS/IRQ execution
+
+Generated execution treats an IRQ as a **block-boundary transition**, not as a side effect of `tick()`. A pending enabled IRQ is observed by the generated dispatcher before the next block executes; the dispatcher establishes the architectural PC for that boundary and then reuses the runtime exception-entry contract. This preserves the interrupted resume point, CPSR and banked registers while preventing an IRQ from mutating CPU mode in the middle of a generated instruction.
+
+Exception-return instructions that write `PC` with the `S` bit set are handled as real architectural exception returns. The generated ARM path evaluates the return target, asks the runtime to restore the active SPSR/banked state, and only then emits the CFG return transition. Ordinary `BX LR`/function returns remain distinct from these architectural restores at the runtime level.
+
+Nested exception entry is therefore reentrant: an IRQ taken while executing Supervisor/other privileged code captures the current mode's CPSR in `SPSR_irq`, uses the IRQ banked `SP/LR`, and can restore the interrupted privileged context through the same exception-return primitive.
+
+BIOS HALT/IntrWait continue to unmask the IRQ path while waiting. The generated execution contract keeps the asynchronous hardware mechanism in the runtime while the generated CFG remains responsible only for linked control-flow targets.
 
 ## Cartridge saves
 
