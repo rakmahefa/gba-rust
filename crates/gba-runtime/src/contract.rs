@@ -22,7 +22,12 @@ struct GeneratedTraceConfig {
 impl GeneratedTraceConfig {
     fn from_env() -> Self {
         let enabled = env::var(GENERATED_TRACE_ENV)
-            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
             .unwrap_or(false);
         let limit = env::var(GENERATED_TRACE_LIMIT_ENV)
             .ok()

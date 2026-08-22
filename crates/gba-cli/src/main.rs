@@ -49,10 +49,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--execute" => execute = true,
             "--max-steps" => {
-                max_steps = args
-                    .next()
-                    .ok_or("--max-steps requires a value")?
-                    .parse()?;
+                max_steps = args.next().ok_or("--max-steps requires a value")?.parse()?;
             }
             "--image" => {
                 image = ImageArg::parse(&args.next().ok_or("--image requires rom or bios")?)?;
@@ -66,9 +63,8 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     }
 
     Ok(Args {
-        rom_path: rom_path.unwrap_or_else(|| {
-            PathBuf::from("roms/1636 - Pokemon Fire Red (U)(Squirrels).gba")
-        }),
+        rom_path: rom_path
+            .unwrap_or_else(|| PathBuf::from("roms/1636 - Pokemon Fire Red (U)(Squirrels).gba")),
         execute,
         max_steps,
         image,
@@ -220,7 +216,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "executing generated image: image={:?}, max_steps={}, dispatcher=linked CFG",
             args.image, args.max_steps
         );
-        execute_generated_image(&generated.source, &args.rom_path, args.image, args.max_steps)?;
+        execute_generated_image(
+            &generated.source,
+            &args.rom_path,
+            args.image,
+            args.max_steps,
+        )?;
         return Ok(());
     }
 

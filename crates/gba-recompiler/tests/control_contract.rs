@@ -1,6 +1,6 @@
 use gba_recompiler::{
-    analyze, build_semantic_program, discover_functions, IrControlEffect, Mode, ROM_BASE,
-    SemanticTerminator,
+    analyze, build_semantic_program, discover_functions, IrControlEffect, Mode, SemanticTerminator,
+    ROM_BASE,
 };
 
 fn arm_rom(words: &[u32]) -> Vec<u8> {
@@ -16,12 +16,7 @@ fn thumb_rom(halfwords: &[u16]) -> Vec<u8> {
 
 #[test]
 fn arm_swi_creates_a_terminal_semantic_block_with_continuation() {
-    let rom = arm_rom(&[
-        0xef00_0012,
-        0xe1a0_0000,
-        0xef00_0034,
-        0xe1a0_1001,
-    ]);
+    let rom = arm_rom(&[0xef00_0012, 0xe1a0_0000, 0xef00_0034, 0xe1a0_1001]);
     let program = analyze(&rom, ROM_BASE, Mode::Arm).expect("ARM CFG analysis should succeed");
     let functions = discover_functions(&program);
     let semantic = build_semantic_program(&program, &functions)
@@ -34,7 +29,12 @@ fn arm_swi_creates_a_terminal_semantic_block_with_continuation() {
         .collect::<Vec<_>>();
     let swi_blocks = blocks
         .iter()
-        .filter(|block| matches!(block.terminator, SemanticTerminator::SoftwareInterrupt { .. }))
+        .filter(|block| {
+            matches!(
+                block.terminator,
+                SemanticTerminator::SoftwareInterrupt { .. }
+            )
+        })
         .collect::<Vec<_>>();
 
     assert_eq!(swi_blocks.len(), 2);
@@ -61,7 +61,12 @@ fn thumb_swi_creates_a_terminal_semantic_block_with_continuation() {
         .functions
         .iter()
         .flat_map(|function| function.blocks.iter())
-        .filter(|block| matches!(block.terminator, SemanticTerminator::SoftwareInterrupt { .. }))
+        .filter(|block| {
+            matches!(
+                block.terminator,
+                SemanticTerminator::SoftwareInterrupt { .. }
+            )
+        })
         .collect::<Vec<_>>();
 
     assert_eq!(swi_blocks.len(), 2);

@@ -245,19 +245,27 @@ pub fn service_pending_irq(cpu: &mut crate::cpu::Cpu, interrupts: &InterruptCont
     true
 }
 
-pub fn in_range(address: u32, start: u32, end: u32) -> bool {
-    (start..=end).contains(&address)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cpu::{Cpu, CpuMode, REG_PC, REG_SP};
 
-    type TestMemory = ([u8; 0x100], [u8; 0x8000], [u8; 0x400], [u8; 0x18000], [u8; 0x400]);
+    type TestMemory = (
+        [u8; 0x100],
+        [u8; 0x8000],
+        [u8; 0x400],
+        [u8; 0x18000],
+        [u8; 0x400],
+    );
 
     fn memory() -> TestMemory {
-        ([0; 0x100], [0; 0x8000], [0; 0x400], [0; 0x18000], [0; 0x400])
+        (
+            [0; 0x100],
+            [0; 0x8000],
+            [0; 0x400],
+            [0; 0x18000],
+            [0; 0x400],
+        )
     }
 
     fn bios_memory<'a>(

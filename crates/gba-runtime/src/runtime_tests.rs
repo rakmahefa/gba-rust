@@ -1,10 +1,6 @@
 use super::*;
-use crate::bios::{
-    BiosResult, BiosSwi, HALTCNT, IE, IF, IME, IRQ_HBLANK, IRQ_VBLANK,
-};
-use crate::cpu::{
-    CPSR_C, CPSR_N, CPSR_V, CPSR_Z, CpuMode, ExceptionKind, REG_LR, REG_PC, REG_SP,
-};
+use crate::bios::{BiosResult, BiosSwi, HALTCNT, IE, IF, IME, IRQ_HBLANK, IRQ_VBLANK};
+use crate::cpu::{CpuMode, ExceptionKind, CPSR_C, CPSR_N, CPSR_V, CPSR_Z, REG_LR, REG_PC, REG_SP};
 
 #[test]
 fn compare_updates_all_nzcv_flags() {
@@ -116,19 +112,14 @@ fn swi_exception_saves_cpsr_and_restores_banks() {
 #[test]
 fn generated_engine_dispatches_iteratively_without_recursive_calls() {
     let mut runtime = Runtime::new();
-    let result = runtime.run_generated(
-        0x0800_0000,
-        false,
-        Some(10_000),
-        |rt, address, thumb| {
-            rt.tick(1);
-            if rt.cycles == 10_000 {
-                Err("done")
-            } else {
-                Ok((address, thumb))
-            }
-        },
-    );
+    let result = runtime.run_generated(0x0800_0000, false, Some(10_000), |rt, address, thumb| {
+        rt.tick(1);
+        if rt.cycles == 10_000 {
+            Err("done")
+        } else {
+            Ok((address, thumb))
+        }
+    });
     assert_eq!(result, Err("done"));
     assert_eq!(runtime.cycles, 10_000);
 }

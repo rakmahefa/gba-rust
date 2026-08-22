@@ -61,13 +61,7 @@ pub struct ImageMapping {
 }
 
 impl ImageMapping {
-    pub const fn new(
-        kind: ImageKind,
-        base: u32,
-        size: u32,
-        entry: u32,
-        entry_mode: Mode,
-    ) -> Self {
+    pub const fn new(kind: ImageKind, base: u32, size: u32, entry: u32, entry_mode: Mode) -> Self {
         Self {
             kind,
             base,
@@ -188,8 +182,7 @@ impl AddressSpace {
             region: mapping.kind.region(),
             range,
         });
-        self.regions
-            .sort_by_key(|region| region.range.start);
+        self.regions.sort_by_key(|region| region.range.start);
         Ok(())
     }
 }

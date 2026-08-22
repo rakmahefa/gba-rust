@@ -1,7 +1,7 @@
+use super::Runtime;
 use crate::arm7tdmi;
 use crate::bios::PowerState;
 use crate::cpu::REG_PC;
-use super::Runtime;
 
 impl Runtime {
     pub fn step_recompiled(&mut self, cycles: u32) {

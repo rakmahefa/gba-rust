@@ -68,10 +68,16 @@ fn validate_instruction(
         ));
     }
     if source.ops != semantic.ops {
-        return Err(format!("block {} instruction operations changed", block_id.0));
+        return Err(format!(
+            "block {} instruction operations changed",
+            block_id.0
+        ));
     }
     if semantic.ops.is_empty() {
-        return Err(format!("block {} contains an empty semantic instruction", block_id.0));
+        return Err(format!(
+            "block {} contains an empty semantic instruction",
+            block_id.0
+        ));
     }
     if source.reads() != semantic.reads {
         return Err(format!("block {} instruction reads changed", block_id.0));
@@ -149,12 +155,11 @@ fn successor_matches_target(program: &Program, block: &SemanticBlock, target: u3
 }
 
 fn validate_block_against_source(program: &Program, block: &SemanticBlock) -> Result<(), String> {
-    let source = program.cfg.blocks.get(block.id.0).ok_or_else(|| {
-        format!(
-            "semantic block {} does not exist in source CFG",
-            block.id.0
-        )
-    })?;
+    let source = program
+        .cfg
+        .blocks
+        .get(block.id.0)
+        .ok_or_else(|| format!("semantic block {} does not exist in source CFG", block.id.0))?;
     if source.id != block.id {
         return Err(format!(
             "semantic block {} has mismatched source identity",
@@ -300,10 +305,7 @@ fn validate_terminator(program: &Program, block: &SemanticBlock) -> Result<(), S
         | SemanticTerminator::Unknown
             if !block.successors.is_empty() =>
         {
-            Err(format!(
-                "terminating block {} has successors",
-                block.id.0
-            ))
+            Err(format!("terminating block {} has successors", block.id.0))
         }
         _ => Ok(()),
     }
@@ -338,10 +340,7 @@ fn validate_function_metadata(
             ));
         }
         if function.entry != source.entry {
-            return Err(format!(
-                "semantic function {} entry changed",
-                function.id.0
-            ));
+            return Err(format!("semantic function {} entry changed", function.id.0));
         }
         let semantic_block_ids = function
             .blocks
@@ -378,7 +377,11 @@ fn validate_function_metadata(
                 function.id.0
             ));
         }
-        if function.blocks.iter().all(|block| block.id != function.entry) {
+        if function
+            .blocks
+            .iter()
+            .all(|block| block.id != function.entry)
+        {
             return Err(format!(
                 "function {} does not contain its entry block {}",
                 function.id.0, function.entry.0

@@ -7,7 +7,12 @@ use super::common::block_name;
 use super::ops::emit_op;
 use super::terminators::emit_terminator;
 
-pub fn emit_block(out: &mut String, program: &Program, semantic: &SemanticProgram, block_id: BlockId) {
+pub fn emit_block(
+    out: &mut String,
+    program: &Program,
+    semantic: &SemanticProgram,
+    block_id: BlockId,
+) {
     let block = semantic
         .functions
         .iter()
@@ -19,7 +24,13 @@ pub fn emit_block(out: &mut String, program: &Program, semantic: &SemanticProgra
     let _ = writeln!(out, "#[inline(always)]\nfn {name}(rt: &mut Runtime) -> Result<GeneratedBlockExit, &'static str> {{");
     for (instruction, source_ir) in block.instructions.iter().zip(&source.ir) {
         for op in &instruction.ops {
-            emit_op(out, instruction.address, source_ir.source_raw, block.mode, op);
+            emit_op(
+                out,
+                instruction.address,
+                source_ir.source_raw,
+                block.mode,
+                op,
+            );
         }
     }
     emit_terminator(out, block, program);

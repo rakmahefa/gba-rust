@@ -1,6 +1,6 @@
+use super::Runtime;
 use crate::arm7tdmi::{self, Nzcv, ShiftKind, ShiftResult};
 use crate::cpu::{CpuMode, ExceptionKind, REG_LR, REG_PC};
-use super::Runtime;
 
 impl Runtime {
     pub fn load_cartridge(&mut self, cartridge: crate::cartridge::Cartridge) {

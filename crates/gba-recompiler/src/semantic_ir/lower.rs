@@ -4,8 +4,8 @@ use crate::function::FunctionControlFlowGraph;
 use crate::ir::{IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth};
 
 use super::{
-    MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram,
-    SemanticTerminator,
+    MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction,
+    SemanticProgram, SemanticTerminator,
 };
 
 fn memory_width(width: IrMemoryWidth) -> MemoryWidth {
@@ -141,17 +141,17 @@ pub fn build_semantic_program(
     for function in &functions.functions {
         let mut blocks = Vec::with_capacity(function.blocks.len());
         for &block_id in &function.blocks {
-            let block = program
-                .cfg
-                .blocks
-                .get(block_id.0)
-                .ok_or_else(|| {
-                    format!(
-                        "function {} references missing block {}",
-                        function.id.0, block_id.0
-                    )
-                })?;
-            let instructions = block.ir.iter().map(semantic_instruction).collect::<Vec<_>>();
+            let block = program.cfg.blocks.get(block_id.0).ok_or_else(|| {
+                format!(
+                    "function {} references missing block {}",
+                    function.id.0, block_id.0
+                )
+            })?;
+            let instructions = block
+                .ir
+                .iter()
+                .map(semantic_instruction)
+                .collect::<Vec<_>>();
             let mut semantic = SemanticBlock {
                 id: block.id,
                 address: block.key.address,

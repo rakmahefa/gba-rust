@@ -24,9 +24,9 @@ pub(super) fn collect_leaders(
 
     let mut leaders = leaders.into_iter().collect::<Vec<_>>();
     leaders.sort_by(|a, b| {
-        a.address
-            .cmp(&b.address)
-            .then_with(|| super::discovery::sort_mode(a.mode).cmp(&super::discovery::sort_mode(b.mode)))
+        a.address.cmp(&b.address).then_with(|| {
+            super::discovery::sort_mode(a.mode).cmp(&super::discovery::sort_mode(b.mode))
+        })
     });
     leaders
 }

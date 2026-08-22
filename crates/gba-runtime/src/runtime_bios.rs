@@ -1,8 +1,8 @@
+use super::Runtime;
 use crate::bios::{
     execute_swi as execute_bios_swi, service_pending_irq, BiosMemory, BiosResult, BiosSwi,
     PowerState, IRQ_VBLANK,
 };
-use super::Runtime;
 
 impl Runtime {
     pub fn bios_swi(&mut self, swi: BiosSwi) -> BiosResult {

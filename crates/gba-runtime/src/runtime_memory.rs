@@ -1,6 +1,6 @@
-use crate::arm7tdmi;
-use crate::bios::{HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT, PowerState};
 use super::Runtime;
+use crate::arm7tdmi;
+use crate::bios::{PowerState, HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT};
 
 const KEYINPUT_HIGH: u32 = KEYINPUT + 1;
 const WAITCNT_HIGH: u32 = WAITCNT + 1;

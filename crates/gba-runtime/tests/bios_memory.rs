@@ -18,7 +18,15 @@ fn load_bios_maps_bytes_at_zero() {
 #[test]
 fn bios_reads_support_all_runtime_widths() {
     let mut runtime = Runtime::new();
-    runtime.load_bios(&[0x78, 0x56, 0x34, 0x12].into_iter().chain(std::iter::repeat(0)).take(BIOS_SIZE).collect::<Vec<_>>()).unwrap();
+    runtime
+        .load_bios(
+            &[0x78, 0x56, 0x34, 0x12]
+                .into_iter()
+                .chain(std::iter::repeat(0))
+                .take(BIOS_SIZE)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
 
     assert_eq!(runtime.read8(0), 0x78);
     assert_eq!(runtime.read16(0), 0x5678);

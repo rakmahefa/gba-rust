@@ -1,6 +1,4 @@
-use gba_runtime::{
-    GeneratedBlockExit, GeneratedExecutionExit, Runtime, RuntimeContract,
-};
+use gba_runtime::{GeneratedBlockExit, GeneratedExecutionExit, Runtime, RuntimeContract};
 
 #[test]
 fn max_steps_counts_blocks_not_runtime_cycles() {
