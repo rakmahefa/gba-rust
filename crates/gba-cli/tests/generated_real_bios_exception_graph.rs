@@ -32,11 +32,14 @@ fn real_bios_builds_exception_graph_and_executes_irq_vector() {
         0,
         Mode::Arm,
     );
-    let graph = analyze_exception_graph(REAL_BIOS, mapping).expect("real BIOS exception graph must analyze");
+    let graph = analyze_exception_graph(REAL_BIOS, mapping)
+        .expect("real BIOS exception graph must analyze");
 
     assert_eq!(graph.nodes.len(), ExceptionVectorKind::ALL.len());
     for kind in ExceptionVectorKind::ALL {
-        let node = graph.node(kind).expect("every architectural vector must be present");
+        let node = graph
+            .node(kind)
+            .expect("every architectural vector must be present");
         assert_eq!(node.vector, kind.vector());
         assert!(!node.program.cfg.blocks.is_empty());
     }
@@ -56,7 +59,8 @@ fn real_bios_builds_exception_graph_and_executes_irq_vector() {
         ExceptionVectorKind::Irq.vector(),
         Mode::Arm,
     );
-    let irq_program = analyze_with_mapping(REAL_BIOS, irq_mapping).expect("real BIOS IRQ vector must analyze");
+    let irq_program = analyze_with_mapping(REAL_BIOS, irq_mapping)
+        .expect("real BIOS IRQ vector must analyze");
     let generated = generate(&irq_program, "gba_irq_entry");
     assert!(generated.source.contains("GeneratedBlockExit"));
     assert!(generated.source.contains("return_from_exception"));
@@ -75,7 +79,8 @@ fn real_bios_builds_exception_graph_and_executes_irq_vector() {
         .expect("resolve gba-runtime path");
     let bios_path = root.join("gba_bios.bin");
     fs::write(&bios_path, REAL_BIOS).expect("write real BIOS fixture");
-    fs::write(src.join("gba_generated.rs"), generated.source).expect("write generated IRQ module");
+    fs::write(src.join("gba_generated.rs"), generated.source)
+        .expect("write generated IRQ module");
     fs::write(
         root.join("Cargo.toml"),
         format!(
@@ -99,7 +104,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.load_bios(&bios)?;
 
     let caller_cpsr = runtime.cpu.cpsr;
-    let (vector, thumb) = runtime.raise_exception_at_boundary(ExceptionKind::Irq, 0x0000_0100, false);
+    let (vector, thumb) =
+        runtime.raise_exception_at_boundary(ExceptionKind::Irq, 0x0000_0100, false);
     assert_eq!((vector, thumb), (0x18, false));
     assert_eq!(runtime.mode(), CpuMode::Irq);
     assert_eq!(runtime.cpu.r[REG_PC], 0x18);
