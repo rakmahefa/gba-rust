@@ -6,7 +6,7 @@ use std::{
 };
 
 use gba_recompiler::{analyze_with_mapping, generate, ImageKind, ImageMapping, Mode};
-use gba_runtime::{Cartridge, GeneratedExecutionExit, Runtime};
+use gba_runtime::{Cartridge, Runtime};
 
 const REAL_ROM_ENV: &str = "GBA_REAL_ROM";
 const DEFAULT_STEP_LIMIT: u64 = 512;
@@ -130,7 +130,7 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
 
     assert_eq!(program.entry.0, 0);
     assert_eq!(program.cfg.blocks[0].key.address, CARTRIDGE_BASE);
-    assert!(!program.cfg.blocks[0].key.thumb);
+    assert_eq!(program.cfg.blocks[0].key.mode, Mode::Arm);
     assert!(!program.cfg.blocks.is_empty());
     assert!(
         program
