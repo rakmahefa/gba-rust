@@ -86,7 +86,11 @@ impl Runtime {
     }
 
     pub(crate) fn complete_dma(&mut self, channel: u8) {
-        let Some(active) = self.dma.active() else { return; };
+        if channel >= 4 { return; }
+        let Some(active) = self.dma.active() else {
+            self.interrupts.request(1 << (8 + channel));
+            return;
+        };
         if active != channel as usize { return; }
         let irq = self.dma.channels[active].control & 0x4000 != 0;
         self.dma.complete();
