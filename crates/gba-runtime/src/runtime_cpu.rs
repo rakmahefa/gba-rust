@@ -86,13 +86,7 @@ impl Runtime {
         self.set_flags(flags);
     }
 
-    pub fn shift(
-        &self,
-        value: u32,
-        kind: ShiftKind,
-        amount: u8,
-        register_shift: bool,
-    ) -> ShiftResult {
+    pub fn shift(&self, value: u32, kind: ShiftKind, amount: u8, register_shift: bool) -> ShiftResult {
         let carry = self.cpu.nzcv().c;
         if register_shift {
             arm7tdmi::shift_register(value, kind, amount, carry)
@@ -137,6 +131,23 @@ impl Runtime {
         } else {
             self.read_reg(REG_PC).wrapping_sub(4)
         };
+        self.cpu.switch_mode(kind.mode());
+        self.cpu.set_spsr(old_cpsr);
+        self.cpu.cpsr |= kind.masks();
+        self.cpu.set_thumb(false);
+        self.cpu.r[REG_LR] = return_address;
+        self.cpu.r[REG_PC] = kind.vector();
+        (kind.vector(), false)
+    }
+
+    pub fn raise_exception_at_boundary(
+        &mut self,
+        kind: ExceptionKind,
+        resume_address: u32,
+        resume_thumb: bool,
+    ) -> (u32, bool) {
+        let old_cpsr = self.cpu.cpsr;
+        let return_address = resume_address.wrapping_add(if resume_thumb { 2 } else { 4 });
         self.cpu.switch_mode(kind.mode());
         self.cpu.set_spsr(old_cpsr);
         self.cpu.cpsr |= kind.masks();
