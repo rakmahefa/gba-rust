@@ -23,8 +23,25 @@ fn unique_runner_dir() -> PathBuf {
     ))
 }
 
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("resolve workspace root")
+}
+
 fn real_rom_path() -> Option<PathBuf> {
-    env::var_os(REAL_ROM_ENV).map(PathBuf::from)
+    let configured = env::var_os(REAL_ROM_ENV).map(PathBuf::from)?;
+    if configured.is_absolute() {
+        return Some(configured);
+    }
+
+    let workspace_relative = workspace_root().join(configured);
+    if workspace_relative.exists() {
+        Some(workspace_relative)
+    } else {
+        Some(PathBuf::from(env::var_os(REAL_ROM_ENV).unwrap()))
+    }
 }
 
 fn real_rom_mapping(size: usize) -> ImageMapping {
@@ -41,11 +58,7 @@ fn write_generated_runner(root: &Path, source: &str) {
     let src = root.join("src");
     fs::create_dir_all(&src).expect("create generated real-ROM runner");
 
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("resolve workspace root");
-    let runtime_path = workspace_root
+    let runtime_path = workspace_root()
         .join("crates/gba-runtime")
         .canonicalize()
         .expect("resolve gba-runtime path");
@@ -114,7 +127,12 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
         return;
     };
 
-    let rom = fs::read(&path).expect("GBA_REAL_ROM must point to a readable ROM");
+    let rom = fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "{REAL_ROM_ENV} points to unreadable ROM {}: {error}",
+            path.display()
+        )
+    });
     assert!(
         rom.len() >= 0xc0,
         "real GBA ROM must contain the minimum cartridge header"
