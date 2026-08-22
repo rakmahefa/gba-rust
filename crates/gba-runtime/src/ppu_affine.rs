@@ -323,17 +323,29 @@ fn bgr555_to_rgba(value: u16) -> u32 {
 mod tests {
     use super::*;
 
+    fn put_u16(io: &mut HashMap<u32, u8>, address: u32, value: u16) {
+        let [lo, hi] = value.to_le_bytes();
+        io.insert(address, lo);
+        io.insert(address + 1, hi);
+    }
+
+    fn put_u32(io: &mut HashMap<u32, u8>, address: u32, value: u32) {
+        for (offset, byte) in value.to_le_bytes().into_iter().enumerate() {
+            io.insert(address + offset as u32, byte);
+        }
+    }
+
     #[test]
     fn identity_affine_mapping_renders_tile_zero() {
         let mut ppu = Ppu::default();
         let mut vram = vec![0; 0x18000];
         let mut palette = vec![0; 0x400];
         let mut io = HashMap::new();
-        io.insert(BG2CNT, 0x4000);
-        io.insert(BG2PA, 0x0100);
-        io.insert(BG2PB, 0);
-        io.insert(BG2PC, 0);
-        io.insert(BG2PD, 0x0100);
+        put_u16(&mut io, BG2CNT, 0x4000);
+        put_u16(&mut io, BG2PA, 0x0100);
+        put_u16(&mut io, BG2PB, 0);
+        put_u16(&mut io, BG2PC, 0);
+        put_u16(&mut io, BG2PD, 0x0100);
         palette[2] = 0x1f;
         vram[0] = 1;
         vram[0x4000] = 1;
@@ -347,11 +359,11 @@ mod tests {
         let mut vram = vec![0; 0x18000];
         let mut palette = vec![0; 0x400];
         let mut io = HashMap::new();
-        io.insert(BG2CNT, 0x4000);
-        io.insert(BG2PA, 0x0100);
-        io.insert(BG2PB, 0);
-        io.insert(BG2PC, 0);
-        io.insert(BG2PD, 0x0100);
+        put_u16(&mut io, BG2CNT, 0x4000);
+        put_u16(&mut io, BG2PA, 0x0100);
+        put_u16(&mut io, BG2PB, 0);
+        put_u16(&mut io, BG2PC, 0);
+        put_u16(&mut io, BG2PD, 0x0100);
         palette[2] = 0x1f;
         vram[1] = 1;
         vram[0x4000 + 64] = 1;
@@ -365,12 +377,12 @@ mod tests {
         let vram = vec![0; 0x18000];
         let palette = vec![0; 0x400];
         let mut io = HashMap::new();
-        io.insert(BG2CNT, 0x4000);
-        io.insert(BG2PA, 0x0100);
-        io.insert(BG2PB, 0);
-        io.insert(BG2PC, 0);
-        io.insert(BG2PD, 0x0100);
-        io.insert(BG2X, 0xffff_ff00);
+        put_u16(&mut io, BG2CNT, 0x4000);
+        put_u16(&mut io, BG2PA, 0x0100);
+        put_u16(&mut io, BG2PB, 0);
+        put_u16(&mut io, BG2PC, 0);
+        put_u16(&mut io, BG2PD, 0x0100);
+        put_u32(&mut io, BG2X, 0xffff_ff00);
         ppu.render_affine_mode_scanline(BG2_ENABLE | 1, 0, &vram, &palette, &io);
         assert_eq!(ppu.framebuffer[0], 0xff00_0000);
     }
