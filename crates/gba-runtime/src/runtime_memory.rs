@@ -76,7 +76,9 @@ impl Runtime {
 
         match address {
             mmio::DISPCNT => {
-                self.dispcnt = (self.dispcnt & 0xff00) | u16::from(value);
+                // DISPCNT bit 3 is read-only. Byte writes must preserve it.
+                self.dispcnt =
+                    (self.dispcnt & 0x0008) | (u16::from(value) & 0x00f7);
             }
             mmio::DISPCNT_HI => {
                 self.dispcnt = (self.dispcnt & 0x00ff) | (u16::from(value) << 8);
@@ -217,7 +219,9 @@ impl Runtime {
             }
             BusRegion::CartridgeSave => self.write8(address, value.to_le_bytes()[0]),
             _ if address == mmio::DISPCNT => {
-                self.dispcnt = value & mmio::DISPCNT_WRITABLE_MASK;
+                // DISPCNT bit 3 is read-only and retains its previous value.
+                self.dispcnt = (self.dispcnt & 0x0008)
+                    | (value & mmio::DISPCNT_WRITABLE_MASK & !0x0008);
             }
             _ if address == mmio::DISPSTAT => {
                 self.dispstat = (self.dispstat & mmio::DISPSTAT_STATUS_MASK)
