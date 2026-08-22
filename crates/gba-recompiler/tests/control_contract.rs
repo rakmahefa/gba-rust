@@ -1,4 +1,7 @@
-use gba_recompiler::{build_semantic_program, discover_functions, analyze, Mode, ROM_BASE, SemanticTerminator};
+use gba_recompiler::{
+    analyze, build_semantic_program, discover_functions, IrControlEffect, Mode, ROM_BASE,
+    SemanticTerminator,
+};
 
 fn arm_rom(words: &[u32]) -> Vec<u8> {
     words.iter().flat_map(|word| word.to_le_bytes()).collect()
@@ -40,7 +43,9 @@ fn arm_swi_creates_a_terminal_semantic_block_with_continuation() {
         block
             .instructions
             .iter()
-            .filter(|instruction| !matches!(instruction.control_effect(), gba_recompiler::IrControlEffect::None))
+            .filter(|instruction| {
+                !matches!(instruction.control_effect(), IrControlEffect::None)
+            })
             .count()
             <= 1
     }));
@@ -54,7 +59,8 @@ fn thumb_swi_creates_a_terminal_semantic_block_with_continuation() {
         0xdf34, // SWI 0x34
         0x1c09, // ADD r1, r1, #0
     ]);
-    let program = analyze(&rom, ROM_BASE, Mode::Thumb).expect("Thumb CFG analysis should succeed");
+    let program =
+        analyze(&rom, ROM_BASE, Mode::Thumb).expect("Thumb CFG analysis should succeed");
     let functions = discover_functions(&program);
     let semantic = build_semantic_program(&program, &functions)
         .expect("Thumb semantic control contract should accept separated SWIs");
