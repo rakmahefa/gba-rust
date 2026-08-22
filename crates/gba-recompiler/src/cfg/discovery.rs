@@ -10,7 +10,7 @@ use super::model::{BlockKey, DiscoveredInstruction};
 const DEBUG_ABSTRACT_STATE_ADDRESS: u32 = 0x0000_0118;
 
 fn debug_abstract_state(
-    key: BlockKey,
+    key: &BlockKey,
     state_before: AbstractState,
     state_after: AbstractState,
     successors: &[BlockKey],
@@ -41,10 +41,11 @@ pub(super) fn discover_reachable(
     while let Some(key) = queue.pop_front() {
         let state = states.get(&key).copied().unwrap_or_default();
         let instruction = decode_at(rom, key.clone(), mapping)?;
-        let state_after = super::abstract_state::transfer_instruction(rom, instruction, state, mapping);
+        let state_after =
+            super::abstract_state::transfer_instruction(rom, instruction, state, mapping);
         let successors = instruction_successors(rom, instruction, state_after, mapping);
 
-        debug_abstract_state(key, state, state_after, &successors);
+        debug_abstract_state(&key, state, state_after, &successors);
 
         if !discovered.contains_key(&key) {
             order.push(key.clone());
