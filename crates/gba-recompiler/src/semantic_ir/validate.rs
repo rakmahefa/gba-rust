@@ -61,9 +61,6 @@ fn validate_instruction(
     if source.address != semantic.address || source.size != semantic.size {
         return Err(format!("block {} instruction identity changed", block_id.0));
     }
-    if semantic.ops.is_empty() {
-        return Err(format!("block {} contains an empty semantic instruction", block_id.0));
-    }
     if source.control() != semantic.control_effect() {
         return Err(format!(
             "block {} instruction control effect changed",
@@ -72,6 +69,9 @@ fn validate_instruction(
     }
     if source.ops != semantic.ops {
         return Err(format!("block {} instruction operations changed", block_id.0));
+    }
+    if semantic.ops.is_empty() {
+        return Err(format!("block {} contains an empty semantic instruction", block_id.0));
     }
     if source.reads() != semantic.reads {
         return Err(format!("block {} instruction reads changed", block_id.0));
@@ -150,7 +150,10 @@ fn successor_matches_target(program: &Program, block: &SemanticBlock, target: u3
 
 fn validate_block_against_source(program: &Program, block: &SemanticBlock) -> Result<(), String> {
     let source = program.cfg.blocks.get(block.id.0).ok_or_else(|| {
-        format!("semantic block {} does not exist in source CFG", block.id.0)
+        format!(
+            "semantic block {} does not exist in source CFG",
+            block.id.0
+        )
     })?;
     if source.id != block.id {
         return Err(format!(
@@ -174,7 +177,10 @@ fn validate_block_against_source(program: &Program, block: &SemanticBlock) -> Re
         validate_instruction(source_ir, semantic_instruction, block.id)?;
     }
     if block.instructions.is_empty() {
-        return Err(format!("block {} contains no semantic instructions", block.id.0));
+        return Err(format!(
+            "block {} contains no semantic instructions",
+            block.id.0
+        ));
     }
     validate_control_placement(block)?;
     Ok(())
@@ -284,10 +290,13 @@ fn validate_terminator(program: &Program, block: &SemanticBlock) -> Result<(), S
         SemanticTerminator::Return
         | SemanticTerminator::IndirectBranch { .. }
         | SemanticTerminator::Unknown
-            if !block.successors.is_empty() => Err(format!(
-            "terminating block {} has successors",
-            block.id.0
-        )),
+            if !block.successors.is_empty() =>
+        {
+            Err(format!(
+                "terminating block {} has successors",
+                block.id.0
+            ))
+        }
         _ => Ok(()),
     }
 }
@@ -326,13 +335,12 @@ fn validate_function_metadata(
                 function.id.0
             ));
         }
-        if function.blocks.len() != source.blocks.len()
-            || function
-                .blocks
-                .iter()
-                .map(|block| block.id)
-                .ne(source.blocks.iter().copied())
-        {
+        let semantic_block_ids = function
+            .blocks
+            .iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>();
+        if semantic_block_ids != source.blocks {
             return Err(format!(
                 "semantic function {} block membership changed",
                 function.id.0
