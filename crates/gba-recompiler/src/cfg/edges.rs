@@ -1,7 +1,7 @@
 use crate::address_space::ImageMapping;
 use crate::decoder::{
-    ArmExtended, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode,
-    ThumbExtended, ThumbOp,
+    ArmExtended, ArmOp, Condition, DecodeError, Instruction, InstructionKind, Mode, ThumbExtended,
+    ThumbOp,
 };
 
 use super::abstract_state::{resolved_exchange_target, AbstractState};
@@ -9,9 +9,7 @@ use super::model::BlockKey;
 
 pub(super) fn next_key(instruction: Instruction) -> BlockKey {
     BlockKey {
-        address: instruction
-            .address
-            .wrapping_add(instruction.size as u32),
+        address: instruction.address.wrapping_add(instruction.size as u32),
         mode: instruction.mode,
     }
 }
@@ -84,8 +82,8 @@ pub(super) fn instruction_successors(
         }
         InstructionKind::Arm(ArmOp::Extended(
             ArmExtended::CoprocessorRegisterTransfer { .. }
-                | ArmExtended::CoprocessorTransfer { .. }
-                | ArmExtended::CoprocessorData { .. },
+            | ArmExtended::CoprocessorTransfer { .. }
+            | ArmExtended::CoprocessorData { .. },
         )) => {
             // The GBA ARM7TDMI has no executable coprocessor implementation in
             // this runtime. Keep these instructions as decoded IR, but do not
@@ -111,13 +109,12 @@ pub(super) fn instruction_successors(
                 next,
             ]
         }
-        InstructionKind::Thumb(ThumbOp::BranchExchange { rm }) => resolved_exchange_target(
-            state,
-            rm,
-        )
-        .filter(|target| in_image(mapping, target.address))
-        .into_iter()
-        .collect(),
+        InstructionKind::Thumb(ThumbOp::BranchExchange { rm }) => {
+            resolved_exchange_target(state, rm)
+                .filter(|target| in_image(mapping, target.address))
+                .into_iter()
+                .collect()
+        }
         InstructionKind::Arm(ArmOp::Unknown) | InstructionKind::Thumb(ThumbOp::Unknown) => {
             Vec::new()
         }
@@ -134,10 +131,7 @@ pub(super) fn is_call(instruction: Instruction) -> bool {
     )
 }
 
-pub(super) fn is_fallthrough(
-    instruction: Instruction,
-    successors: &[BlockKey],
-) -> bool {
+pub(super) fn is_fallthrough(instruction: Instruction, successors: &[BlockKey]) -> bool {
     successors.len() == 1
         && successors[0] == next_key(instruction)
         && !is_call(instruction)
@@ -157,7 +151,8 @@ pub(super) fn decode_at(
         Mode::Thumb => {
             let raw = crate::decoder::read_thumb_at(rom, mapping.base, key.address)?;
             if (raw & 0xF800) == 0xF000 {
-                let (first, second) = crate::decoder::read_thumb_bl_at(rom, mapping.base, key.address)?;
+                let (first, second) =
+                    crate::decoder::read_thumb_bl_at(rom, mapping.base, key.address)?;
                 Ok(crate::decoder::decode_thumb_bl(key.address, first, second))
             } else {
                 Ok(crate::decoder::decode_thumb(key.address, raw))

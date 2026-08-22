@@ -6,6 +6,7 @@ use super::common::{block_name, mode_bool};
 
 pub fn emit_dispatcher(out: &mut String, semantic: &SemanticProgram) {
     let _ = writeln!(out, "fn dispatch_block(rt: &mut Runtime, address: u32, thumb: bool) -> Result<GeneratedBlockExit, &'static str> {{");
+    let _ = writeln!(out, "    if rt.generated_irq_pending() {{ rt.enter_instruction(address, thumb); return Ok(GeneratedBlockExit::exception(gba_runtime::ExceptionKind::Irq)); }}");
     let _ = writeln!(out, "    match (address, thumb) {{");
     for function in &semantic.functions {
         for block in &function.blocks {

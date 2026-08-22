@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::bios::{InterruptController, PowerState};
+use super::bios_memory::{Bios, BiosLoadError};
 use super::cartridge::Cartridge;
 use super::cpu::Cpu;
 use super::{Apu, Ppu};
@@ -28,6 +29,7 @@ mod tests;
 #[derive(Debug)]
 pub struct Runtime {
     pub cpu: Cpu,
+    pub bios: Bios,
     pub ppu: Ppu,
     pub apu: Apu,
     pub cartridge: Option<Cartridge>,
@@ -50,6 +52,7 @@ impl Default for Runtime {
     fn default() -> Self {
         Self {
             cpu: Cpu::default(),
+            bios: Bios::default(),
             ppu: Ppu::default(),
             apu: Apu::default(),
             cartridge: None,
@@ -73,5 +76,14 @@ impl Default for Runtime {
 impl Runtime {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn load_bios(&mut self, bytes: &[u8]) -> Result<(), BiosLoadError> {
+        self.bios = Bios::from_bytes(bytes)?;
+        Ok(())
+    }
+
+    pub fn bios(&self) -> &Bios {
+        &self.bios
     }
 }

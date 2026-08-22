@@ -6,7 +6,11 @@ use crate::semantic_ir::{SemanticBlock, SemanticTerminator};
 
 use super::common::{condition_code, mode_bool};
 
-fn fallthrough_target(block: &SemanticBlock, program: &Program, target: u32) -> Option<(u32, Mode)> {
+fn fallthrough_target(
+    block: &SemanticBlock,
+    program: &Program,
+    target: u32,
+) -> Option<(u32, Mode)> {
     block
         .successors
         .iter()
@@ -53,14 +57,24 @@ fn emit_direct_terminator(
         .unwrap_or((block.address, 0));
     let thumb = mode_bool(mode);
     if link {
-        let _ = writeln!(out, "    rt.link_from_instruction({address:#010x}, {size}, {thumb});");
+        let _ = writeln!(
+            out,
+            "    rt.link_from_instruction({address:#010x}, {size}, {thumb});"
+        );
     }
     if condition == Condition::Al {
-        let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb}));");
+        let _ = writeln!(
+            out,
+            "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb}));"
+        );
         return;
     }
     let fallthrough = fallthrough_target(block, program, target);
-    let _ = writeln!(out, "    let branch_taken = rt.condition_code({});", condition_code(condition));
+    let _ = writeln!(
+        out,
+        "    let branch_taken = rt.condition_code({});",
+        condition_code(condition)
+    );
     let _ = writeln!(
         out,
         "    if std::env::var(\"GBA_GENERATED_TRACE\").is_ok() {{ eprintln!(\"[generated-branch] source={address:#010x}/{mode:?} condition={:?} nzcv={{:?}} taken={{}} target={target:#010x} fallthrough={:?}\", rt.nzcv(), branch_taken); }}",
@@ -69,11 +83,60 @@ fn emit_direct_terminator(
     );
     let _ = writeln!(out, "    if branch_taken {{ return Ok(GeneratedBlockExit::continue_to({target:#010x}, {thumb})); }}");
     if let Some((address, next_mode)) = fallthrough {
-        let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({address:#010x}, {}));", mode_bool(next_mode));
+        let _ = writeln!(
+            out,
+            "    return Ok(GeneratedBlockExit::continue_to({address:#010x}, {}));",
+            mode_bool(next_mode)
+        );
     } else {
         let halt = address.wrapping_add(size as u32);
-        let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {thumb}));");
+        let _ = writeln!(
+            out,
+            "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {thumb}));"
+        );
     }
+}
+
+fn emit_software_interrupt(
+    out: &mut String,
+    block: &SemanticBlock,
+    program: &Program,
+    comment: u32,
+) {
+    let thumb = mode_bool(block.mode);
+    let (address, size) = block
+        .instructions
+        .last()
+        .map(|instruction| (instruction.address, instruction.size))
+        .unwrap_or((block.address, 0));
+    let next_pc = address.wrapping_add(size as u32);
+
+    let _ = writeln!(
+        out,
+        "    let bios_result = rt.execute_bios_swi_comment({comment:#010x}, {thumb})?;"
+    );
+    let _ = writeln!(out, "    if bios_result.returned {{");
+    if let Some((target, target_mode)) = source_successor(program, block) {
+        let _ = writeln!(
+            out,
+            "        return Ok(GeneratedBlockExit::continue_to({target:#010x}, {}));",
+            mode_bool(target_mode)
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "        return Ok(GeneratedBlockExit::halt({next_pc:#010x}, {thumb}));"
+        );
+    }
+    let _ = writeln!(out, "    }}");
+    let _ = writeln!(
+        out,
+        "    if let Some(next_pc) = bios_result.next_pc {{ return Ok(GeneratedBlockExit::continue_to(next_pc, bios_result.next_thumb)); }}"
+    );
+    let _ = writeln!(
+        out,
+        "    return Ok(GeneratedBlockExit::halt({next_pc:#010x}, {thumb}));"
+    );
 }
 
 pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Program) {
@@ -88,7 +151,11 @@ pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Progra
         }
         SemanticTerminator::IndirectBranch { register } => {
             if let Some((target, thumb)) = source_successor(program, block) {
-                let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {}));", mode_bool(thumb));
+                let _ = writeln!(
+                    out,
+                    "    return Ok(GeneratedBlockExit::continue_to({target:#010x}, {}));",
+                    mode_bool(thumb)
+                );
             } else {
                 let _ = writeln!(out, "    let (target, thumb) = rt.exchange_target_for_dispatch(rt.read_reg({register})); eprintln!(\"generated dynamic branch: source={address:#010x} register=r{register} target={{target:#010x}} thumb={{thumb}}\"); return Ok(GeneratedBlockExit::dynamic_to(target, thumb));");
             }
@@ -107,18 +174,34 @@ pub fn emit_terminator(out: &mut String, block: &SemanticBlock, program: &Progra
             emit_direct_terminator(out, block, program, target, condition, true)
         }
         SemanticTerminator::Fallthrough => {
-            if let Some(successor) = block.successors.first().and_then(|id| program.cfg.blocks.get(id.0)) {
-                let _ = writeln!(out, "    return Ok(GeneratedBlockExit::continue_to({:#010x}, {}));", successor.key.address, mode_bool(successor.key.mode));
+            if let Some(successor) = block
+                .successors
+                .first()
+                .and_then(|id| program.cfg.blocks.get(id.0))
+            {
+                let _ = writeln!(
+                    out,
+                    "    return Ok(GeneratedBlockExit::continue_to({:#010x}, {}));",
+                    successor.key.address,
+                    mode_bool(successor.key.mode)
+                );
             } else {
                 let halt = address.wrapping_add(size as u32);
-                let _ = writeln!(out, "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {}));", mode_bool(block.mode));
+                let _ = writeln!(
+                    out,
+                    "    return Ok(GeneratedBlockExit::halt({halt:#010x}, {}));",
+                    mode_bool(block.mode)
+                );
             }
         }
-        SemanticTerminator::SoftwareInterrupt { .. } => {
-            let _ = writeln!(out, "    return Err(\"software interrupt execution is not implemented\");");
+        SemanticTerminator::SoftwareInterrupt { comment } => {
+            emit_software_interrupt(out, block, program, comment);
         }
         SemanticTerminator::Unknown => {
-            let _ = writeln!(out, "    return Err(\"generated program reached an unknown terminator\");");
+            let _ = writeln!(
+                out,
+                "    return Err(\"generated program reached an unknown terminator\");"
+            );
         }
     }
 }
@@ -135,11 +218,7 @@ mod tests {
 
     #[test]
     fn resolved_indirect_branch_is_emitted_as_linked_transition() {
-        let rom = arm_rom(&[
-            0xE59F_3000,
-            0xE12F_FF13,
-            ROM_BASE,
-        ]);
+        let rom = arm_rom(&[0xE59F_3000, 0xE12F_FF13, ROM_BASE]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
@@ -172,7 +251,12 @@ mod tests {
             .functions
             .iter()
             .flat_map(|function| function.blocks.iter())
-            .find(|block| matches!(block.terminator, SemanticTerminator::IndirectCall { register: 3, .. }))
+            .find(|block| {
+                matches!(
+                    block.terminator,
+                    SemanticTerminator::IndirectCall { register: 3, .. }
+                )
+            })
             .expect("resolved indirect call block");
 
         let mut generated = String::new();
@@ -195,5 +279,26 @@ mod tests {
         assert!(generated.contains("let branch_taken = rt.condition_code(10);"));
         assert!(generated.contains("[generated-branch]"));
         assert!(generated.contains("branch_taken"));
+    }
+
+    #[test]
+    fn software_interrupt_calls_the_runtime_bios_contract() {
+        let rom = arm_rom(&[0xEF00_0002, 0xE1A0_0000]);
+        let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let block = semantic
+            .functions
+            .iter()
+            .flat_map(|function| function.blocks.iter())
+            .find(|block| matches!(block.terminator, SemanticTerminator::SoftwareInterrupt { comment: 2 }))
+            .expect("software interrupt block");
+
+        let mut generated = String::new();
+        emit_terminator(&mut generated, block, &program);
+
+        assert!(generated.contains("rt.execute_bios_swi_comment(0x00000002, false)?"));
+        assert!(generated.contains("bios_result.returned"));
+        assert!(!generated.contains("software interrupt execution is not implemented"));
     }
 }

@@ -1,6 +1,6 @@
-use crate::arm7tdmi;
-use crate::bios::{HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT, PowerState};
 use super::Runtime;
+use crate::arm7tdmi;
+use crate::bios::{PowerState, HALTCNT, IE, IF, IME, KEYINPUT, WAITCNT};
 
 const KEYINPUT_HIGH: u32 = KEYINPUT + 1;
 const WAITCNT_HIGH: u32 = WAITCNT + 1;
@@ -8,7 +8,7 @@ const WAITCNT_HIGH: u32 = WAITCNT + 1;
 impl Runtime {
     pub fn read8(&self, address: u32) -> u8 {
         match address {
-            0x0000_0000..=0x0000_3fff => 0xff,
+            0x0000_0000..=0x0000_3fff => self.bios.read8(address as usize),
             0x0200_0000..=0x0203_ffff => self.ewram[(address - 0x0200_0000) as usize],
             0x0300_0000..=0x0300_7fff => self.iwram[(address - 0x0300_0000) as usize],
             0x0400_0000..=0x0400_03ff => self.read_mmio8(address),
@@ -95,6 +95,9 @@ impl Runtime {
                         .save
                         .write((address - 0x0e00_0000) as usize, value);
                 }
+            }
+            0x0000_0000..=0x0000_3fff => {
+                // GBA BIOS is read-only from the CPU memory bus.
             }
             _ => {
                 self.io.insert(address, value);

@@ -37,7 +37,12 @@ impl SaveRam {
                 }
             }
         }
-        Self { kind, data, path, dirty: false }
+        Self {
+            kind,
+            data,
+            path,
+            dirty: false,
+        }
     }
 
     pub fn kind(&self) -> SaveType {
@@ -45,7 +50,10 @@ impl SaveRam {
     }
 
     pub fn read(&self, addr: usize) -> u8 {
-        self.data.get(addr % self.data.len().max(1)).copied().unwrap_or(0xff)
+        self.data
+            .get(addr % self.data.len().max(1))
+            .copied()
+            .unwrap_or(0xff)
     }
 
     pub fn write(&mut self, addr: usize, value: u8) {
@@ -105,7 +113,10 @@ impl Cartridge {
                 if stem.is_empty() { "game" } else { &stem }
             )))
         };
-        Self { rom, save: SaveRam::new(kind, path) }
+        Self {
+            rom,
+            save: SaveRam::new(kind, path),
+        }
     }
 }
 

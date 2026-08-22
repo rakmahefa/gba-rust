@@ -43,10 +43,7 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
     )
 }
 
-pub fn analyze_with_mapping(
-    image: &[u8],
-    mapping: ImageMapping,
-) -> Result<Program, AnalysisError> {
+pub fn analyze_with_mapping(image: &[u8], mapping: ImageMapping) -> Result<Program, AnalysisError> {
     if mapping.size != image.len() as u32 {
         return Err(AnalysisError::InvalidEntry(mapping.entry));
     }
@@ -61,11 +58,9 @@ pub fn analyze_with_mapping(
     let (discovered_order, discovered) = discover_reachable(image, entry_key.clone(), mapping)?;
     let leaders = collect_leaders(&discovered, &entry_key);
     let (blocks, ids) = partition_blocks(&discovered, &leaders);
-    let entry_id = *ids
-        .get(&entry_key)
-        .ok_or(AnalysisError::EntryMismatch {
-            entry: mapping.entry,
-        })?;
+    let entry_id = *ids.get(&entry_key).ok_or(AnalysisError::EntryMismatch {
+        entry: mapping.entry,
+    })?;
 
     let cfg = ControlFlowGraph {
         entry: entry_id,
@@ -179,11 +174,11 @@ mod tests {
         let target = ROM_BASE + 12;
         let bytes = arm_rom(&[0xE59F_0000, 0xE12F_FF10, target, 0xE1A0_0000]);
         let program = analyze(&bytes, ROM_BASE, Mode::Arm).unwrap();
-        assert!(program
-            .cfg
-            .blocks
-            .iter()
-            .any(|block| block.key == BlockKey { address: target, mode: Mode::Arm }));
+        assert!(program.cfg.blocks.iter().any(|block| block.key
+            == BlockKey {
+                address: target,
+                mode: Mode::Arm
+            }));
     }
 
     #[test]
@@ -193,11 +188,11 @@ mod tests {
         bytes.extend_from_slice(&target.to_le_bytes());
         bytes.extend_from_slice(&0xE1A0_0000u32.to_le_bytes());
         let program = analyze(&bytes, ROM_BASE, Mode::Thumb).unwrap();
-        assert!(program
-            .cfg
-            .blocks
-            .iter()
-            .any(|block| block.key == BlockKey { address: target, mode: Mode::Arm }));
+        assert!(program.cfg.blocks.iter().any(|block| block.key
+            == BlockKey {
+                address: target,
+                mode: Mode::Arm
+            }));
     }
 
     #[test]

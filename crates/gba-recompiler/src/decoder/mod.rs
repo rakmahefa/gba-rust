@@ -8,8 +8,8 @@ pub mod types;
 
 pub use classification::{classify_arm, classify_thumb, ArmClass, ThumbClass};
 pub use memory::{
-    read_arm, read_arm_at, read_thumb, read_thumb_at, read_thumb_bl, read_thumb_bl_at,
-    DecodeError, ROM_BASE,
+    read_arm, read_arm_at, read_thumb, read_thumb_at, read_thumb_bl, read_thumb_bl_at, DecodeError,
+    ROM_BASE,
 };
 pub use semantic::{
     decode_arm, decode_arm_from_rom, decode_thumb, decode_thumb_bl, decode_thumb_bl_from_rom,

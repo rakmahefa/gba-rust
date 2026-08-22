@@ -1,14 +1,16 @@
 use std::env;
 
-use crate::{Runtime, REG_PC};
+use crate::{BiosResult, ExceptionKind, Runtime, REG_PC};
 
-pub const RUNTIME_CONTRACT_VERSION: u32 = 5;
+pub const RUNTIME_CONTRACT_VERSION: u32 = 7;
 pub const GENERATED_TARGET_OUTSIDE_CFG: &str =
     "generated direct target is outside the statically linked CFG";
 pub const GENERATED_TARGET_DYNAMIC_UNRESOLVED: &str =
     "generated indirect target is unresolved or outside the statically linked CFG";
 pub const GENERATED_TARGET_MISALIGNED: &str =
     "generated target cannot be represented by the requested execution mode";
+pub const GENERATED_BIOS_SWI_UNIMPLEMENTED: &str =
+    "generated BIOS SWI number is not implemented";
 
 const GENERATED_TRACE_ENV: &str = "GBA_GENERATED_TRACE";
 const GENERATED_TRACE_LIMIT_ENV: &str = "GBA_GENERATED_TRACE_LIMIT";
@@ -19,10 +21,16 @@ struct GeneratedTraceConfig {
     enabled: bool,
     limit: u64,
 }
+
 impl GeneratedTraceConfig {
     fn from_env() -> Self {
         let enabled = env::var(GENERATED_TRACE_ENV)
-            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
             .unwrap_or(false);
         let limit = env::var(GENERATED_TRACE_LIMIT_ENV)
             .ok()
@@ -96,6 +104,7 @@ pub struct GeneratedBlockKey {
     pub address: u32,
     pub thumb: bool,
 }
+
 impl GeneratedBlockKey {
     pub const fn new(address: u32, thumb: bool) -> Self {
         Self {
@@ -103,12 +112,15 @@ impl GeneratedBlockKey {
             thumb,
         }
     }
+
     pub const fn align(address: u32, thumb: bool) -> u32 {
         address & if thumb { !1 } else { !3 }
     }
+
     pub const fn tuple(self) -> (u32, bool) {
         (self.address, self.thumb)
     }
+
     pub const fn is_aligned(address: u32, thumb: bool) -> bool {
         Self::align(address, thumb) == address
     }
@@ -120,26 +132,37 @@ pub enum GeneratedBlockExit {
     Dynamic { address: u32, thumb: bool },
     Return { address: u32, thumb: bool },
     Halt { address: u32, thumb: bool },
+    Exception { kind: ExceptionKind },
 }
+
 impl GeneratedBlockExit {
     pub const fn continue_to(address: u32, thumb: bool) -> Self {
         Self::Continue { address, thumb }
     }
+
     pub const fn dynamic_to(address: u32, thumb: bool) -> Self {
         Self::Dynamic { address, thumb }
     }
+
     pub const fn return_to(address: u32, thumb: bool) -> Self {
         Self::Return { address, thumb }
     }
+
     pub const fn halt(address: u32, thumb: bool) -> Self {
         Self::Halt { address, thumb }
     }
-    pub const fn target(self) -> (u32, bool) {
+
+    pub const fn exception(kind: ExceptionKind) -> Self {
+        Self::Exception { kind }
+    }
+
+    pub const fn target(self) -> Option<(u32, bool)> {
         match self {
             Self::Continue { address, thumb }
             | Self::Dynamic { address, thumb }
             | Self::Return { address, thumb }
-            | Self::Halt { address, thumb } => (address, thumb),
+            | Self::Halt { address, thumb } => Some((address, thumb)),
+            Self::Exception { .. } => None,
         }
     }
 }
@@ -148,6 +171,11 @@ impl GeneratedBlockExit {
 pub enum GeneratedExecutionExit {
     Returned { address: u32, thumb: bool },
     Halted { address: u32, thumb: bool },
+    ExceptionVector {
+        kind: ExceptionKind,
+        address: u32,
+        thumb: bool,
+    },
     StepLimitExceeded { address: u32, thumb: bool },
 }
 
@@ -157,11 +185,13 @@ pub struct GeneratedExecutionResult {
     pub steps: u64,
     pub state: ArchitecturalState,
 }
+
 impl GeneratedExecutionResult {
     pub const fn target(&self) -> (u32, bool) {
         match self.exit {
             GeneratedExecutionExit::Returned { address, thumb }
             | GeneratedExecutionExit::Halted { address, thumb }
+            | GeneratedExecutionExit::ExceptionVector { address, thumb, .. }
             | GeneratedExecutionExit::StepLimitExceeded { address, thumb } => (address, thumb),
         }
     }
@@ -174,6 +204,7 @@ pub struct ArchitecturalState {
     pub thumb: bool,
     pub cycles: u64,
 }
+
 impl ArchitecturalState {
     pub fn pc(&self) -> u32 {
         self.registers[REG_PC]
@@ -193,6 +224,13 @@ pub trait RuntimeContract {
     fn write32(&mut self, address: u32, value: u32);
     fn execute_arm_instruction(&mut self, raw: u32) -> Option<(u32, bool)>;
     fn execute_thumb_instruction(&mut self, raw: u16) -> Option<(u32, bool)>;
+    fn enter_exception(&mut self, kind: ExceptionKind) -> (u32, bool);
+    fn return_from_exception(&mut self, target: u32) -> Option<(u32, bool)>;
+    fn execute_bios_swi_comment(
+        &mut self,
+        comment: u32,
+        thumb: bool,
+    ) -> Result<BiosResult, &'static str>;
     fn exchange_target_for_dispatch(&mut self, target: u32) -> (u32, bool);
     fn tick(&mut self, cycles: u32);
     fn run_generated_contract<F, L>(
@@ -218,33 +256,43 @@ impl RuntimeContract for Runtime {
             cycles: self.cycles,
         }
     }
+
     fn enter_instruction(&mut self, address: u32, thumb: bool) {
         Runtime::enter_instruction(self, address, thumb);
     }
+
     fn link_from_instruction(&mut self, address: u32, size: u8, thumb: bool) {
         Runtime::link_from_instruction(self, address, size, thumb);
     }
+
     fn condition_code(&self, condition: u8) -> bool {
         Runtime::condition_code(self, condition)
     }
+
     fn read8(&self, address: u32) -> u8 {
         Runtime::read8(self, address)
     }
+
     fn read16(&self, address: u32) -> u16 {
         Runtime::read16(self, address)
     }
+
     fn read32(&self, address: u32) -> u32 {
         Runtime::read32(self, address)
     }
+
     fn write8(&mut self, address: u32, value: u8) {
         Runtime::write8(self, address, value);
     }
+
     fn write16(&mut self, address: u32, value: u16) {
         Runtime::write16(self, address, value);
     }
+
     fn write32(&mut self, address: u32, value: u32) {
         Runtime::write32(self, address, value);
     }
+
     fn execute_arm_instruction(&mut self, raw: u32) -> Option<(u32, bool)> {
         if raw & 0x0fff_fff0 == 0x012f_ff10 || raw & 0x0fff_fff0 == 0x012f_ff30 {
             let target = self.read_reg((raw & 0x0f) as usize);
@@ -252,15 +300,36 @@ impl RuntimeContract for Runtime {
         }
         Runtime::execute_arm_instruction(self, raw)
     }
+
     fn execute_thumb_instruction(&mut self, raw: u16) -> Option<(u32, bool)> {
         Runtime::execute_thumb_instruction(self, raw)
     }
+
+    fn enter_exception(&mut self, kind: ExceptionKind) -> (u32, bool) {
+        Runtime::raise_exception(self, kind)
+    }
+
+    fn return_from_exception(&mut self, target: u32) -> Option<(u32, bool)> {
+        Runtime::exception_return(self, target)
+    }
+
+    fn execute_bios_swi_comment(
+        &mut self,
+        comment: u32,
+        thumb: bool,
+    ) -> Result<BiosResult, &'static str> {
+        Runtime::execute_bios_swi_comment(self, comment, thumb)
+            .map_err(|_| GENERATED_BIOS_SWI_UNIMPLEMENTED)
+    }
+
     fn exchange_target_for_dispatch(&mut self, target: u32) -> (u32, bool) {
         Runtime::exchange_target_for_dispatch(self, target)
     }
+
     fn tick(&mut self, cycles: u32) {
         Runtime::tick(self, cycles);
     }
+
     fn run_generated_contract<F, L>(
         &mut self,
         address: u32,
@@ -361,6 +430,24 @@ impl RuntimeContract for Runtime {
                         state: self.architectural_state(),
                     });
                 }
+                GeneratedBlockExit::Exception { kind } => {
+                    let (vector, vector_thumb) = self.enter_exception(kind);
+                    let target = checked(vector, vector_thumb)?;
+                    trace.log_transition(steps - 1, source, exit, Some(target), self.cycles);
+                    if is_linked(target.address, target.thumb) {
+                        next = target;
+                    } else {
+                        return Ok(GeneratedExecutionResult {
+                            exit: GeneratedExecutionExit::ExceptionVector {
+                                kind,
+                                address: target.address,
+                                thumb: target.thumb,
+                            },
+                            steps,
+                            state: self.architectural_state(),
+                        });
+                    }
+                }
             }
         }
     }
@@ -369,6 +456,7 @@ impl RuntimeContract for Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CpuMode, PowerState};
 
     #[test]
     fn trace_config_is_disabled_by_default_without_environment() {
@@ -380,5 +468,40 @@ mod tests {
     fn generated_block_key_trace_identity_preserves_mode() {
         let key = GeneratedBlockKey::new(0x120, true);
         assert_eq!(key.tuple(), (0x120, true));
+    }
+
+    #[test]
+    fn exception_exit_enters_and_exposes_an_unlinked_vector() {
+        let mut runtime = Runtime::new();
+        let result = runtime
+            .run_generated_contract(
+                0x0800_0000,
+                false,
+                Some(1),
+                |_, _, _| Ok(GeneratedBlockExit::exception(ExceptionKind::Undefined)),
+                |_, _| false,
+            )
+            .expect("exception vector is an execution result, not a dispatch error");
+
+        assert_eq!(result.steps, 1);
+        assert_eq!(runtime.mode(), CpuMode::Undefined);
+        assert!(matches!(
+            result.exit,
+            GeneratedExecutionExit::ExceptionVector {
+                kind: ExceptionKind::Undefined,
+                address: 0x04,
+                thumb: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn bios_swi_contract_is_exposed_by_runtime_trait() {
+        let mut runtime = Runtime::new();
+        runtime.enter_instruction(0x0800_0000, false);
+        let result = RuntimeContract::execute_bios_swi_comment(&mut runtime, 0x02, false).unwrap();
+        assert!(!result.returned);
+        assert_eq!(runtime.power, PowerState::Halted);
+        assert_eq!(runtime.mode(), CpuMode::Supervisor);
     }
 }

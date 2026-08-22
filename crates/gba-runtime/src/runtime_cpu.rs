@@ -1,6 +1,6 @@
+use super::Runtime;
 use crate::arm7tdmi::{self, Nzcv, ShiftKind, ShiftResult};
 use crate::cpu::{CpuMode, ExceptionKind, REG_LR, REG_PC};
-use super::Runtime;
 
 impl Runtime {
     pub fn load_cartridge(&mut self, cartridge: crate::cartridge::Cartridge) {
@@ -86,13 +86,7 @@ impl Runtime {
         self.set_flags(flags);
     }
 
-    pub fn shift(
-        &self,
-        value: u32,
-        kind: ShiftKind,
-        amount: u8,
-        register_shift: bool,
-    ) -> ShiftResult {
+    pub fn shift(&self, value: u32, kind: ShiftKind, amount: u8, register_shift: bool) -> ShiftResult {
         let carry = self.cpu.nzcv().c;
         if register_shift {
             arm7tdmi::shift_register(value, kind, amount, carry)
@@ -114,6 +108,14 @@ impl Runtime {
         arm7tdmi::condition_holds(self.cpu.cpsr, code)
     }
 
+    pub fn enter_exception(&mut self, kind: ExceptionKind) -> (u32, bool) {
+        self.raise_exception(kind)
+    }
+
+    pub fn return_from_exception(&mut self, target: u32) -> Option<(u32, bool)> {
+        self.exception_return(target)
+    }
+
     pub fn exception_return(&mut self, target: u32) -> Option<(u32, bool)> {
         let spsr = self.cpu.spsr()?;
         self.cpu.restore_exception_state(spsr);
@@ -129,6 +131,23 @@ impl Runtime {
         } else {
             self.read_reg(REG_PC).wrapping_sub(4)
         };
+        self.cpu.switch_mode(kind.mode());
+        self.cpu.set_spsr(old_cpsr);
+        self.cpu.cpsr |= kind.masks();
+        self.cpu.set_thumb(false);
+        self.cpu.r[REG_LR] = return_address;
+        self.cpu.r[REG_PC] = kind.vector();
+        (kind.vector(), false)
+    }
+
+    pub fn raise_exception_at_boundary(
+        &mut self,
+        kind: ExceptionKind,
+        resume_address: u32,
+        resume_thumb: bool,
+    ) -> (u32, bool) {
+        let old_cpsr = self.cpu.cpsr;
+        let return_address = resume_address.wrapping_add(if resume_thumb { 2 } else { 4 });
         self.cpu.switch_mode(kind.mode());
         self.cpu.set_spsr(old_cpsr);
         self.cpu.cpsr |= kind.masks();

@@ -118,6 +118,14 @@ impl BiosResult {
         next_pc: None,
         next_thumb: false,
     };
+
+    pub const fn transfer(next_pc: u32, next_thumb: bool) -> Self {
+        Self {
+            returned: false,
+            next_pc: Some(next_pc),
+            next_thumb,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -129,12 +137,8 @@ pub struct BiosMemory<'a> {
     pub oam: &'a mut [u8],
 }
 
-pub fn swi_number(raw: u32, thumb: bool) -> u8 {
-    if thumb {
-        (raw & 0xff) as u8
-    } else {
-        ((raw >> 16) & 0xff) as u8
-    }
+pub fn swi_number(raw: u32, _thumb: bool) -> u8 {
+    raw as u8
 }
 
 pub fn reset_state(cpu: &mut crate::cpu::Cpu, power: &mut PowerState) {
@@ -170,7 +174,7 @@ pub fn execute_swi(
             } else {
                 0x0200_0000
             };
-            BiosResult::NON_RETURNING
+            BiosResult::transfer(cpu.r[REG_PC], false)
         }
         BiosSwi::RegisterRamReset => {
             let flags = cpu.r[0];
@@ -201,10 +205,12 @@ pub fn execute_swi(
         }
         BiosSwi::Halt => {
             *power = PowerState::Halted;
+            cpu.cpsr &= !CPSR_I;
             BiosResult::NON_RETURNING
         }
         BiosSwi::Stop => {
             *power = PowerState::Stopped;
+            cpu.cpsr &= !CPSR_I;
             BiosResult::NON_RETURNING
         }
         BiosSwi::IntrWait => {
@@ -219,6 +225,7 @@ pub fn execute_swi(
                 BiosResult::RETURNED
             } else {
                 *power = PowerState::Halted;
+                cpu.cpsr &= !CPSR_I;
                 BiosResult::NON_RETURNING
             }
         }
@@ -245,19 +252,27 @@ pub fn service_pending_irq(cpu: &mut crate::cpu::Cpu, interrupts: &InterruptCont
     true
 }
 
-pub fn in_range(address: u32, start: u32, end: u32) -> bool {
-    (start..=end).contains(&address)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cpu::{Cpu, CpuMode, REG_PC, REG_SP};
 
-    type TestMemory = ([u8; 0x100], [u8; 0x8000], [u8; 0x400], [u8; 0x18000], [u8; 0x400]);
+    type TestMemory = (
+        [u8; 0x100],
+        [u8; 0x8000],
+        [u8; 0x400],
+        [u8; 0x18000],
+        [u8; 0x400],
+    );
 
     fn memory() -> TestMemory {
-        ([0; 0x100], [0; 0x8000], [0; 0x400], [0; 0x18000], [0; 0x400])
+        (
+            [0; 0x100],
+            [0; 0x8000],
+            [0; 0x400],
+            [0; 0x18000],
+            [0; 0x400],
+        )
     }
 
     fn bios_memory<'a>(
@@ -277,9 +292,10 @@ mod tests {
     }
 
     #[test]
-    fn swi_number_uses_gba_arm_and_thumb_encodings() {
-        assert_eq!(swi_number(0x0004_0000, false), 4);
+    fn swi_number_uses_the_low_byte_for_arm_and_thumb_encodings() {
+        assert_eq!(swi_number(0x0000_0004, false), 4);
         assert_eq!(swi_number(0x0000_0005, true), 5);
+        assert_eq!(swi_number(0x00ab_0005, false), 5);
     }
 
     #[test]
@@ -329,7 +345,7 @@ mod tests {
             &mut memory,
             BiosSwi::SoftReset,
         );
-        assert_eq!(result, BiosResult::NON_RETURNING);
+        assert_eq!(result, BiosResult::transfer(0x0200_0000, false));
         assert_eq!(cpu.r[REG_PC], 0x0200_0000);
     }
 
@@ -356,6 +372,27 @@ mod tests {
         assert_eq!(result, BiosResult::RETURNED);
         assert_eq!(power, PowerState::Running);
         assert_eq!(interrupts.iflags & IRQ_VBLANK, 0);
+    }
+
+    #[test]
+    fn halt_clears_irq_mask_so_an_external_irq_can_wake_the_runtime() {
+        let (mut ewram, mut iwram, mut palette, mut vram, mut oam) = memory();
+        let mut cpu = Cpu::default();
+        cpu.cpsr |= CPSR_I;
+        let mut power = PowerState::Running;
+        let mut interrupts = InterruptController::default();
+        let mut memory = bios_memory(&mut ewram, &mut iwram, &mut palette, &mut vram, &mut oam);
+
+        execute_swi(
+            &mut cpu,
+            &mut power,
+            &mut interrupts,
+            &mut memory,
+            BiosSwi::Halt,
+        );
+
+        assert_eq!(power, PowerState::Halted);
+        assert_eq!(cpu.cpsr & CPSR_I, 0);
     }
 
     #[test]

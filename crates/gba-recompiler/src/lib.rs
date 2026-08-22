@@ -3,6 +3,7 @@ pub mod architecture;
 pub mod cfg;
 pub mod codegen;
 pub mod decoder;
+pub mod exception_graph;
 pub mod execution;
 pub mod function;
 pub mod ir;
@@ -18,11 +19,18 @@ pub use architecture::{
     exchange_target, link_address, rotate_unaligned_word, shift_immediate, shift_register,
     NzcvMask, ShiftResult, ShiftType,
 };
-pub use cfg::{analyze, analyze_with_mapping, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph, Program};
+pub use cfg::{
+    analyze, analyze_with_mapping, AnalysisError, BasicBlock, BlockId, BlockKey, ControlFlowGraph,
+    Program,
+};
 pub use codegen::{generate, generate_semantic, RustModule};
 pub use decoder::{
     decode_arm, decode_thumb, decode_thumb_bl, ArmOp, Condition, DecodeError, Instruction,
     InstructionKind, Mode, ThumbOp, ROM_BASE,
+};
+pub use exception_graph::{
+    analyze_exception_graph, ExceptionGraph, ExceptionGraphEdge, ExceptionGraphEdgeKind,
+    ExceptionGraphNode, ExceptionVectorKind,
 };
 pub use execution::{
     add_flags, branch_target, condition_holds, sub_flags, Nzcv, CPSR_C, CPSR_N, CPSR_T, CPSR_V,

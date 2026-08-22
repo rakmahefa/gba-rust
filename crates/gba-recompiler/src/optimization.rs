@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use crate::ir::{IrInstruction, IrOp, Value};
-use crate::semantic_ir::{FlagEffect, MemoryEffect, MemoryWidth, SemanticInstruction, SemanticProgram};
+use crate::semantic_ir::{
+    FlagEffect, MemoryEffect, MemoryWidth, SemanticInstruction, SemanticProgram,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptimizationKind {

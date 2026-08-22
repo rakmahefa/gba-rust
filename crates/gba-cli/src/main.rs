@@ -49,10 +49,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--execute" => execute = true,
             "--max-steps" => {
-                max_steps = args
-                    .next()
-                    .ok_or("--max-steps requires a value")?
-                    .parse()?;
+                max_steps = args.next().ok_or("--max-steps requires a value")?.parse()?;
             }
             "--image" => {
                 image = ImageArg::parse(&args.next().ok_or("--image requires rom or bios")?)?;
@@ -66,9 +63,8 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     }
 
     Ok(Args {
-        rom_path: rom_path.unwrap_or_else(|| {
-            PathBuf::from("roms/1636 - Pokemon Fire Red (U)(Squirrels).gba")
-        }),
+        rom_path: rom_path
+            .unwrap_or_else(|| PathBuf::from("roms/1636 - Pokemon Fire Red (U)(Squirrels).gba")),
         execute,
         max_steps,
         image,
@@ -118,12 +114,6 @@ use std::{env, fs, path::PathBuf};
 
 use gba_runtime::{Cartridge, GeneratedExecutionExit, Runtime};
 
-fn load_bios(runtime: &mut Runtime, bios: &[u8]) {
-    for (offset, byte) in bios.iter().copied().enumerate() {
-        runtime.io.insert(offset as u32, byte);
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let image_kind = args.next().ok_or("missing image kind")?;
@@ -138,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match image_kind.as_str() {
         "rom" => runtime.load_cartridge(Cartridge::from_rom(image, "saves")),
-        "bios" => load_bios(&mut runtime, &image),
+        "bios" => runtime.load_bios(&image)?,
         other => return Err(format!("unsupported image kind: {other}").into()),
     }
 
@@ -226,7 +216,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "executing generated image: image={:?}, max_steps={}, dispatcher=linked CFG",
             args.image, args.max_steps
         );
-        execute_generated_image(&generated.source, &args.rom_path, args.image, args.max_steps)?;
+        execute_generated_image(
+            &generated.source,
+            &args.rom_path,
+            args.image,
+            args.max_steps,
+        )?;
         return Ok(());
     }
 
@@ -239,12 +234,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             runtime.cartridge.as_ref().unwrap().rom.len()
         );
     } else {
-        let mapped = image.len().min(0x4000);
         let mut runtime = Runtime::new();
-        for (offset, byte) in image.iter().copied().enumerate().take(0x4000) {
-            runtime.io.insert(offset as u32, byte);
-        }
-        println!("runtime ready: BIOS mapped bytes={mapped}, entry=0x0");
+        runtime.load_bios(&image)?;
+        println!(
+            "runtime ready: BIOS mapped bytes={}, entry=0x0",
+            runtime.bios().bytes().len()
+        );
     }
 
     Ok(())

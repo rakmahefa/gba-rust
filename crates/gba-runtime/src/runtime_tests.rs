@@ -1,10 +1,6 @@
 use super::*;
-use crate::bios::{
-    BiosResult, BiosSwi, HALTCNT, IE, IF, IME, IRQ_HBLANK, IRQ_VBLANK,
-};
-use crate::cpu::{
-    CPSR_C, CPSR_N, CPSR_V, CPSR_Z, CpuMode, ExceptionKind, REG_LR, REG_PC, REG_SP,
-};
+use crate::bios::{BiosResult, BiosSwi, HALTCNT, IE, IF, IME, IRQ_HBLANK, IRQ_VBLANK};
+use crate::cpu::{CpuMode, ExceptionKind, CPSR_C, CPSR_N, CPSR_V, CPSR_Z, REG_LR, REG_PC, REG_SP};
 
 #[test]
 fn compare_updates_all_nzcv_flags() {
@@ -116,19 +112,14 @@ fn swi_exception_saves_cpsr_and_restores_banks() {
 #[test]
 fn generated_engine_dispatches_iteratively_without_recursive_calls() {
     let mut runtime = Runtime::new();
-    let result = runtime.run_generated(
-        0x0800_0000,
-        false,
-        Some(10_000),
-        |rt, address, thumb| {
-            rt.tick(1);
-            if rt.cycles == 10_000 {
-                Err("done")
-            } else {
-                Ok((address, thumb))
-            }
-        },
-    );
+    let result = runtime.run_generated(0x0800_0000, false, Some(10_000), |rt, address, thumb| {
+        rt.tick(1);
+        if rt.cycles == 10_000 {
+            Err("done")
+        } else {
+            Ok((address, thumb))
+        }
+    });
     assert_eq!(result, Err("done"));
     assert_eq!(runtime.cycles, 10_000);
 }
@@ -201,4 +192,47 @@ fn vblank_frame_request_reaches_the_integrated_irq_path() {
     runtime.frame();
     assert_eq!(runtime.mode(), CpuMode::Irq);
     assert_eq!(runtime.read_reg(REG_PC), 0x18);
+}
+
+#[test]
+fn thumb_bios_swi_restores_thumb_state_and_next_instruction() {
+    let mut runtime = Runtime::new();
+    runtime.enter_instruction(0x0800_0100, true);
+    let result = runtime.bios_swi(BiosSwi::RegisterRamReset);
+    assert_eq!(result, BiosResult::RETURNED);
+    assert_eq!(runtime.mode(), CpuMode::System);
+    assert!(runtime.cpu.thumb);
+    assert_eq!(runtime.read_reg(REG_PC), 0x0800_0102);
+}
+
+#[test]
+fn pending_irq_enters_irq_mode_and_can_be_returned_through_the_contract() {
+    let mut runtime = Runtime::new();
+    runtime.enter_instruction(0x0800_0300, false);
+    runtime.bios_swi(BiosSwi::Halt);
+    runtime.write16(IE, IRQ_VBLANK);
+    runtime.write16(IME, 1);
+    runtime.interrupts.request(IRQ_VBLANK);
+
+    assert_eq!(runtime.deliver_pending_interrupt(), Some((0x18, false)));
+    assert_eq!(runtime.mode(), CpuMode::Irq);
+    assert_eq!(runtime.power, PowerState::Running);
+    assert_eq!(runtime.cpu.spsr(), Some(CpuMode::Supervisor as u32));
+
+    let result = runtime
+        .return_from_exception(runtime.read_reg(REG_LR))
+        .expect("IRQ handler must be able to return");
+    assert_eq!(result, (0x08, false));
+    assert_eq!(runtime.mode(), CpuMode::Supervisor);
+    assert_eq!(runtime.power, PowerState::Running);
+}
+
+#[test]
+fn stopped_runtime_does_not_deliver_pending_interrupts() {
+    let mut runtime = Runtime::new();
+    runtime.write8(HALTCNT, 0x80);
+    runtime.write16(IE, IRQ_VBLANK);
+    runtime.write16(IME, 1);
+    runtime.interrupts.request(IRQ_VBLANK);
+    assert_eq!(runtime.deliver_pending_interrupt(), None);
 }

@@ -1,4 +1,7 @@
-use gba_runtime::{GeneratedBlockKey, GeneratedBlockExit, GeneratedExecutionExit, Runtime, RuntimeContract, GENERATED_TARGET_MISALIGNED, REG_PC};
+use gba_runtime::{
+    GeneratedBlockExit, GeneratedBlockKey, GeneratedExecutionExit, Runtime, RuntimeContract,
+    GENERATED_TARGET_MISALIGNED, REG_PC,
+};
 
 #[test]
 fn generated_block_key_canonicalizes_only_through_explicit_constructor() {

@@ -12,6 +12,24 @@ The ROM is statically decoded into an intermediate representation and Rust sourc
 
 The runtime is intentionally independent from the generated program. The normal execution path is generated native Rust code; an instruction interpreter is not the architectural center.
 
+## Generated execution contract
+
+Generated basic blocks terminate through `GeneratedBlockExit`. Direct and dynamic CFG transitions must satisfy alignment and linked-CFG validation before the runtime dispatches the next block.
+
+Architectural exceptions use the same boundary. `GeneratedBlockExit::Exception` asks the runtime to perform exception entry, including mode banking, SPSR capture, CPSR masking, Thumb clearing and vector selection. When the exception vector is not part of the generated CFG, the runtime returns `GeneratedExecutionExit::ExceptionVector` instead of silently dispatching an unresolved address.
+
+BIOS SWIs use this exception state as well: the runtime enters Supervisor mode before executing the modeled BIOS service, restores the caller's CPSR/banked registers for returning SWIs, and leaves the Supervisor state active for non-returning services such as HALT/STOP.
+
+### Phase 4: reentrant BIOS/IRQ execution
+
+Generated execution treats an IRQ as a **block-boundary transition**, not as a side effect of `tick()`. A pending enabled IRQ is observed by the generated dispatcher before the next block executes; the dispatcher establishes the architectural PC for that boundary and then reuses the runtime exception-entry contract. This preserves the interrupted resume point, CPSR and banked registers while preventing an IRQ from mutating CPU mode in the middle of a generated instruction.
+
+Exception-return instructions that write `PC` with the `S` bit set are handled as real architectural exception returns. The generated ARM path evaluates the return target, asks the runtime to restore the active SPSR/banked state, and only then emits the CFG return transition. Ordinary `BX LR`/function returns remain distinct from these architectural restores at the runtime level.
+
+Nested exception entry is therefore reentrant: an IRQ taken while executing Supervisor/other privileged code captures the current mode's CPSR in `SPSR_irq`, uses the IRQ banked `SP/LR`, and can restore the interrupted privileged context through the same exception-return primitive.
+
+BIOS HALT/IntrWait continue to unmask the IRQ path while waiting. The generated execution contract keeps the asynchronous hardware mechanism in the runtime while the generated CFG remains responsible only for linked control-flow targets.
+
 ## Cartridge saves
 
 Battery-backed SRAM/Flash/EEPROM belongs to the cartridge model. It is persisted as `<game>.sav`; this is **not** a savestate. Writes are dirty-tracked, flushed atomically, and the previous save is retained as `<game>.sav.bak` when possible.
@@ -20,7 +38,7 @@ Battery-backed SRAM/Flash/EEPROM belongs to the cartridge model. It is persisted
 
 1. Complete ARM7TDMI ARM/Thumb decoder and static CFG recovery.
 2. Introduce a typed IR and basic-block/function analysis.
-3. Generate executable Rust with explicit runtime calls for memory, branches, DMA and I/O.
+3. Generate executable Rust with explicit runtime calls for memory, branches, DMA, I/O and BIOS exception services.
 4. Implement PPU modes 0-5, sprites and windows.
 5. Implement APU, timers, DMA, IRQ and keypad.
 6. Complete SRAM/Flash/EEPROM protocols and save detection.

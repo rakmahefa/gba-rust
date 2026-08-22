@@ -38,11 +38,7 @@ pub fn read_thumb_at(rom: &[u8], base: u32, address: u32) -> Result<u16, DecodeE
     ))
 }
 
-pub fn read_thumb_bl_at(
-    rom: &[u8],
-    base: u32,
-    address: u32,
-) -> Result<(u16, u16), DecodeError> {
+pub fn read_thumb_bl_at(rom: &[u8], base: u32, address: u32) -> Result<(u16, u16), DecodeError> {
     let offset = offset_for(rom, base, address, 4)?;
     Ok((
         u16::from_le_bytes(

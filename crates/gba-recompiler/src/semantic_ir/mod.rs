@@ -30,7 +30,10 @@ mod tests {
         assert_eq!(block.instructions[0].writes, vec![0]);
         assert_eq!(block.instructions[1].reads, vec![0]);
         assert_eq!(block.instructions[1].writes, vec![0]);
-        assert_eq!(block.instructions[0].control_effect(), IrControlEffect::None);
+        assert_eq!(
+            block.instructions[0].control_effect(),
+            IrControlEffect::None
+        );
     }
 
     #[test]
@@ -133,7 +136,9 @@ mod tests {
         let program = analyze(&arm_rom(&[0xE3A0_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let mut semantic = build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].instructions[0].reads.push(1);
+        semantic.functions[0].blocks[0].instructions[0]
+            .reads
+            .push(1);
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
         assert!(error.contains("instruction reads changed"));
     }

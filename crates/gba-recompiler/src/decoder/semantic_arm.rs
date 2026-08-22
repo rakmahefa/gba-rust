@@ -120,9 +120,6 @@ fn decode_single_transfer(raw: u32) -> ArmOp {
     let offset = if raw & (1 << 25) == 0 {
         Operand2::Imm(raw & 0x0FFF)
     } else {
-        // Single-data-transfer I=1 is *not* the data-processing Operand2
-        // immediate selector. It encodes a register offset with an immediate
-        // shift: Rm plus shift_imm/shift_type, with bit 4 fixed to zero.
         Operand2::Reg {
             rm: (raw & 0xF) as u8,
             shift: ((raw >> 7) & 0x1F) as u8,
@@ -196,7 +193,23 @@ fn decode_data_processing(raw: u32) -> ArmOp {
     let opcode = ((raw >> 21) & 0xF) as u8;
     let rd = ((raw >> 12) & 0xF) as u8;
     let rn = ((raw >> 16) & 0xF) as u8;
+    let set_flags = raw & (1 << 20) != 0;
     let op2 = arm_operand2(raw);
+
+    // Data-processing instructions that write PC with S=1 are architectural
+    // exception returns (e.g. MOVS PC, LR and SUBS PC, LR, #4). Keep them in
+    // the extended representation so codegen can invoke the runtime
+    // exception-return contract instead of treating them as ordinary ALU ops.
+    if rd == 15 && set_flags {
+        return ArmOp::Extended(ArmExtended::DataProcessing {
+            op: arm_data_op(opcode),
+            rd,
+            rn,
+            op2,
+            set_flags,
+        });
+    }
+
     match opcode {
         0xD => ArmOp::Mov { rd, op2 },
         0x4 => ArmOp::Add { rd, rn, op2 },
@@ -207,7 +220,7 @@ fn decode_data_processing(raw: u32) -> ArmOp {
             rd,
             rn,
             op2,
-            set_flags: raw & (1 << 20) != 0,
+            set_flags,
         }),
     }
 }
@@ -330,5 +343,21 @@ mod tests {
             )),
             other => panic!("unexpected decode: {other:?}"),
         }
+    }
+
+    #[test]
+    fn subs_pc_lr_immediate_is_kept_as_extended_exception_return() {
+        let raw = 0xE25E_F004u32;
+        let instruction = decode(0x0000_0018, raw, classify_arm(raw));
+        assert!(matches!(
+            instruction.kind,
+            InstructionKind::Arm(ArmOp::Extended(ArmExtended::DataProcessing {
+                op: ArmDataOp::Sub,
+                rd: 15,
+                rn: 14,
+                set_flags: true,
+                ..
+            }))
+        ));
     }
 }
