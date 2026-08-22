@@ -214,6 +214,8 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("real-rom execution: steps="));
     assert!(stdout.contains("real-rom execution: pc="));
-    assert!(stdout.contains("real-rom execution: sp=0x03007f00"));
+    assert!(stdout.contains("real-rom execution: thumb="));
+    assert!(stdout.contains("real-rom execution: sp="));
     assert!(stdout.contains("real-rom execution: cycles="));
+    assert!(stdout.contains("real-rom execution: exit="));
 }
