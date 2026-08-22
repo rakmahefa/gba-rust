@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+
 use crate::cfg::{BlockId, Program};
-use crate::function::FunctionControlFlowGraph;
-use crate::ir::{IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth};
+use crate::function::{FunctionControlFlowGraph, FunctionId};
+use crate::ir::{IrControlEffect, IrInstruction, IrMemoryEffect, IrMemoryKind, IrMemoryWidth};
+use crate::decoder::{ArmExtended, ThumbExtended};
 
 use super::{
-    FlagEffect, MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction,
-    SemanticProgram, SemanticTerminator,
+    MemoryEffect, MemoryWidth, SemanticBlock, SemanticInstruction, SemanticProgram,
+    SemanticTerminator,
 };
 
 fn memory_width(width: IrMemoryWidth) -> MemoryWidth {
@@ -12,6 +15,42 @@ fn memory_width(width: IrMemoryWidth) -> MemoryWidth {
         IrMemoryWidth::Byte => MemoryWidth::Byte,
         IrMemoryWidth::Halfword => MemoryWidth::Halfword,
         IrMemoryWidth::Word => MemoryWidth::Word,
+    }
+}
+
+fn same_memory(source: Option<IrMemoryEffect>, semantic: Option<MemoryEffect>) -> bool {
+    match (source, semantic) {
+        (None, None) => true,
+        (Some(source), Some(semantic)) => {
+            let width = memory_width(source.width);
+            match source.kind {
+                IrMemoryKind::Read => {
+                    semantic
+                        == MemoryEffect::Read {
+                            width,
+                            base: source.base,
+                            address_is_dynamic: source.address_is_dynamic,
+                        }
+                }
+                IrMemoryKind::Write => {
+                    semantic
+                        == MemoryEffect::Write {
+                            width,
+                            base: source.base,
+                            address_is_dynamic: source.address_is_dynamic,
+                        }
+                }
+                IrMemoryKind::ReadWrite => {
+                    semantic
+                        == MemoryEffect::ReadWrite {
+                            width,
+                            base: source.base,
+                            address_is_dynamic: source.address_is_dynamic,
+                        }
+                }
+            }
+        }
+        _ => false,
     }
 }
 
@@ -41,7 +80,7 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
         reads: ir.reads(),
         writes: ir.writes(),
         memory,
-        flags: FlagEffect {
+        flags: super::FlagEffect {
             read_n: flags.read_n,
             read_z: flags.read_z,
             read_c: flags.read_c,
@@ -52,6 +91,18 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
             write_v: flags.write_v,
         },
     }
+}
+
+fn software_interrupt_comment(block: &SemanticBlock) -> Option<u32> {
+    block.instructions.last()?.ops.iter().rev().find_map(|op| match op {
+        crate::ir::IrOp::ArmExtended {
+            op: ArmExtended::SoftwareInterrupt { comment },
+        }
+        | crate::ir::IrOp::ThumbExtended {
+            op: ThumbExtended::SoftwareInterrupt { comment },
+        } => Some(*comment),
+        _ => None,
+    })
 }
 
 fn terminator(block: &SemanticBlock) -> SemanticTerminator {
@@ -90,7 +141,9 @@ fn terminator(block: &SemanticBlock) -> SemanticTerminator {
             register,
             link: false,
         } => SemanticTerminator::IndirectBranch { register },
-        IrControlEffect::Unknown => SemanticTerminator::Unknown,
+        IrControlEffect::Unknown => software_interrupt_comment(block)
+            .map(|comment| SemanticTerminator::SoftwareInterrupt { comment })
+            .unwrap_or(SemanticTerminator::Unknown),
         IrControlEffect::None => SemanticTerminator::Fallthrough,
     }
 }
@@ -103,7 +156,11 @@ fn semantic_successors(
         SemanticTerminator::Return
         | SemanticTerminator::IndirectBranch { .. }
         | SemanticTerminator::Unknown => Vec::new(),
-        _ => source_successors.to_vec(),
+        SemanticTerminator::SoftwareInterrupt { .. }
+        | SemanticTerminator::Fallthrough
+        | SemanticTerminator::Branch { .. }
+        | SemanticTerminator::Call { .. }
+        | SemanticTerminator::IndirectCall { .. } => source_successors.to_vec(),
     }
 }
 
