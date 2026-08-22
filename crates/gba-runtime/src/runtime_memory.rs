@@ -57,7 +57,6 @@ impl Runtime {
             mmio::IME => u8::from(self.interrupts.ime),
             mmio::IME_HI => 0,
             mmio::POSTFLG => self.postflg,
-            // HALTCNT is write-only; reads do not expose stored power state.
             mmio::HALTCNT => 0,
             _ => *self.io.get(&address).unwrap_or(&0),
         }
@@ -76,9 +75,9 @@ impl Runtime {
 
         match address {
             mmio::DISPCNT => {
-                // DISPCNT bit 3 is read-only. Byte writes must preserve it.
-                self.dispcnt =
-                    (self.dispcnt & 0x0008) | (u16::from(value) & 0x00f7);
+                // Only bit 3 is read-only in the low byte; preserve all high-byte state.
+                let writable = u16::from(value) & 0x00f7;
+                self.dispcnt = (self.dispcnt & !0x00f7) | writable;
             }
             mmio::DISPCNT_HI => {
                 self.dispcnt = (self.dispcnt & 0x00ff) | (u16::from(value) << 8);
@@ -89,7 +88,6 @@ impl Runtime {
             mmio::DISPSTAT_HI => {
                 self.dispstat = (self.dispstat & 0x00ff) | (u16::from(value) << 8);
             }
-            // VCOUNT and KEYINPUT are read-only hardware state.
             mmio::VCOUNT | mmio::VCOUNT_HI | mmio::KEYINPUT | mmio::KEYINPUT_HI => {}
             mmio::IE => {
                 self.interrupts.ie = (self.interrupts.ie & 0x3f00) | u16::from(value);
@@ -119,7 +117,6 @@ impl Runtime {
             }
             mmio::IME_HI => {}
             mmio::POSTFLG => self.postflg = value & mmio::POSTFLG_WRITABLE_MASK,
-            // HALTCNT consumes only writes; reads remain write-only above.
             mmio::HALTCNT => {
                 self.power = if value & 0x80 != 0 {
                     PowerState::Stopped
@@ -219,9 +216,8 @@ impl Runtime {
             }
             BusRegion::CartridgeSave => self.write8(address, value.to_le_bytes()[0]),
             _ if address == mmio::DISPCNT => {
-                // DISPCNT bit 3 is read-only and retains its previous value.
-                self.dispcnt = (self.dispcnt & 0x0008)
-                    | (value & mmio::DISPCNT_WRITABLE_MASK & !0x0008);
+                self.dispcnt = (self.dispcnt & !mmio::DISPCNT_WRITABLE_MASK)
+                    | (value & mmio::DISPCNT_WRITABLE_MASK);
             }
             _ if address == mmio::DISPSTAT => {
                 self.dispstat = (self.dispstat & mmio::DISPSTAT_STATUS_MASK)
@@ -233,10 +229,9 @@ impl Runtime {
                 self.interrupts.ie = value & mmio::INTERRUPT_SOURCE_MASK;
                 self.service_interrupts();
             }
-            _ if address == mmio::IF => {
-                self.interrupts
-                    .acknowledge(value & mmio::INTERRUPT_SOURCE_MASK)
-            }
+            _ if address == mmio::IF => self
+                .interrupts
+                .acknowledge(value & mmio::INTERRUPT_SOURCE_MASK),
             _ if address == mmio::WAITCNT => {
                 self.waitcnt = (self.waitcnt & 0x8000)
                     | (value & mmio::WAITCNT_WRITABLE_MASK);
@@ -252,9 +247,7 @@ impl Runtime {
                 self.write8(mmio::POSTFLG, bytes[0]);
                 self.write8(mmio::HALTCNT, bytes[1]);
             }
-            _ if address == mmio::HALTCNT => {
-                self.write8(address, value as u8);
-            }
+            _ if address == mmio::HALTCNT => self.write8(address, value as u8),
             _ => {
                 for (i, byte) in value.to_le_bytes().into_iter().enumerate() {
                     self.write8(address.wrapping_add(i as u32), byte);
