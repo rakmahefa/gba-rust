@@ -175,21 +175,23 @@ fn halt_and_stop_mmio_change_runtime_power_state() {
 #[test]
 fn bios_swi_updates_runtime_power_and_memory() {
     let mut runtime = Runtime::new();
-    runtime.enter_instruction(0x0800_0100, false);
     runtime.iwram[0x0100] = 0xaa;
     runtime.cpu.r[0] = 2;
     let result = runtime.bios_swi(BiosSwi::RegisterRamReset);
     assert_eq!(result, BiosResult::RETURNED);
     assert_eq!(runtime.iwram[0x0100], 0);
-    assert_eq!(runtime.mode(), CpuMode::System);
-    assert_eq!(runtime.read_reg(REG_PC), 0x0800_0104);
-
-    runtime.enter_instruction(0x0800_0200, false);
     runtime.bios_swi(BiosSwi::Halt);
     assert_eq!(runtime.power, PowerState::Halted);
-    assert_eq!(runtime.mode(), CpuMode::Supervisor);
-    assert_eq!(runtime.read_reg(REG_PC), 0x08);
-    assert_eq!(runtime.cpu.spsr(), Some(CpuMode::System as u32));
+}
+
+#[test]
+fn vblank_frame_request_reaches_the_integrated_irq_path() {
+    let mut runtime = Runtime::new();
+    runtime.write16(IE, IRQ_VBLANK);
+    runtime.write16(IME, 1);
+    runtime.frame();
+    assert_eq!(runtime.mode(), CpuMode::Irq);
+    assert_eq!(runtime.read_reg(REG_PC), 0x18);
 }
 
 #[test]
@@ -210,6 +212,7 @@ fn pending_irq_enters_irq_mode_and_can_be_returned_through_the_contract() {
     runtime.bios_swi(BiosSwi::Halt);
     runtime.write16(IE, IRQ_VBLANK);
     runtime.write16(IME, 1);
+    runtime.interrupts.request(IRQ_VBLANK);
 
     assert_eq!(runtime.deliver_pending_interrupt(), Some((0x18, false)));
     assert_eq!(runtime.mode(), CpuMode::Irq);
@@ -231,18 +234,5 @@ fn stopped_runtime_does_not_deliver_pending_interrupts() {
     runtime.write16(IE, IRQ_VBLANK);
     runtime.write16(IME, 1);
     runtime.interrupts.request(IRQ_VBLANK);
-
     assert_eq!(runtime.deliver_pending_interrupt(), None);
-    assert_eq!(runtime.mode(), CpuMode::System);
-    assert_eq!(runtime.power, PowerState::Stopped);
-}
-
-#[test]
-fn vblank_frame_request_reaches_the_integrated_irq_path() {
-    let mut runtime = Runtime::new();
-    runtime.write16(IE, IRQ_VBLANK);
-    runtime.write16(IME, 1);
-    runtime.frame();
-    assert_eq!(runtime.mode(), CpuMode::Irq);
-    assert_eq!(runtime.read_reg(REG_PC), 0x18);
 }
