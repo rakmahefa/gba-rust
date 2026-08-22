@@ -126,9 +126,12 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
 }
 
 fn terminator(block: &SemanticBlock) -> SemanticTerminator {
-    let Some(instruction) = block.instructions.last() else {
-        return SemanticTerminator::Unknown;
+    let Some(instruction) = block.instructions.iter().rev().find(|instruction| {
+        !matches!(instruction.control_effect(), IrControlEffect::None)
+    }) else {
+        return SemanticTerminator::Fallthrough;
     };
+
     match instruction.control_effect() {
         IrControlEffect::Branch {
             target,
@@ -253,7 +256,6 @@ fn validate_instruction(
     source: &IrInstruction,
     semantic: &SemanticInstruction,
     block_id: BlockId,
-    is_last: bool,
 ) -> Result<(), String> {
     if source.address != semantic.address || source.size != semantic.size {
         return Err(format!("block {} instruction identity changed", block_id.0));
@@ -289,11 +291,21 @@ fn validate_instruction(
             block_id.0
         ));
     }
-    if !is_last && !matches!(semantic.control_effect(), IrControlEffect::None) {
-        return Err(format!(
-            "block {} has a control-effect instruction before its terminator",
-            block_id.0
-        ));
+    Ok(())
+}
+
+fn validate_control_placement(block: &SemanticBlock) -> Result<(), String> {
+    let mut control_instruction = None;
+    for (index, instruction) in block.instructions.iter().enumerate() {
+        if matches!(instruction.control_effect(), IrControlEffect::None) {
+            continue;
+        }
+        if control_instruction.replace(index).is_some() {
+            return Err(format!(
+                "block {} contains multiple control-effect instructions",
+                block.id.0
+            ));
+        }
     }
     Ok(())
 }
@@ -359,16 +371,12 @@ pub fn validate_semantic_program(
                     block.id.0
                 ));
             }
-            for (index, (source_ir, semantic_instruction)) in
-                source.ir.iter().zip(&block.instructions).enumerate()
+            for (source_ir, semantic_instruction) in
+                source.ir.iter().zip(&block.instructions)
             {
-                validate_instruction(
-                    source_ir,
-                    semantic_instruction,
-                    block.id,
-                    index + 1 == source.ir.len(),
-                )?;
+                validate_instruction(source_ir, semantic_instruction, block.id)?;
             }
+            validate_control_placement(block)?;
             for successor in &block.successors {
                 if successor.0 >= program.cfg.blocks.len() {
                     return Err(format!(
@@ -399,18 +407,9 @@ pub fn validate_semantic_program(
                         return Err(format!("terminating block {} has successors", block.id.0));
                     }
                 }
-                SemanticTerminator::Fallthrough => {
-                    if block.instructions.last().is_some_and(|instruction| {
-                        !matches!(instruction.control_effect(), IrControlEffect::None)
-                    }) {
-                        return Err(format!(
-                            "fallthrough block {} still contains a control effect",
-                            block.id.0
-                        ));
-                    }
-                }
+                SemanticTerminator::Fallthrough => {}
                 SemanticTerminator::Unknown => {
-                    if !block.instructions.last().is_some_and(|instruction| {
+                    if !block.instructions.iter().rev().any(|instruction| {
                         matches!(instruction.control_effect(), IrControlEffect::Unknown)
                     }) {
                         return Err(format!(
@@ -584,5 +583,52 @@ mod tests {
             });
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
         assert!(error.contains("instruction control effect changed"));
+    }
+
+    #[test]
+    fn semantic_validation_rejects_multiple_control_effects() {
+        let mut semantic = SemanticBlock {
+            id: BlockId(0),
+            address: ROM_BASE,
+            mode: Mode::Arm,
+            instructions: vec![
+                SemanticInstruction {
+                    address: ROM_BASE,
+                    size: 4,
+                    ops: vec![IrOp::Branch {
+                        target: ROM_BASE,
+                        condition: Condition::Al,
+                        link: false,
+                    }],
+                    reads: Vec::new(),
+                    writes: Vec::new(),
+                    memory: None,
+                    flags: FlagEffect {
+                        read: false,
+                        write: false,
+                    },
+                },
+                SemanticInstruction {
+                    address: ROM_BASE + 4,
+                    size: 4,
+                    ops: vec![IrOp::BranchExchange {
+                        register: 14,
+                        link: false,
+                    }],
+                    reads: vec![14],
+                    writes: Vec::new(),
+                    memory: None,
+                    flags: FlagEffect {
+                        read: false,
+                        write: false,
+                    },
+                },
+            ],
+            successors: Vec::new(),
+            terminator: SemanticTerminator::Return,
+        };
+        let error = validate_control_placement(&semantic).unwrap_err();
+        assert!(error.contains("multiple control-effect instructions"));
+        semantic.instructions.clear();
     }
 }
