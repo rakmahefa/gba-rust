@@ -1,8 +1,46 @@
 //! Architectural GBA memory-mapped I/O register definitions.
 //!
-//! This module owns register addresses and bit definitions shared by the
-//! runtime memory bus and device models. Device state remains in their
-//! respective runtime components; this module is intentionally declarative.
+//! This module owns the register contract shared by the CPU bus and device
+//! models. Each register has an explicit width, access policy and writable
+//! mask so device state cannot accidentally inherit generic byte-array
+//! semantics.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MmioWidth {
+    Byte,
+    Halfword,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MmioAccess {
+    ReadOnly,
+    ReadWrite,
+    WriteOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MmioRegister {
+    pub address: u32,
+    pub width: MmioWidth,
+    pub access: MmioAccess,
+    pub writable_mask: u32,
+}
+
+impl MmioRegister {
+    pub const fn new(
+        address: u32,
+        width: MmioWidth,
+        access: MmioAccess,
+        writable_mask: u32,
+    ) -> Self {
+        Self {
+            address,
+            width,
+            access,
+            writable_mask,
+        }
+    }
+}
 
 pub const DISPCNT: u32 = 0x0400_0000;
 pub const DISPSTAT: u32 = 0x0400_0004;
@@ -15,6 +53,27 @@ pub const IME: u32 = 0x0400_0208;
 pub const POSTFLG: u32 = 0x0400_0300;
 pub const HALTCNT: u32 = 0x0400_0301;
 
+pub const DISPCNT_HI: u32 = DISPCNT + 1;
+pub const DISPSTAT_HI: u32 = DISPSTAT + 1;
+pub const VCOUNT_HI: u32 = VCOUNT + 1;
+pub const KEYINPUT_HI: u32 = KEYINPUT + 1;
+pub const IE_HI: u32 = IE + 1;
+pub const IF_HI: u32 = IF + 1;
+pub const WAITCNT_HI: u32 = WAITCNT + 1;
+pub const IME_HI: u32 = IME + 1;
+
+/// DISPCNT has sixteen architectural control bits.
+pub const DISPCNT_WRITABLE_MASK: u16 = 0xffff;
+/// DISPSTAT status bits 0..2 are hardware-owned; bits 3..5 and 8..15 are writable.
+pub const DISPSTAT_WRITABLE_MASK: u16 = 0xff38;
+/// Interrupt controller exposes fourteen interrupt sources.
+pub const INTERRUPT_SOURCE_MASK: u16 = 0x3fff;
+/// WAITCNT bit 15 (Game Pak type) is read-only on GBA hardware.
+pub const WAITCNT_WRITABLE_MASK: u16 = 0x7fff;
+/// IME is a single-bit master interrupt enable register.
+pub const IME_WRITABLE_MASK: u16 = 0x0001;
+pub const POSTFLG_WRITABLE_MASK: u8 = 0x01;
+
 pub const DISPSTAT_VBLANK: u16 = 1 << 0;
 pub const DISPSTAT_HBLANK: u16 = 1 << 1;
 pub const DISPSTAT_VCOUNT: u16 = 1 << 2;
@@ -24,13 +83,86 @@ pub const DISPSTAT_VCOUNT_IRQ: u16 = 1 << 5;
 pub const DISPSTAT_VCOUNT_MASK: u16 = 0xff << 8;
 pub const DISPSTAT_STATUS_MASK: u16 = DISPSTAT_VBLANK | DISPSTAT_HBLANK | DISPSTAT_VCOUNT;
 
-pub const DISPSTAT_HI: u32 = DISPSTAT + 1;
-pub const VCOUNT_HI: u32 = VCOUNT + 1;
-pub const KEYINPUT_HI: u32 = KEYINPUT + 1;
-pub const IE_HI: u32 = IE + 1;
-pub const IF_HI: u32 = IF + 1;
-pub const WAITCNT_HI: u32 = WAITCNT + 1;
-pub const IME_HI: u32 = IME + 1;
+pub const DISPCNT_REGISTER: MmioRegister = MmioRegister::new(
+    DISPCNT,
+    MmioWidth::Halfword,
+    MmioAccess::ReadWrite,
+    DISPCNT_WRITABLE_MASK as u32,
+);
+pub const DISPSTAT_REGISTER: MmioRegister = MmioRegister::new(
+    DISPSTAT,
+    MmioWidth::Halfword,
+    MmioAccess::ReadWrite,
+    DISPSTAT_WRITABLE_MASK as u32,
+);
+pub const VCOUNT_REGISTER: MmioRegister = MmioRegister::new(
+    VCOUNT,
+    MmioWidth::Halfword,
+    MmioAccess::ReadOnly,
+    0,
+);
+pub const KEYINPUT_REGISTER: MmioRegister = MmioRegister::new(
+    KEYINPUT,
+    MmioWidth::Halfword,
+    MmioAccess::ReadOnly,
+    0,
+);
+pub const IE_REGISTER: MmioRegister = MmioRegister::new(
+    IE,
+    MmioWidth::Halfword,
+    MmioAccess::ReadWrite,
+    INTERRUPT_SOURCE_MASK as u32,
+);
+pub const IF_REGISTER: MmioRegister = MmioRegister::new(
+    IF,
+    MmioWidth::Halfword,
+    MmioAccess::ReadWrite,
+    INTERRUPT_SOURCE_MASK as u32,
+);
+pub const WAITCNT_REGISTER: MmioRegister = MmioRegister::new(
+    WAITCNT,
+    MmioWidth::Halfword,
+    MmioAccess::ReadWrite,
+    WAITCNT_WRITABLE_MASK as u32,
+);
+pub const IME_REGISTER: MmioRegister = MmioRegister::new(
+    IME,
+    MmioWidth::Halfword,
+    MmioAccess::ReadWrite,
+    IME_WRITABLE_MASK as u32,
+);
+pub const POSTFLG_REGISTER: MmioRegister = MmioRegister::new(
+    POSTFLG,
+    MmioWidth::Byte,
+    MmioAccess::ReadWrite,
+    POSTFLG_WRITABLE_MASK as u32,
+);
+pub const HALTCNT_REGISTER: MmioRegister = MmioRegister::new(
+    HALTCNT,
+    MmioWidth::Byte,
+    MmioAccess::WriteOnly,
+    0xff,
+);
+
+/// Returns the canonical register contract for an exact register address.
+/// High bytes of halfword registers deliberately resolve to the same device
+/// register because the runtime supports byte-granular CPU bus accesses.
+#[inline]
+pub const fn register(address: u32) -> Option<MmioRegister> {
+    match address {
+        DISPCNT | DISPCNT_HI => Some(DISPCNT_REGISTER),
+        DISPSTAT | DISPSTAT_HI => Some(DISPSTAT_REGISTER),
+        VCOUNT | VCOUNT_HI => Some(VCOUNT_REGISTER),
+        KEYINPUT | KEYINPUT_HI => Some(KEYINPUT_REGISTER),
+        IE | IE_HI => Some(IE_REGISTER),
+        IF | IF_HI => Some(IF_REGISTER),
+        WAITCNT | WAITCNT_HI => Some(WAITCNT_REGISTER),
+        IME | IME_HI => Some(IME_REGISTER),
+        POSTFLG => Some(POSTFLG_REGISTER),
+        HALTCNT => Some(HALTCNT_REGISTER),
+        _ => None,
+    }
+}
 
 #[inline]
 pub const fn dispstat_vcount(value: u16) -> u8 {
@@ -67,5 +199,17 @@ mod tests {
             DISPSTAT_STATUS_MASK & (DISPSTAT_VBLANK_IRQ | DISPSTAT_HBLANK_IRQ | DISPSTAT_VCOUNT_IRQ),
             0
         );
+    }
+
+    #[test]
+    fn register_contract_exposes_access_policy_and_masks() {
+        assert_eq!(register(DISPCNT), Some(DISPCNT_REGISTER));
+        assert_eq!(register(DISPCNT_HI), Some(DISPCNT_REGISTER));
+        assert_eq!(register(VCOUNT).unwrap().access, MmioAccess::ReadOnly);
+        assert_eq!(register(HALTCNT).unwrap().access, MmioAccess::WriteOnly);
+        assert_eq!(register(DISPSTAT).unwrap().writable_mask, 0xff38);
+        assert_eq!(register(IE).unwrap().writable_mask, 0x3fff);
+        assert_eq!(register(WAITCNT).unwrap().writable_mask, 0x7fff);
+        assert!(register(0x0400_001f).is_none());
     }
 }
