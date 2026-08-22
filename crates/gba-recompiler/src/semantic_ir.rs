@@ -126,9 +126,12 @@ fn semantic_instruction(ir: &IrInstruction) -> SemanticInstruction {
 }
 
 fn terminator(block: &SemanticBlock) -> SemanticTerminator {
-    let Some(instruction) = block.instructions.last() else {
-        return SemanticTerminator::Unknown;
+    let Some(instruction) = block.instructions.iter().rev().find(|instruction| {
+        !matches!(instruction.control_effect(), IrControlEffect::None)
+    }) else {
+        return SemanticTerminator::Fallthrough;
     };
+
     match instruction.control_effect() {
         IrControlEffect::Branch {
             target,
@@ -160,6 +163,16 @@ fn terminator(block: &SemanticBlock) -> SemanticTerminator {
     }
 }
 
+fn semantic_successors(
+    source_successors: &[BlockId],
+    terminator: &SemanticTerminator,
+) -> Vec<BlockId> {
+    match terminator {
+        SemanticTerminator::Return | SemanticTerminator::IndirectBranch { .. } => Vec::new(),
+        _ => source_successors.to_vec(),
+    }
+}
+
 pub fn build_semantic_program(
     program: &Program,
     functions: &FunctionControlFlowGraph,
@@ -184,10 +197,11 @@ pub fn build_semantic_program(
                 address: block.key.address,
                 mode: block.key.mode,
                 instructions,
-                successors: block.successors.clone(),
+                successors: Vec::new(),
                 terminator: SemanticTerminator::Unknown,
             };
             semantic.terminator = terminator(&semantic);
+            semantic.successors = semantic_successors(&block.successors, &semantic.terminator);
             blocks.push(semantic);
         }
         semantic_functions.push(SemanticFunction {
@@ -242,7 +256,6 @@ fn validate_instruction(
     source: &IrInstruction,
     semantic: &SemanticInstruction,
     block_id: BlockId,
-    is_last: bool,
 ) -> Result<(), String> {
     if source.address != semantic.address || source.size != semantic.size {
         return Err(format!("block {} instruction identity changed", block_id.0));
@@ -278,11 +291,21 @@ fn validate_instruction(
             block_id.0
         ));
     }
-    if !is_last && !matches!(semantic.control_effect(), IrControlEffect::None) {
-        return Err(format!(
-            "block {} has a control-effect instruction before its terminator",
-            block_id.0
-        ));
+    Ok(())
+}
+
+fn validate_control_placement(block: &SemanticBlock) -> Result<(), String> {
+    let mut control_instruction = None;
+    for (index, instruction) in block.instructions.iter().enumerate() {
+        if matches!(instruction.control_effect(), IrControlEffect::None) {
+            continue;
+        }
+        if control_instruction.replace(index).is_some() {
+            return Err(format!(
+                "block {} contains multiple control-effect instructions",
+                block.id.0
+            ));
+        }
     }
     Ok(())
 }
@@ -348,16 +371,10 @@ pub fn validate_semantic_program(
                     block.id.0
                 ));
             }
-            for (index, (source_ir, semantic_instruction)) in
-                source.ir.iter().zip(&block.instructions).enumerate()
-            {
-                validate_instruction(
-                    source_ir,
-                    semantic_instruction,
-                    block.id,
-                    index + 1 == source.ir.len(),
-                )?;
+            for (source_ir, semantic_instruction) in source.ir.iter().zip(&block.instructions) {
+                validate_instruction(source_ir, semantic_instruction, block.id)?;
             }
+            validate_control_placement(block)?;
             for successor in &block.successors {
                 if successor.0 >= program.cfg.blocks.len() {
                     return Err(format!(
@@ -388,21 +405,15 @@ pub fn validate_semantic_program(
                         return Err(format!("terminating block {} has successors", block.id.0));
                     }
                 }
-                SemanticTerminator::Fallthrough => {
-                    if block.instructions.last().is_some_and(|instruction| {
-                        !matches!(instruction.control_effect(), IrControlEffect::None)
-                    }) {
-                        return Err(format!(
-                            "fallthrough block {} still contains a control effect",
-                            block.id.0
-                        ));
-                    }
-                }
+                SemanticTerminator::Fallthrough => {}
                 SemanticTerminator::Unknown => {
-                    if !block.instructions.last().is_some_and(|instruction| {
+                    if !block.instructions.iter().rev().any(|instruction| {
                         matches!(instruction.control_effect(), IrControlEffect::Unknown)
                     }) {
-                        return Err(format!("unknown semantic terminator in block {} is not backed by an unknown control effect", block.id.0));
+                        return Err(format!(
+                            "unknown semantic terminator in block {} is not backed by an unknown control effect",
+                            block.id.0
+                        ));
                     }
                 }
             }
@@ -502,13 +513,60 @@ mod tests {
     }
 
     #[test]
+    fn resolved_bx_lr_is_a_semantic_return_without_executable_successor() {
+        let rom = arm_rom(&[
+            0xE59F_E000, // ldr lr, [pc]
+            0xE12F_FF1E, // bx lr
+            0xE1A0_0000, // resolved LR target / executable NOP
+        ]);
+        let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let block = semantic
+            .functions
+            .iter()
+            .flat_map(|function| function.blocks.iter())
+            .find(|block| {
+                block.terminator == SemanticTerminator::Return
+                    && block.instructions.last().map(|i| i.address) == Some(ROM_BASE + 4)
+            })
+            .expect("resolved BX LR semantic return block must be present");
+        assert_eq!(block.terminator, SemanticTerminator::Return);
+        assert!(block.successors.is_empty());
+    }
+
+    #[test]
+    fn resolved_indirect_branch_is_dynamic_without_executable_successor() {
+        let rom = arm_rom(&[
+            0xE59F_3000, // ldr r3, [pc]
+            0xE12F_FF13, // bx r3
+            0xE1A0_0000, // resolved r3 target / executable NOP
+        ]);
+        let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let block = semantic
+            .functions
+            .iter()
+            .flat_map(|function| function.blocks.iter())
+            .find(|block| {
+                block.terminator == SemanticTerminator::IndirectBranch { register: 3 }
+                    && block.instructions.last().map(|i| i.address) == Some(ROM_BASE + 4)
+            })
+            .expect("resolved BX r3 semantic indirect-branch block must be present");
+        assert_eq!(
+            block.terminator,
+            SemanticTerminator::IndirectBranch { register: 3 }
+        );
+        assert!(block.successors.is_empty());
+    }
+
+    #[test]
     fn semantic_validation_rejects_changed_reads() {
         let program = analyze(&arm_rom(&[0xE3A0_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let mut semantic = build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].instructions[0]
-            .reads
-            .push(1);
+        semantic.functions[0].blocks[0].instructions[0].reads.push(1);
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
         assert!(error.contains("instruction reads changed"));
     }
@@ -518,14 +576,37 @@ mod tests {
         let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let mut semantic = build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].instructions[0]
-            .ops
-            .push(IrOp::Branch {
-                target: ROM_BASE,
-                condition: Condition::Al,
-                link: false,
-            });
+        semantic.functions[0].blocks[0].instructions[0].ops.push(IrOp::Branch {
+            target: ROM_BASE,
+            condition: Condition::Al,
+            link: false,
+        });
         let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
         assert!(error.contains("instruction control effect changed"));
+    }
+
+    #[test]
+    fn semantic_validation_rejects_multiple_control_effects() {
+        let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
+        let functions = discover_functions(&program);
+        let semantic = build_semantic_program(&program, &functions).unwrap();
+        let block = semantic
+            .functions
+            .iter()
+            .flat_map(|function| function.blocks.iter())
+            .find(|block| block.instructions.len() == 2)
+            .expect("two-instruction block must be present");
+        let mut invalid_block = block.clone();
+        invalid_block.instructions[0].ops.push(IrOp::BranchExchange {
+            register: 14,
+            link: false,
+        });
+        invalid_block.instructions[1].ops.push(IrOp::Branch {
+            target: ROM_BASE,
+            condition: Condition::Al,
+            link: false,
+        });
+        let error = validate_control_placement(&invalid_block).unwrap_err();
+        assert!(error.contains("multiple control-effect instructions"));
     }
 }
