@@ -105,12 +105,64 @@ impl Default for Runtime {
 }
 
 impl Runtime {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn load_bios(&mut self, bytes: &[u8]) -> Result<(), BiosLoadError> {
         self.bios = Bios::from_bytes(bytes)?;
         Ok(())
     }
 
-    pub fn bios(&self) -> &Bios { &self.bios }
+    pub fn bios(&self) -> &Bios {
+        &self.bios
+    }
+
+    /// Update one of the GBA's 10 active-low keypad bits.
+    ///
+    /// Bits 0..9 map to A, B, Select, Start, Right, Left, Up, Down, R and L.
+    /// Pressing a key clears the corresponding KEYINPUT bit. IRQ generation is
+    /// intentionally left to the future KEYCNT device, so KEYINPUT itself never
+    /// manufactures an interrupt that was not enabled by MMIO state.
+    pub fn set_key_pressed(&mut self, key: u8, pressed: bool) {
+        if key >= 10 {
+            return;
+        }
+        let bit = 1u16 << key;
+        if pressed {
+            self.keyinput &= !bit;
+        } else {
+            self.keyinput |= bit;
+        }
+    }
+
+    /// Replace the complete active-low keypad state. Only the architectural
+    /// ten-button range is accepted; upper bits remain released/high.
+    pub fn set_key_input(&mut self, pressed_mask: u16) {
+        self.keyinput = KEYINPUT_DEFAULT & !(pressed_mask & 0x03ff);
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn key_input_is_active_low() {
+        let mut runtime = Runtime::new();
+        assert_eq!(runtime.keyinput, 0x03ff);
+        runtime.set_key_pressed(0, true);
+        assert_eq!(runtime.keyinput & 1, 0);
+        runtime.set_key_pressed(0, false);
+        assert_ne!(runtime.keyinput & 1, 0);
+    }
+
+    #[test]
+    fn key_input_ignores_non_architectural_bits() {
+        let mut runtime = Runtime::new();
+        runtime.set_key_input(0xffff);
+        assert_eq!(runtime.keyinput, 0);
+        runtime.set_key_pressed(10, true);
+        assert_eq!(runtime.keyinput, 0);
+    }
 }
