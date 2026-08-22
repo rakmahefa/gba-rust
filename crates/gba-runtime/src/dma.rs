@@ -58,7 +58,7 @@ impl DmaAddressMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DmaChannel {
     pub source: u32,
     pub destination: u32,
@@ -70,16 +70,22 @@ pub struct DmaChannel {
     start_pending: bool,
 }
 
-impl Default for DmaChannel {
-    fn default() -> Self {
-        Self { source: 0, destination: 0, count: 0, control: 0, current_source: 0, current_destination: 0, reload_destination: 0, start_pending: false }
-    }
-}
-
 impl DmaChannel {
-    pub fn enabled(&self) -> bool { self.control & CONTROL_ENABLE != 0 }
-    pub fn trigger(&self) -> DmaTrigger { DmaTrigger::from_control(self.control) }
-    pub fn width(&self) -> u32 { if self.control & CONTROL_WORD != 0 { 4 } else { 2 } }
+    pub fn enabled(&self) -> bool {
+        self.control & CONTROL_ENABLE != 0
+    }
+
+    pub fn trigger(&self) -> DmaTrigger {
+        DmaTrigger::from_control(self.control)
+    }
+
+    pub fn width(&self) -> u32 {
+        if self.control & CONTROL_WORD != 0 {
+            4
+        } else {
+            2
+        }
+    }
 
     pub fn transfer_count(&self, channel: usize) -> u32 {
         if self.count == 0 {
@@ -89,9 +95,19 @@ impl DmaChannel {
         }
     }
 
-    pub fn request(&mut self) { if self.enabled() { self.start_pending = true; } }
-    pub fn pending(&self) -> bool { self.start_pending && self.enabled() }
-    pub fn clear_pending(&mut self) { self.start_pending = false; }
+    pub fn request(&mut self) {
+        if self.enabled() {
+            self.start_pending = true;
+        }
+    }
+
+    pub fn pending(&self) -> bool {
+        self.start_pending && self.enabled()
+    }
+
+    pub fn clear_pending(&mut self) {
+        self.start_pending = false;
+    }
 
     pub fn begin(&mut self) {
         self.current_source = self.source;
@@ -100,8 +116,13 @@ impl DmaChannel {
         self.start_pending = false;
     }
 
-    pub fn current_source(&self) -> u32 { self.current_source }
-    pub fn current_destination(&self) -> u32 { self.current_destination }
+    pub fn current_source(&self) -> u32 {
+        self.current_source
+    }
+
+    pub fn current_destination(&self) -> u32 {
+        self.current_destination
+    }
 
     pub fn advance_addresses(&mut self) {
         let width = self.width();
@@ -125,11 +146,18 @@ impl DmaChannel {
         }
     }
 
-    pub fn write_source(&mut self, value: u32) { self.source = value & 0x0fff_ffff; }
-    pub fn write_destination(&mut self, value: u32) { self.destination = value & 0x07ff_ffff; }
+    pub fn write_source(&mut self, value: u32) {
+        self.source = value & 0x0fff_ffff;
+    }
+
+    pub fn write_destination(&mut self, value: u32) {
+        self.destination = value & 0x07ff_ffff;
+    }
+
     pub fn write_count(&mut self, value: u16, channel: usize) {
         self.count = value & if channel == 3 { 0xffff } else { 0x3fff };
     }
+
     pub fn write_control(&mut self, value: u16, channel: usize) {
         let mask = if channel == 3 { DMA3_CONTROL_MASK } else { DMA_CONTROL_MASK };
         let was_enabled = self.enabled();
@@ -137,7 +165,9 @@ impl DmaChannel {
         if !was_enabled && self.enabled() && matches!(self.trigger(), DmaTrigger::Immediate) {
             self.start_pending = true;
         }
-        if !self.enabled() { self.start_pending = false; }
+        if !self.enabled() {
+            self.start_pending = false;
+        }
     }
 }
 
@@ -166,20 +196,36 @@ impl Default for DmaController {
 }
 
 impl DmaController {
-    pub fn active(&self) -> Option<usize> { self.active }
-    pub fn busy_until(&self) -> u64 { self.busy_until }
-    pub fn is_busy(&self, now: u64) -> bool { self.active.is_some() && now < self.busy_until }
+    pub fn active(&self) -> Option<usize> {
+        self.active
+    }
+
+    pub fn busy_until(&self) -> u64 {
+        self.busy_until
+    }
+
+    pub fn is_busy(&self, now: u64) -> bool {
+        self.active.is_some() && now < self.busy_until
+    }
 
     pub fn request_trigger(&mut self, trigger: DmaTrigger) {
         for channel in &mut self.channels {
-            if channel.enabled() && channel.trigger() == trigger { channel.request(); }
+            if channel.enabled() && channel.trigger() == trigger {
+                channel.request();
+            }
         }
     }
 
-    pub fn request_immediate(&mut self, channel: usize) { if channel < 4 { self.channels[channel].request(); } }
+    pub fn request_immediate(&mut self, channel: usize) {
+        if channel < 4 {
+            self.channels[channel].request();
+        }
+    }
 
     pub fn select_next(&self) -> Option<usize> {
-        if self.active.is_some() { return None; }
+        if self.active.is_some() {
+            return None;
+        }
         (0..4).find(|&channel| self.channels[channel].pending())
     }
 
@@ -237,7 +283,9 @@ fn rom_sequential_wait(waitcnt: u16, bank: u8) -> u32 {
 }
 
 pub fn transfer_cycles(source: u32, destination: u32, count: u32, width: u32, waitcnt: u16) -> u64 {
-    if count == 0 { return 0; }
+    if count == 0 {
+        return 0;
+    }
     let src = bus::decode(source).region;
     let dst = bus::decode(destination).region;
 
@@ -329,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn control_masks_keep_dma3_bit_15_configuration_valid() {
+    fn control_masks_keep_dma3_configuration_valid() {
         let mut channel = DmaChannel::default();
         channel.write_control(0xffff, 3);
         assert_eq!(channel.control, DMA3_CONTROL_MASK);
@@ -337,7 +385,7 @@ mod tests {
 
     #[test]
     fn rom_waitstate_changes_transfer_cost() {
-        let fast = transfer_cycles(bus::ROM0_START, bus::EWRAM_START, 4, 2, 0x001c);
+        let fast = transfer_cycles(bus::ROM0_START, bus::EWRAM_START, 4, 2, 0x0008);
         let slow = transfer_cycles(bus::ROM0_START, bus::EWRAM_START, 4, 2, 0x0000);
         assert!(fast < slow);
     }
