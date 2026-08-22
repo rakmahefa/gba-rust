@@ -61,11 +61,11 @@ fn validate_instruction(
     if source.address != semantic.address || source.size != semantic.size {
         return Err(format!("block {} instruction identity changed", block_id.0));
     }
-    if semantic.ops.is_empty() {
-        return Err(format!("block {} contains an empty semantic instruction", block_id.0));
-    }
     if source.ops != semantic.ops {
         return Err(format!("block {} instruction operations changed", block_id.0));
+    }
+    if semantic.ops.is_empty() {
+        return Err(format!("block {} contains an empty semantic instruction", block_id.0));
     }
     if source.reads() != semantic.reads {
         return Err(format!("block {} instruction reads changed", block_id.0));
@@ -100,10 +100,16 @@ fn validate_instruction(
         ));
     }
     if !same_memory(source.memory(), semantic.memory) {
-        return Err(format!("block {} instruction memory effects changed", block_id.0));
+        return Err(format!(
+            "block {} instruction memory effects changed",
+            block_id.0
+        ));
     }
     if source.control() != semantic.control_effect() {
-        return Err(format!("block {} instruction control effect changed", block_id.0));
+        return Err(format!(
+            "block {} instruction control effect changed",
+            block_id.0
+        ));
     }
     Ok(())
 }
@@ -143,11 +149,12 @@ fn successor_matches_target(program: &Program, block: &SemanticBlock, target: u3
 }
 
 fn validate_block_against_source(program: &Program, block: &SemanticBlock) -> Result<(), String> {
-    let source = program
-        .cfg
-        .blocks
-        .get(block.id.0)
-        .ok_or_else(|| format!("semantic block {} does not exist in source CFG", block.id.0))?;
+    let source = program.cfg.blocks.get(block.id.0).ok_or_else(|| {
+        format!(
+            "semantic block {} does not exist in source CFG",
+            block.id.0
+        )
+    })?;
     if source.id != block.id {
         return Err(format!(
             "semantic block {} has mismatched source identity",
@@ -170,7 +177,10 @@ fn validate_block_against_source(program: &Program, block: &SemanticBlock) -> Re
         validate_instruction(source_ir, semantic_instruction, block.id)?;
     }
     if block.instructions.is_empty() {
-        return Err(format!("block {} contains no semantic instructions", block.id.0));
+        return Err(format!(
+            "block {} contains no semantic instructions",
+            block.id.0
+        ));
     }
     validate_control_placement(block)?;
     Ok(())
@@ -280,10 +290,10 @@ fn validate_terminator(program: &Program, block: &SemanticBlock) -> Result<(), S
         SemanticTerminator::Return
         | SemanticTerminator::IndirectBranch { .. }
         | SemanticTerminator::Unknown
-            if !block.successors.is_empty() =>
-        {
-            Err(format!("terminating block {} has successors", block.id.0))
-        }
+            if !block.successors.is_empty() => Err(format!(
+            "terminating block {} has successors",
+            block.id.0
+        )),
         _ => Ok(()),
     }
 }
@@ -317,9 +327,16 @@ fn validate_function_metadata(
             ));
         }
         if function.entry != source.entry {
-            return Err(format!("semantic function {} entry changed", function.id.0));
+            return Err(format!(
+                "semantic function {} entry changed",
+                function.id.0
+            ));
         }
-        let semantic_block_ids = function.blocks.iter().map(|block| block.id).collect::<Vec<_>>();
+        let semantic_block_ids = function
+            .blocks
+            .iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>();
         if semantic_block_ids != source.blocks {
             return Err(format!(
                 "semantic function {} block membership changed",
@@ -379,7 +396,10 @@ pub fn validate_semantic_program(
         for block in &function.blocks {
             validate_block_against_source(program, block)?;
             if owned.insert(block.id, function.id).is_some() {
-                return Err(format!("block {} belongs to multiple functions", block.id.0));
+                return Err(format!(
+                    "block {} belongs to multiple functions",
+                    block.id.0
+                ));
             }
             validate_successors(program, block)?;
             validate_terminator(program, block)?;
@@ -391,7 +411,11 @@ pub fn validate_semantic_program(
     if !owned.contains_key(&program.cfg.entry) || owned[&program.cfg.entry] != semantic.entry {
         return Err("CFG entry block is not owned by semantic entry function".into());
     }
-    for call in semantic.functions.iter().flat_map(|function| function.calls.iter()) {
+    for call in semantic
+        .functions
+        .iter()
+        .flat_map(|function| function.calls.iter())
+    {
         if call.block.0 >= program.cfg.blocks.len() {
             return Err(format!("call site references invalid block {}", call.block.0));
         }
