@@ -90,6 +90,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rom = fs::read(&rom_path)?;
     let mut runtime = gba_runtime::Runtime::new();
     runtime.load_cartridge(gba_runtime::Cartridge::from_rom(rom, "saves"));
+    assert_eq!(
+        runtime.cpu.r[13], 0x0300_7f00,
+        "cartridge execution must receive the BIOS-compatible system stack"
+    );
 
     let result = gba_generated::gba_entry_with_limit(&mut runtime, max_steps)?;
     assert_eq!(
@@ -101,13 +105,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("real-rom execution: steps={}", result.steps);
     println!("real-rom execution: pc={:#010x}", result.state.pc());
     println!("real-rom execution: thumb={}", result.state.thumb);
+    println!("real-rom execution: sp={:#010x}", result.state.registers[13]);
     println!("real-rom execution: cycles={}", result.state.cycles);
     println!("real-rom execution: exit={:?}", result.exit);
 
     match result.exit {
-        GeneratedExecutionExit::Returned { .. }
-        | GeneratedExecutionExit::Halted { .. }
-        | GeneratedExecutionExit::StepLimitExceeded { .. } => Ok(()),
+        GeneratedExecutionExit::Returned { .. } | GeneratedExecutionExit::Halted { .. } => Ok(()),
+        GeneratedExecutionExit::StepLimitExceeded { address, .. } => {
+            if result.steps != max_steps {
+                return Err("generated execution reported an inconsistent step-limit count".into());
+            }
+            if address == 0x0800_0000 {
+                return Err("real-ROM execution never progressed beyond the cartridge entry".into());
+            }
+            Ok(())
+        }
         GeneratedExecutionExit::ExceptionVector { kind, .. } => {
             Err(format!("execution escaped into an unlinked exception vector: {kind:?}").into())
         }
@@ -164,6 +176,7 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
     let mut preflight = Runtime::new();
     preflight.load_cartridge(Cartridge::from_rom(rom.clone(), "saves"));
     assert_eq!(preflight.cpu.r[15], CARTRIDGE_BASE);
+    assert_eq!(preflight.cpu.r[13], 0x0300_7f00);
     assert_eq!(preflight.read8(CARTRIDGE_BASE), rom[0]);
     assert_eq!(
         preflight.read16(CARTRIDGE_BASE),
@@ -201,5 +214,6 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("real-rom execution: steps="));
     assert!(stdout.contains("real-rom execution: pc="));
+    assert!(stdout.contains("real-rom execution: sp=0x03007f00"));
     assert!(stdout.contains("real-rom execution: cycles="));
 }
