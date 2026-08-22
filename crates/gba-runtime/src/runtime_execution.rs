@@ -3,7 +3,8 @@ use crate::arm7tdmi;
 use crate::bios::{PowerState, IRQ_DMA0, IRQ_HBLANK, IRQ_VBLANK, IRQ_VCOUNT};
 use crate::cpu::REG_PC;
 use crate::mmio::{
-    DISPSTAT_HBLANK, DISPSTAT_VBLANK, DISPSTAT_VCOUNT_IRQ, DISPSTAT_VCOUNT_MASK,
+    DISPSTAT_HBLANK, DISPSTAT_HBLANK_IRQ, DISPSTAT_VBLANK, DISPSTAT_VBLANK_IRQ,
+    DISPSTAT_VCOUNT_IRQ, DISPSTAT_VCOUNT_MASK,
 };
 use crate::scheduler::{
     EventKind, CYCLES_PER_SCANLINE, HBLANK_START_CYCLES, SCANLINES_PER_FRAME,
@@ -77,18 +78,12 @@ impl Runtime {
         match event {
             EventKind::PpuHBlankStart => {
                 self.dispstat |= DISPSTAT_HBLANK;
-                if self.dispstat & DISPSTAT_HBLANK != 0
-                    && self.dispstat & DISPSTAT_HBLANK != 0
-                    && self.dispstat & crate::mmio::DISPSTAT_STATUS_MASK != 0
-                {
-                    // Status and IRQ enable share DISPSTAT architecturally only
-                    // through the VBlank/HBlank/VCOUNT enable bits in the
-                    // corresponding control register; the runtime memory layer
-                    // remains responsible for preserving writable fields.
+                if self.dispstat & DISPSTAT_HBLANK_IRQ != 0 {
+                    self.request_interrupt(IRQ_HBLANK);
                 }
                 self.scheduler.schedule_in(
-                    CYCLES_PER_SCANLINE.saturating_sub(HBLANK_START_CYCLES),
-                    EventKind::PpuScanline,
+                    CYCLES_PER_SCANLINE,
+                    EventKind::PpuHBlankStart,
                 );
             }
             EventKind::PpuScanline => {
@@ -102,7 +97,9 @@ impl Runtime {
 
                 if self.vcount == VBLANK_START_LINE {
                     self.dispstat |= DISPSTAT_VBLANK;
-                    self.request_interrupt(IRQ_VBLANK);
+                    if self.dispstat & DISPSTAT_VBLANK_IRQ != 0 {
+                        self.request_interrupt(IRQ_VBLANK);
+                    }
                 }
 
                 let compare = ((self.dispstat & DISPSTAT_VCOUNT_MASK) >> 8) as u16;
@@ -113,17 +110,15 @@ impl Runtime {
                 }
 
                 self.scheduler.schedule_in(
-                    HBLANK_START_CYCLES,
-                    EventKind::PpuHBlankStart,
-                );
-                self.scheduler.schedule_in(
                     CYCLES_PER_SCANLINE,
                     EventKind::PpuScanline,
                 );
             }
             EventKind::PpuVBlankStart => {
                 self.dispstat |= DISPSTAT_VBLANK;
-                self.request_interrupt(IRQ_VBLANK);
+                if self.dispstat & DISPSTAT_VBLANK_IRQ != 0 {
+                    self.request_interrupt(IRQ_VBLANK);
+                }
             }
             EventKind::DmaComplete { channel } => {
                 if channel < 4 {
