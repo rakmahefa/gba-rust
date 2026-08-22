@@ -60,12 +60,7 @@ fn emit_direct_terminator(
         return;
     }
     let fallthrough = fallthrough_target(block, program, target);
-    let _ = writeln!(
-        out,
-        "    let branch_taken = rt.condition_code({});"
-        ,
-        condition_code(condition)
-    );
+    let _ = writeln!(out, "    let branch_taken = rt.condition_code({});", condition_code(condition));
     let _ = writeln!(
         out,
         "    if std::env::var(\"GBA_GENERATED_TRACE\").is_ok() {{ eprintln!(\"[generated-branch] source={address:#010x}/{mode:?} condition={:?} nzcv={{:?}} taken={{}} target={target:#010x} fallthrough={:?}\", rt.nzcv(), branch_taken); }}",
@@ -190,7 +185,7 @@ mod tests {
 
     #[test]
     fn conditional_branch_emits_runtime_decision_trace() {
-        let rom = arm_rom(&[0x0A00_0000, 0xE1A0_0000, 0xE1A0_0000]);
+        let rom = arm_rom(&[0xA000_0000, 0xE1A0_0000, 0xE1A0_0000]);
         let program = analyze(&rom, ROM_BASE, Mode::Arm).unwrap();
         let functions = discover_functions(&program);
         let semantic = build_semantic_program(&program, &functions).unwrap();
