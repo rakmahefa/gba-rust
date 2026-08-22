@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::address_space::ImageMapping;
 use crate::decoder::{DecodeError, Mode};
@@ -52,18 +52,58 @@ fn debug_incoming_edge(
     );
 }
 
+fn prune_unreachable(
+    entry: &BlockKey,
+    discovered: &HashMap<BlockKey, DiscoveredInstruction>,
+) -> (Vec<BlockKey>, HashMap<BlockKey, DiscoveredInstruction>) {
+    let mut reachable = HashSet::<BlockKey>::new();
+    let mut queue = VecDeque::<BlockKey>::from([entry.clone()]);
+
+    while let Some(key) = queue.pop_front() {
+        if !reachable.insert(key.clone()) {
+            continue;
+        }
+        let Some(node) = discovered.get(&key) else {
+            continue;
+        };
+        for successor in &node.successors {
+            if discovered.contains_key(successor) {
+                queue.push_back(successor.clone());
+            }
+        }
+    }
+
+    let mut order = discovered
+        .keys()
+        .filter(|key| reachable.contains(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    order.sort_by(|a, b| {
+        a.address.cmp(&b.address).then_with(|| {
+            super::discovery::sort_mode(a.mode).cmp(&super::discovery::sort_mode(b.mode))
+        })
+    });
+
+    let filtered = discovered
+        .iter()
+        .filter(|(key, _)| reachable.contains(*key))
+        .map(|(key, node)| (key.clone(), node.clone()))
+        .collect::<HashMap<_, _>>();
+
+    (order, filtered)
+}
+
 pub(super) fn discover_reachable(
     rom: &[u8],
     entry: BlockKey,
     mapping: ImageMapping,
 ) -> Result<(Vec<BlockKey>, HashMap<BlockKey, DiscoveredInstruction>), DecodeError> {
-    let mut order = Vec::new();
     let mut discovered = HashMap::<BlockKey, DiscoveredInstruction>::new();
     let mut states = HashMap::<BlockKey, AbstractState>::new();
     let mut queue = VecDeque::<BlockKey>::new();
 
     states.insert(entry.clone(), AbstractState::default());
-    queue.push_back(entry);
+    queue.push_back(entry.clone());
 
     while let Some(key) = queue.pop_front() {
         let state = states.get(&key).copied().unwrap_or_default();
@@ -73,10 +113,6 @@ pub(super) fn discover_reachable(
         let successors = instruction_successors(rom, instruction, state_after, mapping);
 
         debug_abstract_state(&key, state, state_after, &successors);
-
-        if !discovered.contains_key(&key) {
-            order.push(key.clone());
-        }
 
         let previous = discovered.insert(
             key.clone(),
@@ -121,7 +157,7 @@ pub(super) fn discover_reachable(
         }
     }
 
-    Ok((order, discovered))
+    Ok(prune_unreachable(&entry, &discovered))
 }
 
 pub(super) fn sort_mode(mode: Mode) -> u8 {
