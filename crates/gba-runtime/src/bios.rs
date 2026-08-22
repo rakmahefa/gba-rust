@@ -205,10 +205,12 @@ pub fn execute_swi(
         }
         BiosSwi::Halt => {
             *power = PowerState::Halted;
+            cpu.cpsr &= !CPSR_I;
             BiosResult::NON_RETURNING
         }
         BiosSwi::Stop => {
             *power = PowerState::Stopped;
+            cpu.cpsr &= !CPSR_I;
             BiosResult::NON_RETURNING
         }
         BiosSwi::IntrWait => {
@@ -223,6 +225,7 @@ pub fn execute_swi(
                 BiosResult::RETURNED
             } else {
                 *power = PowerState::Halted;
+                cpu.cpsr &= !CPSR_I;
                 BiosResult::NON_RETURNING
             }
         }
@@ -369,6 +372,27 @@ mod tests {
         assert_eq!(result, BiosResult::RETURNED);
         assert_eq!(power, PowerState::Running);
         assert_eq!(interrupts.iflags & IRQ_VBLANK, 0);
+    }
+
+    #[test]
+    fn halt_clears_irq_mask_so_an_external_irq_can_wake_the_runtime() {
+        let (mut ewram, mut iwram, mut palette, mut vram, mut oam) = memory();
+        let mut cpu = Cpu::default();
+        cpu.cpsr |= CPSR_I;
+        let mut power = PowerState::Running;
+        let mut interrupts = InterruptController::default();
+        let mut memory = bios_memory(&mut ewram, &mut iwram, &mut palette, &mut vram, &mut oam);
+
+        execute_swi(
+            &mut cpu,
+            &mut power,
+            &mut interrupts,
+            &mut memory,
+            BiosSwi::Halt,
+        );
+
+        assert_eq!(power, PowerState::Halted);
+        assert_eq!(cpu.cpsr & CPSR_I, 0);
     }
 
     #[test]
