@@ -12,9 +12,13 @@ const VRAM_LEN: usize = 0x18000;
 const OAM_LEN: usize = 0x400;
 const KEYINPUT_DEFAULT: u16 = 0x03ff;
 
+#[path = "runtime_bios.rs"]
 mod runtime_bios;
+#[path = "runtime_cpu.rs"]
 mod runtime_cpu;
+#[path = "runtime_execution.rs"]
 mod runtime_execution;
+#[path = "runtime_memory.rs"]
 mod runtime_memory;
 
 #[cfg(test)]
