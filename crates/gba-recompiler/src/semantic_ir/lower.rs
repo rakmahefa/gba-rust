@@ -1,10 +1,10 @@
 use crate::cfg::{BlockId, Program};
 use crate::decoder::{ArmExtended, ThumbExtended};
 use crate::function::FunctionControlFlowGraph;
-use crate::ir::{IrControlEffect, IrInstruction, IrMemoryEffect, IrMemoryKind, IrMemoryWidth};
+use crate::ir::{IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth};
 
 use super::{
-    MemoryEffect, MemoryWidth, SemanticBlock, SemanticInstruction, SemanticProgram,
+    MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram,
     SemanticTerminator,
 };
 
