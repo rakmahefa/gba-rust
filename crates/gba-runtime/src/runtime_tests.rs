@@ -1,7 +1,12 @@
 use super::*;
 use crate::bios::{BiosResult, BiosSwi, HALTCNT, IE, IF, IME, IRQ_HBLANK, IRQ_VBLANK};
-use crate::bus::{BusRegion, EWRAM_START, IWRAM_START, OAM_START, PALETTE_START, ROM0_START, ROM1_START, VRAM_START};
-use crate::cpu::{CpuMode, ExceptionKind, CPSR_C, CPSR_N, CPSR_V, CPSR_Z, REG_LR, REG_PC, REG_SP};
+use crate::bus::{
+    BusRegion, EWRAM_START, IWRAM_START, OAM_START, PALETTE_START, ROM0_START, ROM1_START,
+    VRAM_START,
+};
+use crate::cpu::{
+    CpuMode, ExceptionKind, CPSR_C, CPSR_N, CPSR_V, CPSR_Z, REG_LR, REG_PC, REG_SP,
+};
 
 #[test]
 fn compare_updates_all_nzcv_flags() {
@@ -101,7 +106,9 @@ fn swi_exception_saves_cpsr_and_restores_banks() {
     runtime.write_reg(REG_SP, 0x3000);
     runtime.write_reg(REG_LR, 0x4000);
     assert_eq!(runtime.cpu.spsr(), Some(old));
-    let result = runtime.exception_return(0x0800_0104).expect("exception return");
+    let result = runtime
+        .exception_return(0x0800_0104)
+        .expect("exception return");
     assert_eq!(result, (0x0800_0104, false));
     assert_eq!(runtime.mode(), CpuMode::System);
     assert_eq!(runtime.read_reg(REG_SP), 0x1000);
@@ -113,7 +120,11 @@ fn generated_engine_dispatches_iteratively_without_recursive_calls() {
     let mut runtime = Runtime::new();
     let result = runtime.run_generated(0x0800_0000, false, Some(10_000), |rt, address, thumb| {
         rt.tick(1);
-        if rt.cycles == 10_000 { Err("done") } else { Ok((address, thumb)) }
+        if rt.cycles == 10_000 {
+            Err("done")
+        } else {
+            Ok((address, thumb))
+        }
     });
     assert_eq!(result, Err("done"));
     assert_eq!(runtime.cycles, 10_000);
@@ -122,7 +133,10 @@ fn generated_engine_dispatches_iteratively_without_recursive_calls() {
 #[test]
 fn exchange_target_for_dispatch_updates_thumb_and_pc() {
     let mut runtime = Runtime::new();
-    assert_eq!(runtime.exchange_target_for_dispatch(0x0800_0101), (0x0800_0100, true));
+    assert_eq!(
+        runtime.exchange_target_for_dispatch(0x0800_0101),
+        (0x0800_0100, true)
+    );
     assert!(runtime.cpu.thumb);
     assert_eq!(runtime.read_reg(REG_PC), 0x0800_0100);
 }
@@ -211,7 +225,9 @@ fn pending_irq_enters_irq_mode_and_can_be_returned_through_the_contract() {
     assert_eq!(runtime.power, PowerState::Running);
     assert_eq!(runtime.cpu.spsr(), Some(CpuMode::Supervisor as u32));
 
-    let result = runtime.return_from_exception(runtime.read_reg(REG_LR)).expect("IRQ handler must be able to return");
+    let result = runtime
+        .return_from_exception(runtime.read_reg(REG_LR))
+        .expect("IRQ handler must be able to return");
     assert_eq!(result, (0x08, false));
     assert_eq!(runtime.mode(), CpuMode::Supervisor);
     assert_eq!(runtime.power, PowerState::Running);
@@ -236,8 +252,12 @@ fn internal_ram_and_video_mirrors_share_physical_storage() {
     assert_eq!(runtime.read8(IWRAM_START + 0x8000 + 0x123), 0x34);
     runtime.write16(PALETTE_START, 0x5678);
     assert_eq!(runtime.read16(PALETTE_START + 0x400), 0x5678);
-    runtime.write16(VRAM_START + 0x100, 0xabcd);
-    assert_eq!(runtime.read16(VRAM_START + 0x200), 0xabcd);
+
+    // GBA VRAM is 96 KiB with an 8 KiB mirror gap: 0x06018000..0x0601FFFF
+    // maps back to 0x06010000..0x06017FFF.
+    runtime.write16(VRAM_START + 0x10000, 0xabcd);
+    assert_eq!(runtime.read16(VRAM_START + 0x18000), 0xabcd);
+
     runtime.write16(OAM_START + 0x20, 0x2468);
     assert_eq!(runtime.read16(OAM_START + 0x420), 0x2468);
 }
@@ -245,7 +265,10 @@ fn internal_ram_and_video_mirrors_share_physical_storage() {
 #[test]
 fn cartridge_rom_waitstate_windows_alias_the_same_rom() {
     let mut runtime = Runtime::new();
-    runtime.cartridge = Some(crate::Cartridge::from_rom(vec![0x78, 0x56, 0x34, 0x12], "."));
+    runtime.cartridge = Some(crate::Cartridge::from_rom(
+        vec![0x78, 0x56, 0x34, 0x12],
+        ".",
+    ));
     assert_eq!(runtime.read32(ROM0_START), 0x1234_5678);
     assert_eq!(runtime.read32(ROM1_START), 0x1234_5678);
     assert_eq!(runtime.read32(ROM0_START + 0x20_000), 0xff_ff_ff_ff);
@@ -265,6 +288,9 @@ fn video_byte_writes_follow_gba_halfword_rules() {
 
 #[test]
 fn bus_decode_reports_the_runtime_region_without_guessing_unmapped_io() {
-    assert_eq!(crate::decode_bus_address(ROM1_START).region, BusRegion::CartridgeRom);
+    assert_eq!(
+        crate::decode_bus_address(ROM1_START).region,
+        BusRegion::CartridgeRom
+    );
     assert_eq!(crate::decode_bus_address(0x0100_0000).region, BusRegion::Unmapped);
 }
