@@ -50,11 +50,12 @@ fn interrupt_register_byte_writes_preserve_all_valid_low_bits() {
 }
 
 #[test]
-fn waitcnt_preserves_the_read_only_gamepak_type_bit() {
+fn waitcnt_preserves_the_read_only_gamepak_type_bit_and_ignores_reserved_bit() {
     let mut runtime = Runtime::new();
     runtime.waitcnt = 0x8000;
     runtime.write16(mmio::WAITCNT, 0xffff);
-    assert_eq!(runtime.read16(mmio::WAITCNT), 0xffff);
+    assert_eq!(runtime.read16(mmio::WAITCNT), 0xdfff);
+    assert_eq!(runtime.read16(mmio::WAITCNT) & 0x2000, 0);
 
     runtime.waitcnt = 0;
     runtime.write16(mmio::WAITCNT, 0xffff);
