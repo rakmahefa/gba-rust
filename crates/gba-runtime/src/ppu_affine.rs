@@ -368,7 +368,7 @@ mod tests {
         put_u16(&mut io, BG2PD, 0x0100);
         palette[2] = 0x1f;
         vram[1] = 1;
-        vram[128] = 1;
+        vram[64] = 1;
         ppu.render_affine_mode_scanline(BG2_ENABLE | 1, 0, &vram, &palette, &io);
         assert_eq!(ppu.framebuffer[8], 0xffff_0000);
     }
