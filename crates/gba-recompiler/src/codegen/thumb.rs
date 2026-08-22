@@ -253,15 +253,9 @@ pub fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
             let count = registers.count_ones() + u32::from(extra_lr_pc);
             if load {
                 let _ = writeln!(out, "    let mut address = rt.read_reg(13);");
-                let load_regs: Vec<u8> = (0..8u8)
-                    .filter(|reg| registers & (1 << reg) != 0)
-                    .collect();
-                for (index, reg) in load_regs.iter().enumerate() {
-                    let next = index + 1 < load_regs.len() || extra_lr_pc;
-                    if next {
+                for reg in 0..8u8 {
+                    if registers & (1 << reg) != 0 {
                         let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address)); address = address.wrapping_add(4);");
-                    } else {
-                        let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address));");
                     }
                 }
                 if extra_lr_pc {
@@ -277,19 +271,13 @@ pub fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
                     out,
                     "    let mut address = rt.read_reg(13).wrapping_sub({count} * 4);"
                 );
-                let store_regs: Vec<u8> = (0..8u8)
-                    .filter(|reg| registers & (1 << reg) != 0)
-                    .collect();
-                for (index, reg) in store_regs.iter().enumerate() {
-                    let next = index + 1 < store_regs.len() || extra_lr_pc;
-                    if next {
+                for reg in 0..8u8 {
+                    if registers & (1 << reg) != 0 {
                         let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg})); address = address.wrapping_add(4);");
-                    } else {
-                        let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg}));");
                     }
                 }
                 if extra_lr_pc {
-                    let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg(14));");
+                    let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg(14)); address = address.wrapping_add(4);");
                 }
                 let _ = writeln!(
                     out,
