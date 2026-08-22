@@ -12,7 +12,7 @@ pub use validate::validate_semantic_program;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decoder::{Condition, Mode, ROM_BASE};
+    use crate::decoder::{Mode, ROM_BASE};
     use crate::ir::IrControlEffect;
     use crate::{analyze, discover_functions};
 
