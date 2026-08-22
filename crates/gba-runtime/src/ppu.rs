@@ -160,6 +160,7 @@ mod tests {
         vram[0xa000] = 2;
         palette[2] = 0x1f;
         palette[4] = 0xe0;
+        palette[5] = 0x03;
         ppu.render_scanline(BG2_ENABLE | 4 | FRAME_SELECT, 0, &vram, &palette);
         assert_eq!(ppu.framebuffer[0], 0xff00_ff00);
     }
