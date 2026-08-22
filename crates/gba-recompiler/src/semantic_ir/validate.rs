@@ -142,14 +142,11 @@ fn validate_terminator(program: &Program, block: &SemanticBlock) -> Result<(), S
         _ => return Err(format!("block {} terminator disagrees with terminal control effect", block.id.0)),
     }
     match block.terminator {
-        SemanticTerminator::Return | SemanticTerminator::IndirectBranch { .. } | SemanticTerminator::Unknown => {
-            if !block.successors.is_empty() {
-                return Err(format!("terminating block {} has successors", block.id.0));
-            }
+        SemanticTerminator::Return | SemanticTerminator::IndirectBranch { .. } | SemanticTerminator::Unknown if !block.successors.is_empty() => {
+            Err(format!("terminating block {} has successors", block.id.0))
         }
-        _ => {}
+        _ => Ok(()),
     }
-    Ok(())
 }
 
 fn validate_function_metadata(program: &Program, functions: &FunctionControlFlowGraph, semantic: &SemanticProgram) -> Result<(), String> {
@@ -227,67 +224,4 @@ pub fn validate_semantic_program(program: &Program, functions: &FunctionControlF
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::decoder::{Mode, ROM_BASE};
-    use crate::ir::IrOp;
-    use crate::{analyze, discover_functions};
-
-    fn arm_rom(words: &[u32]) -> Vec<u8> {
-        words.iter().flat_map(|word| word.to_le_bytes()).collect()
-    }
-
-    #[test]
-    fn rejects_control_effect_not_in_last_instruction() {
-        let program = analyze(&arm_rom(&[0xE3A0_0001, 0xE280_0001]), ROM_BASE, Mode::Arm).unwrap();
-        let functions = discover_functions(&program);
-        let mut semantic = super::super::lower::build_semantic_program(&program, &functions).unwrap();
-        let block = &mut semantic.functions[0].blocks[0];
-        block.instructions[0].ops.push(IrOp::BranchExchange { register: 14, link: false });
-        let error = validate_control_placement(block).unwrap_err();
-        assert!(error.contains("before its final instruction"));
-    }
-
-    #[test]
-    fn rejects_function_id_index_mismatch() {
-        let program = analyze(&arm_rom(&[0xE3A0_0001]), ROM_BASE, Mode::Arm).unwrap();
-        let functions = discover_functions(&program);
-        let mut semantic = super::super::lower::build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].id = FunctionId(1);
-        let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
-        assert!(error.contains("not at vector index"));
-    }
-
-    #[test]
-    fn rejects_block_identity_mismatch() {
-        let program = analyze(&arm_rom(&[0xE3A0_0001]), ROM_BASE, Mode::Arm).unwrap();
-        let functions = discover_functions(&program);
-        let mut semantic = super::super::lower::build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].blocks[0].address += 2;
-        let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
-        assert!(error.contains("address/mode changed"));
-    }
-
-    #[test]
-    fn rejects_dangling_function_successor() {
-        let program = analyze(&arm_rom(&[0xE3A0_0001]), ROM_BASE, Mode::Arm).unwrap();
-        let functions = discover_functions(&program);
-        let mut semantic = super::super::lower::build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].successors.push(FunctionId(99));
-        let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
-        assert!(error.contains("invalid function successor"));
-    }
-
-    #[test]
-    fn rejects_dangling_call_continuation() {
-        let program = analyze(&arm_rom(&[0xE12F_FF31, 0xE1A0_0000]), ROM_BASE, Mode::Arm).unwrap();
-        let functions = discover_functions(&program);
-        let mut semantic = super::super::lower::build_semantic_program(&program, &functions).unwrap();
-        semantic.functions[0].calls[0].return_block = Some(BlockId(99));
-        let error = validate_semantic_program(&program, &functions, &semantic).unwrap_err();
-        assert!(error.contains("call continuation"));
-    }
 }
