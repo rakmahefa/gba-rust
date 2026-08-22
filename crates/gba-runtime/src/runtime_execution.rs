@@ -298,8 +298,8 @@ mod timing_tests {
     fn bitmap_ppu_renders_at_the_first_hblank_boundary() {
         let mut runtime = Runtime::new();
         runtime.dispcnt = 3 | (1 << 10);
-        runtime.vram[0] = 0x00;
-        runtime.vram[1] = 0x7c;
+        runtime.vram[0] = 0x1f;
+        runtime.vram[1] = 0x00;
         runtime.advance_cycles(HBLANK_START_CYCLES as u32);
         assert_eq!(runtime.ppu.framebuffer[0], 0xffff_0000);
     }
