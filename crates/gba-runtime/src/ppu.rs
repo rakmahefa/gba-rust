@@ -51,7 +51,12 @@ impl Ppu {
 
         match dispcnt & MODE_MASK {
             3 => self.render_mode3_scanline(vcount as usize, vram),
-            4 => self.render_mode4_scanline(vcount as usize, dispcnt & FRAME_SELECT != 0, vram, palette),
+            4 => self.render_mode4_scanline(
+                vcount as usize,
+                dispcnt & FRAME_SELECT != 0,
+                vram,
+                palette,
+            ),
             5 => self.render_mode5_scanline(vcount as usize, dispcnt & FRAME_SELECT != 0, vram),
             _ => {}
         }
@@ -128,8 +133,8 @@ mod tests {
         let mut ppu = Ppu::default();
         let mut vram = vec![0; 0x18000];
         let palette = vec![0; 0x400];
-        vram[2] = 0x00;
-        vram[3] = 0x7c;
+        vram[2] = 0x1f;
+        vram[3] = 0x00;
         ppu.render_scanline(BG2_ENABLE | 3, 0, &vram, &palette);
         assert_eq!(ppu.framebuffer[1], 0xffff_0000);
     }
@@ -156,7 +161,7 @@ mod tests {
         palette[2] = 0x1f;
         palette[4] = 0xe0;
         ppu.render_scanline(BG2_ENABLE | 4 | FRAME_SELECT, 0, &vram, &palette);
-        assert_eq!(ppu.framebuffer[0], 0xffff_0000);
+        assert_eq!(ppu.framebuffer[0], 0xff00_ff00);
     }
 
     #[test]
@@ -166,7 +171,10 @@ mod tests {
         let palette = vec![0; 0x400];
         vram[0] = 0x1f;
         ppu.render_scanline(BG2_ENABLE | 5, MODE5_Y_OFFSET as u16, &vram, &palette);
-        assert_eq!(ppu.framebuffer[MODE5_Y_OFFSET * VISIBLE_WIDTH + MODE5_X_OFFSET], 0xffff_0000);
+        assert_eq!(
+            ppu.framebuffer[MODE5_Y_OFFSET * VISIBLE_WIDTH + MODE5_X_OFFSET],
+            0xffff_0000
+        );
         assert_eq!(ppu.framebuffer[0], 0);
     }
 }
