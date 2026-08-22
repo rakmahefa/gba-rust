@@ -146,7 +146,7 @@ impl Timer {
 }
 
 pub const fn timer_index(address: u32) -> Option<usize> {
-    match address {
+    match address & !1 {
         TIMER0CNT_L | TIMER0CNT_H => Some(0),
         TIMER1CNT_L | TIMER1CNT_H => Some(1),
         TIMER2CNT_L | TIMER2CNT_H => Some(2),
@@ -157,7 +157,7 @@ pub const fn timer_index(address: u32) -> Option<usize> {
 
 pub const fn timer_register_is_control(address: u32) -> bool {
     matches!(
-        address,
+        address & !1,
         TIMER0CNT_H | TIMER1CNT_H | TIMER2CNT_H | TIMER3CNT_H
     )
 }
@@ -222,5 +222,16 @@ mod tests {
         let mut timer = Timer::default();
         timer.write_control(0xffff);
         assert_eq!(timer.read_control(), 0x00c7);
+    }
+
+    #[test]
+    fn timer_register_mapping_includes_high_byte_accesses() {
+        assert_eq!(timer_index(TIMER0CNT_L), Some(0));
+        assert_eq!(timer_index(TIMER0CNT_L + 1), Some(0));
+        assert_eq!(timer_index(TIMER0CNT_H), Some(0));
+        assert_eq!(timer_index(TIMER0CNT_H + 1), Some(0));
+        assert!(timer_register_is_control(TIMER0CNT_H));
+        assert!(timer_register_is_control(TIMER0CNT_H + 1));
+        assert!(!timer_register_is_control(TIMER0CNT_L + 1));
     }
 }
