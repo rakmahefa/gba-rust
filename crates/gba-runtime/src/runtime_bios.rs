@@ -55,6 +55,10 @@ impl Runtime {
         self.service_interrupts();
     }
 
+    pub fn generated_irq_pending(&self) -> bool {
+        self.interrupts.irq_pending() && self.cpu.cpsr & (1 << 7) == 0
+    }
+
     pub fn service_interrupts(&mut self) -> bool {
         if self.power == PowerState::Stopped {
             return false;
