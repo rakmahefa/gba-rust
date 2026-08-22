@@ -106,8 +106,8 @@ impl Runtime {
                 self.waitcnt = (self.waitcnt & 0xff00) | u16::from(value);
             }
             mmio::WAITCNT_HI => {
-                self.waitcnt = (self.waitcnt & 0x00ff)
-                    | ((u16::from(value) << 8) & (mmio::WAITCNT_WRITABLE_MASK & 0xff00));
+                self.waitcnt = (self.waitcnt & 0x8000)
+                    | ((u16::from(value) << 8) & 0x7000);
             }
             mmio::IME => {
                 self.interrupts.ime = value & 1 != 0;
@@ -234,7 +234,8 @@ impl Runtime {
                     .acknowledge(value & mmio::INTERRUPT_SOURCE_MASK)
             }
             _ if address == mmio::WAITCNT => {
-                self.waitcnt = value & mmio::WAITCNT_WRITABLE_MASK;
+                self.waitcnt = (self.waitcnt & 0x8000)
+                    | (value & mmio::WAITCNT_WRITABLE_MASK);
             }
             _ if address == mmio::IME => {
                 self.interrupts.ime = value & mmio::IME_WRITABLE_MASK != 0;
