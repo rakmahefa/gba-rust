@@ -1,7 +1,6 @@
-use super::dma::{DmaController, DmaTrigger};
-use super::scheduler::EventKind;
+use crate::dma::{DmaController, DmaTrigger};
+use crate::scheduler::EventKind;
 use super::Runtime;
-use crate::mmio_devices;
 
 const DMA_BASES: [u32; 4] = [0x0400_00b0, 0x0400_00bc, 0x0400_00c8, 0x0400_00d4];
 
@@ -122,7 +121,7 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mmio_devices::{DMA0CNT_H, DMA0CNT_L, DMA0DAD, DMA0SAD};
+    use crate::mmio_devices::{DMA0CNT_H, DMA0DAD, DMA0SAD};
     use crate::{bus, IRQ_DMA0};
 
     fn program_channel(runtime: &mut Runtime, base: u32, source: u32, destination: u32, count: u16, control: u16) {
