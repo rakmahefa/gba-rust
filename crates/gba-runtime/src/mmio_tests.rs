@@ -9,13 +9,22 @@ fn dispcnt_supports_halfword_and_byte_accesses() {
     runtime.write16(mmio::DISPCNT, 0xa55a);
     assert_eq!(runtime.read16(mmio::DISPCNT), 0xa552);
 
-    // Bit 3 is read-only, so a low-byte write preserves its previous value.
+    // The initial value has bit 3 clear, so a low-byte write keeps it clear.
     runtime.write8(mmio::DISPCNT, 0x12);
-    assert_eq!(runtime.read16(mmio::DISPCNT), 0xa51a);
+    assert_eq!(runtime.read16(mmio::DISPCNT), 0xa512);
     runtime.write8(mmio::DISPCNT_HI, 0x34);
-    assert_eq!(runtime.read16(mmio::DISPCNT), 0x341a);
+    assert_eq!(runtime.read16(mmio::DISPCNT), 0x3412);
 
+    // A pre-existing read-only bit must survive both byte and halfword writes.
     runtime.dispcnt = 0x0008;
+    runtime.write8(mmio::DISPCNT, 0x00);
+    assert_eq!(runtime.read16(mmio::DISPCNT), 0x0008);
+
+    runtime.dispcnt = 0xa508;
+    runtime.write8(mmio::DISPCNT_HI, 0xaa);
+    assert_eq!(runtime.read16(mmio::DISPCNT), 0xaa08);
+
+    runtime.dispcnt = 0xa508;
     runtime.write16(mmio::DISPCNT, 0x0000);
     assert_eq!(runtime.read16(mmio::DISPCNT), 0x0008);
 }
