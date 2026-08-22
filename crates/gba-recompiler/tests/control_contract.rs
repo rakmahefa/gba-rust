@@ -17,10 +17,10 @@ fn thumb_rom(halfwords: &[u16]) -> Vec<u8> {
 #[test]
 fn arm_swi_creates_a_terminal_semantic_block_with_continuation() {
     let rom = arm_rom(&[
-        0xef00_0012, // SWI 0x12
-        0xe1a0_0000, // MOV r0, r0
-        0xef00_0034, // SWI 0x34
-        0xe1a0_1001, // MOV r1, r1
+        0xef00_0012,
+        0xe1a0_0000,
+        0xef00_0034,
+        0xe1a0_1001,
     ]);
     let program = analyze(&rom, ROM_BASE, Mode::Arm).expect("ARM CFG analysis should succeed");
     let functions = discover_functions(&program);
@@ -43,9 +43,7 @@ fn arm_swi_creates_a_terminal_semantic_block_with_continuation() {
         block
             .instructions
             .iter()
-            .filter(|instruction| {
-                !matches!(instruction.control_effect(), IrControlEffect::None)
-            })
+            .filter(|instruction| !matches!(instruction.control_effect(), IrControlEffect::None))
             .count()
             <= 1
     }));
@@ -53,14 +51,8 @@ fn arm_swi_creates_a_terminal_semantic_block_with_continuation() {
 
 #[test]
 fn thumb_swi_creates_a_terminal_semantic_block_with_continuation() {
-    let rom = thumb_rom(&[
-        0xdf12, // SWI 0x12
-        0x1c00, // ADD r0, r0, #0
-        0xdf34, // SWI 0x34
-        0x1c09, // ADD r1, r1, #0
-    ]);
-    let program =
-        analyze(&rom, ROM_BASE, Mode::Thumb).expect("Thumb CFG analysis should succeed");
+    let rom = thumb_rom(&[0xdf12, 0x1c00, 0xdf34, 0x1c09]);
+    let program = analyze(&rom, ROM_BASE, Mode::Thumb).expect("Thumb CFG analysis should succeed");
     let functions = discover_functions(&program);
     let semantic = build_semantic_program(&program, &functions)
         .expect("Thumb semantic control contract should accept separated SWIs");
@@ -74,4 +66,13 @@ fn thumb_swi_creates_a_terminal_semantic_block_with_continuation() {
 
     assert_eq!(swi_blocks.len(), 2);
     assert!(swi_blocks.iter().all(|block| block.successors.len() == 1));
+}
+
+#[test]
+fn unsupported_arm_coprocessor_instruction_is_a_hard_cfg_boundary() {
+    let program = analyze(&arm_rom(&[0xFFFF_FFFF, 0xE1A0_0000]), ROM_BASE, Mode::Arm)
+        .expect("CFG analysis should accept unsupported instructions as terminal boundaries");
+    assert_eq!(program.cfg.blocks.len(), 1);
+    assert_eq!(program.cfg.blocks[0].instructions.len(), 1);
+    assert!(program.cfg.blocks[0].successors.is_empty());
 }
