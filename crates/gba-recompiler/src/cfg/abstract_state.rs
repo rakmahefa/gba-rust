@@ -345,7 +345,7 @@ pub(super) fn resolved_exchange_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decoder::{decode_arm, Mode};
+    use crate::decoder::decode_arm;
 
     #[test]
     fn arm_pc_reads_use_architectural_pipeline_offset() {
