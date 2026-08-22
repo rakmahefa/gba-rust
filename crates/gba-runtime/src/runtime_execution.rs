@@ -219,6 +219,18 @@ impl Runtime {
                     return Err("runtime is halted");
                 }
             }
+
+            // Hardware IRQs are sampled only at generated-block boundaries. This
+            // preserves instruction atomicity while making asynchronous timer,
+            // PPU and DMA requests visible to the generated execution path.
+            if self.generated_irq_pending() && self.service_interrupts() {
+                next = (
+                    self.cpu.r[REG_PC] & if self.cpu.thumb { !1 } else { !3 },
+                    self.cpu.thumb,
+                );
+                continue;
+            }
+
             self.cpu.set_thumb(next.1);
             self.cpu.r[REG_PC] = next.0;
             next = dispatch(self, next.0, next.1)?;
@@ -266,6 +278,24 @@ mod timing_tests {
         runtime.schedule_irq_sample(0);
         runtime.advance_cycles(0);
         assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::Irq);
+    }
+
+    #[test]
+    fn generated_execution_samples_a_pending_irq_before_dispatching_next_block() {
+        let mut runtime = Runtime::new();
+        runtime.interrupts.ie = IRQ_HBLANK;
+        runtime.interrupts.ime = true;
+        runtime.interrupts.request(IRQ_HBLANK);
+        let mut dispatched = false;
+        let result = runtime.run_generated(0x0800_0000, false, Some(2), |runtime, address, thumb| {
+            dispatched = true;
+            assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::Irq);
+            assert_eq!(address, 0x0000_0018);
+            assert!(!thumb);
+            Err("irq vector reached")
+        });
+        assert_eq!(result, Err("irq vector reached"));
+        assert!(dispatched);
     }
 
     #[test]
