@@ -110,15 +110,15 @@ impl Runtime {
             return;
         }
         let irq = self.dma.channels[active].control & 0x4000 != 0;
-        let Some((_, disabled)) = self.dma.complete() else {
+        let Some(completed) = self.dma.complete() else {
             return;
         };
+        debug_assert_eq!(completed, active);
+
         let base = DMA_BASES[active];
+        self.set_io_half(base + 8, self.dma.channels[active].count);
         self.set_io_half(base + 10, self.dma.channels[active].control);
-        if disabled {
-            self.dma.channels[active].count = 0;
-            self.set_io_half(base + 8, 0);
-        }
+
         if irq {
             self.interrupts.request(1 << (8 + active));
         }
