@@ -1,11 +1,11 @@
 use crate::cfg::{BlockId, Program};
-use crate::decoder::Mode;
-use crate::function::{FunctionControlFlowGraph, FunctionId};
-use crate::ir::{
-    IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth, IrOp,
-};
+use crate::function::FunctionControlFlowGraph;
+use crate::ir::{IrControlEffect, IrInstruction, IrMemoryKind, IrMemoryWidth};
 
-use super::{MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram, SemanticTerminator};
+use super::{
+    MemoryEffect, MemoryWidth, SemanticBlock, SemanticFunction, SemanticInstruction, SemanticProgram,
+    SemanticTerminator,
+};
 
 fn memory_width(width: IrMemoryWidth) -> MemoryWidth {
     match width {
@@ -87,7 +87,10 @@ fn terminator(block: &SemanticBlock) -> SemanticTerminator {
     }
 }
 
-fn semantic_successors(source_successors: &[BlockId], terminator: &SemanticTerminator) -> Vec<BlockId> {
+fn semantic_successors(
+    source_successors: &[BlockId],
+    terminator: &SemanticTerminator,
+) -> Vec<BlockId> {
     match terminator {
         SemanticTerminator::Return
         | SemanticTerminator::IndirectBranch { .. }
