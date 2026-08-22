@@ -192,7 +192,7 @@ pub fn classify_thumb(raw: u16) -> ThumbClass {
     if thumb_matches(raw, 0xF000, 0xA000) {
         return ThumbClass::Address;
     }
-    if thumb_matches(raw, 0xFF80, 0xB000) {
+    if thumb_matches(raw, 0xFF00, 0xB000) {
         return ThumbClass::AddSp;
     }
     if thumb_matches(raw, 0xFE00, 0xB400) || thumb_matches(raw, 0xFE00, 0xBC00) {
@@ -233,5 +233,11 @@ mod tests {
     #[test]
     fn classifies_thumb_cmp_immediate() {
         assert_eq!(classify_thumb(0x2A5F), ThumbClass::CmpImmediate);
+    }
+
+    #[test]
+    fn classifies_thumb_add_sp_both_directions() {
+        assert_eq!(classify_thumb(0xB000), ThumbClass::AddSp);
+        assert_eq!(classify_thumb(0xB081), ThumbClass::AddSp);
     }
 }
