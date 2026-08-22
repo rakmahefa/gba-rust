@@ -186,7 +186,8 @@ mod tests {
     fn arm_image(words: &[(u32, u32)]) -> Vec<u8> {
         let mut image = vec![0u8; 0x20];
         for &(address, raw) in words {
-            image[address as usize..address as usize + 4].copy_from_slice(&raw.to_le_bytes());
+            image[address as usize..address as usize + 4]
+                .copy_from_slice(&raw.to_le_bytes());
         }
         image
     }
