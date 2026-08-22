@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::bios::{InterruptController, PowerState, IRQ_KEYPAD};
+use super::bios::{InterruptController, PowerState};
 use super::bios_memory::{Bios, BiosLoadError};
 use super::cartridge::Cartridge;
 use super::cpu::Cpu;
@@ -121,35 +121,24 @@ impl Runtime {
     /// Update one of the GBA's 10 active-low keypad bits.
     ///
     /// Bits 0..9 map to A, B, Select, Start, Right, Left, Up, Down, R and L.
-    /// Pressing a key clears the corresponding KEYINPUT bit. A newly pressed
-    /// key may request the keypad IRQ when KEYCNT is enabled by the future MMIO
-    /// keypad device; the runtime keeps the state transition here deterministic.
+    /// Pressing a key clears the corresponding KEYINPUT bit. IRQ generation is
+    /// intentionally left to the future KEYCNT device, so KEYINPUT itself never
+    /// manufactures an interrupt that was not enabled by MMIO state.
     pub fn set_key_pressed(&mut self, key: u8, pressed: bool) {
         if key >= 10 {
             return;
         }
         let bit = 1u16 << key;
-        let was_pressed = self.keyinput & bit == 0;
         if pressed {
             self.keyinput &= !bit;
         } else {
             self.keyinput |= bit;
-        }
-        if pressed && !was_pressed {
-            self.interrupts.request(IRQ_KEYPAD);
-            self.wake_from_interrupt(IRQ_KEYPAD);
         }
     }
 
     /// Replace the complete active-low keypad state. Only the architectural
     /// ten-button range is accepted; upper bits remain released/high.
     pub fn set_key_input(&mut self, pressed_mask: u16) {
-        let next = KEYINPUT_DEFAULT & !(pressed_mask & 0x03ff);
-        let newly_pressed = self.keyinput & !next;
-        self.keyinput = next;
-        if newly_pressed != 0 {
-            self.interrupts.request(IRQ_KEYPAD);
-            self.wake_from_interrupt(IRQ_KEYPAD);
-        }
+        self.keyinput = KEYINPUT_DEFAULT & !(pressed_mask & 0x03ff);
     }
 }
