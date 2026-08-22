@@ -63,6 +63,16 @@ impl Runtime {
     }
 
     pub fn deliver_pending_interrupt(&mut self) -> Option<(u32, bool)> {
+        if self.power == PowerState::Stopped {
+            return None;
+        }
+
+        let pending = self.interrupts.pending();
+        if pending == 0 {
+            return None;
+        }
+
+        self.wake_from_interrupt(pending);
         self.service_interrupts()
             .then_some((self.cpu.r[REG_PC], self.cpu.thumb))
     }
