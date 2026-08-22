@@ -5,7 +5,7 @@ use std::{
 };
 
 use gba_recompiler::{analyze_with_mapping, generate, ImageKind, ImageMapping};
-use gba_runtime::{Cartridge, GeneratedExecutionExit, Runtime};
+use gba_runtime::{Cartridge, Runtime};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ImageArg {
