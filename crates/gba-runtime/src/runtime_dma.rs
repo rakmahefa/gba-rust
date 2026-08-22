@@ -96,12 +96,13 @@ impl Runtime {
             return;
         }
         let Some(active) = self.dma.active() else {
-            self.interrupts.request(1 << (8 + channel));
+            // A stale completion event must be ignored; it cannot manufacture a DMA IRQ.
             return;
         };
         if active != channel as usize {
             return;
         }
+
         let irq = self.dma.channels[active].control & 0x4000 != 0;
         let Some(completed) = self.dma.complete() else {
             return;
@@ -109,18 +110,24 @@ impl Runtime {
         debug_assert_eq!(completed, active);
 
         let base = DMA_BASES[active];
+        self.set_io_word(base, self.dma.channels[active].source);
+        self.set_io_word(base + 4, self.dma.channels[active].destination);
         self.set_io_half(base + 8, self.dma.channels[active].count);
         self.set_io_half(base + 10, self.dma.channels[active].control);
-        if !self.dma.channels[active].enabled() {
-            self.io.insert(base + 8, 0);
-            self.io.insert(base + 9, 0);
-        }
 
         if irq {
             self.interrupts.request(1 << (8 + active));
         }
         if self.dma.select_next().is_some() {
             self.service_dma_arbitration();
+        }
+
+        // Re-assert the programmer-visible terminal state after any chained
+        // arbitration. The expanded execution length (0x4000/0x10000 for a
+        // zero CNT_L write) must never leak back into CNT_L.
+        if !self.dma.channels[active].enabled() {
+            self.set_io_half(base + 8, 0);
+            self.set_io_half(base + 10, self.dma.channels[active].control);
         }
     }
 
@@ -167,6 +174,7 @@ mod tests {
         let remaining = runtime.dma.busy_until() - runtime.scheduler.now();
         runtime.advance_cycles(remaining as u32);
         assert_eq!(runtime.dma.active(), None);
+        assert_eq!(runtime.dma.channels[0].remaining(), 0);
         assert_eq!(runtime.read16(DMA0CNT_L.address), 0);
         assert_eq!(runtime.read16(DMA0CNT_H.address), 0);
         assert_eq!(runtime.read32(DMA0SAD.address), bus::EWRAM_START + 4);
