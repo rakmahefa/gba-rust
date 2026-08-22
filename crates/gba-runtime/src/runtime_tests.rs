@@ -167,6 +167,7 @@ fn mmio_if_write_acknowledges_only_requested_bits() {
 #[test]
 fn halt_and_stop_mmio_change_runtime_power_state() {
     let mut runtime = Runtime::new();
+    runtime.write16(IE, IRQ_VBLANK);
     runtime.write8(HALTCNT, 0);
     assert_eq!(runtime.power, PowerState::Halted);
     runtime.request_interrupt(IRQ_VBLANK);
