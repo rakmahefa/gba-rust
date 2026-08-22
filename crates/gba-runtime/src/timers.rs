@@ -57,23 +57,12 @@ pub enum TimerState {
     Running,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Timer {
     reload: u16,
     counter: u16,
     control: TimerControl,
     cycle_accumulator: u32,
-}
-
-impl Default for Timer {
-    fn default() -> Self {
-        Self {
-            reload: 0,
-            counter: 0,
-            control: TimerControl::default(),
-            cycle_accumulator: 0,
-        }
-    }
 }
 
 impl Timer {
