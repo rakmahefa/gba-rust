@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::decoder::{DecodeError, Mode, ROM_BASE};
+use crate::decoder::{DecodeError, Mode};
 
 mod abstract_state;
 mod discovery;
@@ -60,6 +60,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
+    use crate::decoder::ROM_BASE;
 
     fn arm_rom(words: &[u32]) -> Vec<u8> {
         words.iter().flat_map(|word| word.to_le_bytes()).collect()
