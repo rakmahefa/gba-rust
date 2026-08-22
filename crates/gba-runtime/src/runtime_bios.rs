@@ -35,10 +35,9 @@ impl Runtime {
         result
     }
 
-    pub fn bios_swi_number(&mut self, raw: u32, thumb: bool) -> (u8, Option<BiosResult>) {
+    pub fn bios_swi_number(&mut self, raw: u32, thumb: bool) -> Option<BiosResult> {
         let number = crate::bios::swi_number(raw, thumb);
-        let result = BiosSwi::from_number(number).map(|swi| self.bios_swi(swi));
-        (number, result)
+        BiosSwi::from_number(number).map(|swi| self.bios_swi(swi))
     }
 
     pub fn execute_bios_swi_comment(
@@ -46,10 +45,10 @@ impl Runtime {
         comment: u32,
         thumb: bool,
     ) -> Result<BiosResult, String> {
-        let (number, result) = self.bios_swi_number(comment, thumb);
-        result.ok_or_else(|| {
+        let number = crate::bios::swi_number(comment, thumb);
+        self.bios_swi_number(comment, thumb).ok_or_else(|| {
             format!(
-                "generated BIOS SWI number is not implemented: number=0x{number:02x} comment=0x{comment:08x} thumb={thumb}"
+                "generated BIOS SWI number is not implemented: number={number:#04x} comment={comment:#010x} thumb={thumb}"
             )
         })
     }
