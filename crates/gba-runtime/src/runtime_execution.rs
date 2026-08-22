@@ -48,6 +48,11 @@ impl Runtime {
         self.advance_cycles(cycles);
     }
 
+    fn raise_hardware_interrupt(&mut self, mask: u16) {
+        self.interrupts.request(mask);
+        self.wake_from_interrupt(mask);
+    }
+
     fn tick_timers(&mut self, cycles: u32) {
         if cycles == 0 {
             return;
@@ -69,7 +74,7 @@ impl Runtime {
 
             if self.timers[index].control().irq {
                 let mask = 1 << (3 + index);
-                self.request_interrupt(mask);
+                self.raise_hardware_interrupt(mask);
             }
         }
     }
@@ -79,12 +84,10 @@ impl Runtime {
             EventKind::PpuHBlankStart => {
                 self.dispstat |= DISPSTAT_HBLANK;
                 if self.dispstat & DISPSTAT_HBLANK_IRQ != 0 {
-                    self.request_interrupt(IRQ_HBLANK);
+                    self.raise_hardware_interrupt(IRQ_HBLANK);
                 }
-                self.scheduler.schedule_in(
-                    CYCLES_PER_SCANLINE,
-                    EventKind::PpuHBlankStart,
-                );
+                self.scheduler
+                    .schedule_in(CYCLES_PER_SCANLINE, EventKind::PpuHBlankStart);
             }
             EventKind::PpuScanline => {
                 self.dispstat &= !DISPSTAT_HBLANK;
@@ -98,29 +101,27 @@ impl Runtime {
                 if self.vcount == VBLANK_START_LINE {
                     self.dispstat |= DISPSTAT_VBLANK;
                     if self.dispstat & DISPSTAT_VBLANK_IRQ != 0 {
-                        self.request_interrupt(IRQ_VBLANK);
+                        self.raise_hardware_interrupt(IRQ_VBLANK);
                     }
                 }
 
                 let compare = ((self.dispstat & DISPSTAT_VCOUNT_MASK) >> 8) as u16;
                 if self.vcount == compare && self.dispstat & DISPSTAT_VCOUNT_IRQ != 0 {
-                    self.request_interrupt(IRQ_VCOUNT);
+                    self.raise_hardware_interrupt(IRQ_VCOUNT);
                 }
 
-                self.scheduler.schedule_in(
-                    CYCLES_PER_SCANLINE,
-                    EventKind::PpuScanline,
-                );
+                self.scheduler
+                    .schedule_in(CYCLES_PER_SCANLINE, EventKind::PpuScanline);
             }
             EventKind::PpuVBlankStart => {
                 self.dispstat |= DISPSTAT_VBLANK;
                 if self.dispstat & DISPSTAT_VBLANK_IRQ != 0 {
-                    self.request_interrupt(IRQ_VBLANK);
+                    self.raise_hardware_interrupt(IRQ_VBLANK);
                 }
             }
             EventKind::DmaComplete { channel } => {
                 if channel < 4 {
-                    self.request_interrupt(IRQ_DMA0 << channel);
+                    self.raise_hardware_interrupt(IRQ_DMA0 << channel);
                 }
             }
             EventKind::IrqSample => {
@@ -221,7 +222,7 @@ mod timing_tests {
     use super::*;
     use crate::bios::{IRQ_TIMER0, IRQ_TIMER1};
     use crate::mmio::{DISPSTAT_HBLANK_IRQ, DISPSTAT_VBLANK_IRQ};
-    use crate::timers::{CONTROL_ENABLE, CONTROL_IRQ, CONTROL_CASCADE};
+    use crate::timers::{CONTROL_CASCADE, CONTROL_ENABLE, CONTROL_IRQ};
 
     #[test]
     fn timer_advances_across_ppu_event_boundaries_without_losing_cycles() {
@@ -237,7 +238,7 @@ mod timing_tests {
     }
 
     #[test]
-    fn hblank_event_sets_status_and_can_request_hblank_irq() {
+    fn hardware_irq_becomes_pending_until_an_irq_sample() {
         let mut runtime = Runtime::new();
         runtime.dispstat |= DISPSTAT_HBLANK_IRQ;
         runtime.interrupts.ie = IRQ_HBLANK;
@@ -246,6 +247,11 @@ mod timing_tests {
 
         assert_ne!(runtime.dispstat & DISPSTAT_HBLANK, 0);
         assert_ne!(runtime.interrupts.iflags & IRQ_HBLANK, 0);
+        assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::System);
+
+        runtime.schedule_irq_sample(0);
+        runtime.advance_cycles(0);
+        assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::Irq);
     }
 
     #[test]
@@ -288,5 +294,6 @@ mod timing_tests {
 
         assert_ne!(runtime.interrupts.iflags & IRQ_TIMER0, 0);
         assert_ne!(runtime.interrupts.iflags & IRQ_TIMER1, 0);
+        assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::System);
     }
 }
