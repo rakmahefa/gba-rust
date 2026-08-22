@@ -278,6 +278,14 @@ fn validate_terminator(program: &Program, block: &SemanticBlock) -> Result<(), S
                 link: false,
             },
         ) if *register == effect_register => {}
+        (SemanticTerminator::SoftwareInterrupt { .. }, IrControlEffect::Unknown) => {
+            if block.successors.is_empty() {
+                return Err(format!(
+                    "software-interrupt block {} lost its continuation",
+                    block.id.0
+                ));
+            }
+        }
         (SemanticTerminator::Unknown, IrControlEffect::Unknown) => {}
         _ => {
             return Err(format!(
