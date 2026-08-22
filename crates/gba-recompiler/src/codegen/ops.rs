@@ -106,10 +106,10 @@ fn emit_inner_op(out: &mut String, ins_raw: u32, mode: Mode, op: &IrOp) {
         IrOp::Branch { .. } | IrOp::BranchExchange { .. } => {}
         IrOp::ArmExtended { op } => emit_arm_extended(out, *op),
         IrOp::ThumbExtended { op } => emit_thumb_extended(out, *op),
-        IrOp::Unknown { .. } => {
+        IrOp::Unknown { address, raw, mode } => {
             let _ = writeln!(
                 out,
-                "    return Err(\"unsupported instruction in specialized codegen\");"
+                "    return Err(format!(\"unsupported instruction in specialized codegen: pc={{:#010x}} mode={{:?}} raw={{:#010x}}\", {address:#010x}, {mode:?}, {raw:#010x}).leak());"
             );
         }
     }
@@ -206,5 +206,26 @@ mod tests {
             },
         );
         assert!(out.contains("let address = (rt.read_reg(15) & !3).wrapping_add(352i32 as u32);"));
+    }
+
+    #[test]
+    fn unknown_instruction_emits_structured_diagnostic() {
+        let mut out = String::new();
+        emit_op(
+            &mut out,
+            0x0800_1234,
+            0xE7FF_FF00,
+            Mode::Arm,
+            &IrOp::Unknown {
+                address: 0x0800_1234,
+                raw: 0xE7FF_FF00,
+                mode: Mode::Arm,
+            },
+        );
+        assert!(out.contains("unsupported instruction in specialized codegen"));
+        assert!(out.contains("0x08001234"));
+        assert!(out.contains("0xe7ffff00"));
+        assert!(out.contains("mode=Arm"));
+        assert!(out.contains("rt.tick(1)"));
     }
 }
