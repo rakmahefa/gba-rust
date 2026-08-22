@@ -98,7 +98,7 @@ pub fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
         ThumbExtended::SpRelativeLoadStore { load, rd, offset } => {
             let _ = writeln!(out, "    let address = rt.read_reg(13).wrapping_add({}u32 * 4);", offset);
             if load { let _ = writeln!(out, "    rt.write_reg({rd}, rt.read32(address));"); }
-            else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({rd}));"); }
+            else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({rd}) as u32);"); }
         }
         ThumbExtended::Address { rd, use_sp, word_offset } => {
             let _ = writeln!(out, "    rt.write_reg({rd}, (if {use_sp} {{ rt.read_reg(13) }} else {{ rt.read_reg(15) & !3 }}).wrapping_add({}u32 * 4));", word_offset);
@@ -110,40 +110,60 @@ pub fn emit_thumb_extended(out: &mut String, op: ThumbExtended) {
         ThumbExtended::PushPop { load, registers, extra_lr_pc } => {
             let count = registers.count_ones() + u32::from(extra_lr_pc);
             if load {
-                let _ = writeln!(out, "    let mut address = rt.read_reg(13);");
                 let load_regs: Vec<u8> = (0..8u8).filter(|reg| registers & (1 << reg) != 0).collect();
-                for (index, reg) in load_regs.iter().enumerate() {
-                    let next = index + 1 < load_regs.len() || extra_lr_pc;
-                    if next { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address)); address = address.wrapping_add(4);"); }
-                    else { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address));"); }
+                let needs_address = !load_regs.is_empty() || extra_lr_pc;
+                let needs_address_mut = load_regs.len() + usize::from(extra_lr_pc) > 1;
+                if needs_address {
+                    if needs_address_mut {
+                        let _ = writeln!(out, "    let mut address = rt.read_reg(13);");
+                    } else {
+                        let _ = writeln!(out, "    let address = rt.read_reg(13);");
+                    }
+                    for (index, reg) in load_regs.iter().enumerate() {
+                        let next = index + 1 < load_regs.len() || extra_lr_pc;
+                        if next { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address)); address = address.wrapping_add(4);"); }
+                        else { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address));"); }
+                    }
+                    if extra_lr_pc {
+                        let _ = writeln!(out, "    let target = rt.read32(address); rt.write_reg(13, rt.read_reg(13).wrapping_add({count} * 4)); return Ok(GeneratedBlockExit::continue_to(target & !1, true));");
+                    }
                 }
-                if extra_lr_pc {
-                    let _ = writeln!(out, "    let target = rt.read32(address); rt.write_reg(13, rt.read_reg(13).wrapping_add({count} * 4)); return Ok(GeneratedBlockExit::continue_to(target & !1, true));");
-                } else {
-                    let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_add({count} * 4));");
-                }
+                let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_add({count} * 4));");
             } else {
-                let _ = writeln!(out, "    let mut address = rt.read_reg(13).wrapping_sub({count} * 4);");
                 let store_regs: Vec<u8> = (0..8u8).filter(|reg| registers & (1 << reg) != 0).collect();
-                for (index, reg) in store_regs.iter().enumerate() {
-                    let next = index + 1 < store_regs.len() || extra_lr_pc;
-                    if next { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg})); address = address.wrapping_add(4);"); }
-                    else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg}));"); }
+                let needs_address = !store_regs.is_empty() || extra_lr_pc;
+                let needs_address_mut = store_regs.len() + usize::from(extra_lr_pc) > 1;
+                if needs_address {
+                    if needs_address_mut {
+                        let _ = writeln!(out, "    let mut address = rt.read_reg(13).wrapping_sub({count} * 4);");
+                    } else {
+                        let _ = writeln!(out, "    let address = rt.read_reg(13).wrapping_sub({count} * 4);");
+                    }
+                    for (index, reg) in store_regs.iter().enumerate() {
+                        let next = index + 1 < store_regs.len() || extra_lr_pc;
+                        if next { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg})); address = address.wrapping_add(4);"); }
+                        else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg}));"); }
+                    }
+                    if extra_lr_pc { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg(14));"); }
                 }
-                if extra_lr_pc { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg(14));"); }
                 let _ = writeln!(out, "    rt.write_reg(13, rt.read_reg(13).wrapping_sub({count} * 4));");
             }
         }
         ThumbExtended::MultipleLoadStore { load, rb, register_list } => {
-            let _ = writeln!(out, "    let mut address = rt.read_reg({rb});");
-            for reg in 0..8u8 {
-                if register_list & (1 << reg) != 0 {
-                    if load { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address));"); }
-                    else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg}));"); }
-                    let _ = writeln!(out, "    address = address.wrapping_add(4);");
+            let has_registers = register_list != 0;
+            if has_registers {
+                let _ = writeln!(out, "    let mut address = rt.read_reg({rb});");
+                for reg in 0..8u8 {
+                    if register_list & (1 << reg) != 0 {
+                        if load { let _ = writeln!(out, "    rt.write_reg({reg}, rt.read32(address));"); }
+                        else { let _ = writeln!(out, "    rt.write32(address & !3, rt.read_reg({reg}));"); }
+                        let _ = writeln!(out, "    address = address.wrapping_add(4);");
+                    }
                 }
+                let _ = writeln!(out, "    rt.write_reg({rb}, address);");
+            } else {
+                let _ = writeln!(out, "    rt.write_reg({rb}, rt.read_reg({rb}));");
             }
-            let _ = writeln!(out, "    rt.write_reg({rb}, address);");
         }
         ThumbExtended::SoftwareInterrupt { .. } => {
             let _ = writeln!(out, "    let (target, thumb) = rt.raise_exception(gba_runtime::ExceptionKind::SoftwareInterrupt); return Ok(GeneratedBlockExit::continue_to(target, thumb));");
