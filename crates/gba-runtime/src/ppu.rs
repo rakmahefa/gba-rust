@@ -185,12 +185,12 @@ impl Ppu {
             let px = if hflip { 7 - fine_x } else { fine_x };
             let py = if vflip { 7 - fine_y } else { fine_y };
 
-            let (palette_index, tile_size) = if color_8bpp {
+            let palette_index = if color_8bpp {
                 let tile_offset = char_base + tile_index * 64 + py * 8 + px;
                 if tile_offset >= vram.len() {
                     continue;
                 }
-                (vram[tile_offset] as usize, 64)
+                vram[tile_offset] as usize
             } else {
                 let tile_offset = char_base + tile_index * 32 + py * 4 + (px / 2);
                 if tile_offset >= vram.len() {
@@ -198,9 +198,9 @@ impl Ppu {
                 }
                 let packed = vram[tile_offset];
                 let nibble = if px & 1 == 0 { packed & 0xf } else { packed >> 4 };
-                ((palette_bank * 16) + nibble as usize, 32)
+                (palette_bank * 16) + nibble as usize
             };
-            let _ = tile_size;
+
             if palette_index == 0 || palette_index * 2 + 1 >= palette.len() {
                 continue;
             }
@@ -349,9 +349,7 @@ mod tests {
         io.insert(BG0_HOFS, 1);
         io.insert(BG0_HOFS + 1, 0);
         ppu.sync_registers(&io);
-        vram[0] = 0;
-        vram[1] = 0;
-        vram[32] = 0x10;
+        vram[0] = 0x01;
         palette[2] = 0x1f;
         ppu.render_scanline(BG0_ENABLE, 0, &vram, &palette);
         assert_eq!(ppu.framebuffer[7], 0xffff_0000);
