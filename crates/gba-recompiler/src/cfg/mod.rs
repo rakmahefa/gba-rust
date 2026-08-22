@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::address_space::{AddressSpace, ImageMapping};
+use crate::address_space::{AddressSpace, ImageKind, ImageMapping};
 use crate::decoder::{DecodeError, Mode};
 
 mod abstract_state;
@@ -34,7 +34,7 @@ pub fn analyze(rom: &[u8], entry: u32, entry_mode: Mode) -> Result<Program, Anal
     analyze_with_mapping(
         rom,
         ImageMapping::new(
-            crate::address_space::ImageKind::CartridgeRom,
+            ImageKind::CartridgeRom,
             crate::decoder::ROM_BASE,
             rom.len() as u32,
             entry,
@@ -73,10 +73,8 @@ pub fn analyze_with_mapping(
     };
     validate_cfg(&cfg, discovered_order.len())?;
 
-    let mut address_space = AddressSpace::default();
-    if mapping.kind == crate::address_space::ImageKind::Bios {
-        // The default GBA map already describes the BIOS region; the mapping
-        // identifies which bytes are the image backing that region.
+    let address_space = AddressSpace::default();
+    if mapping.kind == ImageKind::Bios {
         debug_assert!(in_image(mapping, mapping.entry));
     }
 
