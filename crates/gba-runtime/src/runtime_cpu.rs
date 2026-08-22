@@ -1,9 +1,9 @@
-use super::arm7tdmi::{self, Nzcv, ShiftKind, ShiftResult};
-use super::cpu::{CpuMode, ExceptionKind, REG_LR, REG_PC};
+use crate::arm7tdmi::{self, Nzcv, ShiftKind, ShiftResult};
+use crate::cpu::{CpuMode, ExceptionKind, REG_LR, REG_PC};
 use super::Runtime;
 
 impl Runtime {
-    pub fn load_cartridge(&mut self, cartridge: super::cartridge::Cartridge) {
+    pub fn load_cartridge(&mut self, cartridge: crate::cartridge::Cartridge) {
         self.cartridge = Some(cartridge);
         self.cpu.r[REG_PC] = 0x0800_0000;
     }
