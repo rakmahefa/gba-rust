@@ -110,9 +110,15 @@ impl Runtime {
             return;
         }
         let irq = self.dma.channels[active].control & 0x4000 != 0;
-        self.dma.complete();
+        let Some((_, disabled)) = self.dma.complete() else {
+            return;
+        };
         let base = DMA_BASES[active];
         self.set_io_half(base + 10, self.dma.channels[active].control);
+        if disabled {
+            self.dma.channels[active].count = 0;
+            self.set_io_half(base + 8, 0);
+        }
         if irq {
             self.interrupts.request(1 << (8 + active));
         }
@@ -143,7 +149,7 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mmio_devices::{DMA0CNT_H, DMA0DAD, DMA0SAD};
+    use crate::mmio_devices::{DMA0CNT_H, DMA0CNT_L, DMA0DAD, DMA0SAD};
     use crate::{bus, IRQ_DMA0};
 
     fn program_channel(runtime: &mut Runtime, base: u32, source: u32, destination: u32, count: u16, control: u16) {
@@ -169,7 +175,8 @@ mod tests {
         let remaining = runtime.dma.busy_until() - runtime.scheduler.now();
         runtime.advance_cycles(remaining as u32);
         assert_eq!(runtime.dma.active(), None);
-        assert_eq!(runtime.read16(DMA0CNT_H.address), 0x0000);
+        assert_eq!(runtime.read16(DMA0CNT_L.address), 0);
+        assert_eq!(runtime.read16(DMA0CNT_H.address), 0);
         assert_eq!(runtime.read32(DMA0SAD.address), bus::EWRAM_START + 4);
         assert_eq!(runtime.read32(DMA0DAD.address), bus::EWRAM_START + 0x104);
         assert_ne!(runtime.interrupts.iflags & IRQ_DMA0, 0);
