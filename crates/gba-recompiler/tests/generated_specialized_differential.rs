@@ -136,8 +136,10 @@ fn specialized_memory_codegen_executes_load_store_roundtrip() {
     compile_and_run_generated(
         &source,
         "entry",
-        "rt.write_reg(0, 0x0400_0010);",
-        "assert_eq!(rt.read8(0x0400_0010), 42); assert_eq!(result.state.registers[2], 42);",
+        // Use EWRAM for a generic memory roundtrip. 0x0400_0010 is BG0HOFS,
+        // a write-only MMIO register under the Phase 8.1 contract.
+        "rt.write_reg(0, 0x0200_0000);",
+        "assert_eq!(rt.read8(0x0200_0000), 42); assert_eq!(result.state.registers[2], 42);",
     );
 }
 
