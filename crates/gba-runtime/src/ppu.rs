@@ -144,6 +144,7 @@ impl Ppu {
         }
     }
 
+    #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
     fn render_text_bg_scanline(
         &mut self,
         row: usize,
