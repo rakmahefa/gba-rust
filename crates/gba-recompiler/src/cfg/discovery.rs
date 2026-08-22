@@ -7,6 +7,24 @@ use super::abstract_state::AbstractState;
 use super::edges::{decode_at, in_image, instruction_successors};
 use super::model::{BlockKey, DiscoveredInstruction};
 
+const DEBUG_ABSTRACT_STATE_ADDRESS: u32 = 0x0000_0118;
+
+fn debug_abstract_state(
+    key: BlockKey,
+    state_before: AbstractState,
+    state_after: AbstractState,
+    successors: &[BlockKey],
+) {
+    if key.address != DEBUG_ABSTRACT_STATE_ADDRESS {
+        return;
+    }
+
+    eprintln!(
+        "[cfg-debug] abstract state: address={:#010x} mode={:?} before={state_before:?} after={state_after:?} successors={successors:?}",
+        key.address, key.mode
+    );
+}
+
 pub(super) fn discover_reachable(
     rom: &[u8],
     entry: BlockKey,
@@ -25,6 +43,8 @@ pub(super) fn discover_reachable(
         let instruction = decode_at(rom, key.clone(), mapping)?;
         let state_after = super::abstract_state::transfer_instruction(rom, instruction, state, mapping);
         let successors = instruction_successors(rom, instruction, state_after, mapping);
+
+        debug_abstract_state(key, state, state_after, &successors);
 
         if !discovered.contains_key(&key) {
             order.push(key.clone());
