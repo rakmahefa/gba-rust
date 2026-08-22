@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::cfg::{analyze_with_mapping, BlockKey, Program};
-use crate::decoder::{ArmDataOp, ArmExtended, InstructionKind, Mode};
 use crate::address_space::{ImageKind, ImageMapping};
+use crate::cfg::{analyze_with_mapping, BlockKey, Program};
+use crate::decoder::{ArmDataOp, ArmExtended, ArmOp, InstructionKind, Mode};
 
 /// Architectural exception vectors that are part of the ARM7TDMI exception graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,14 +95,11 @@ fn exception_return_sites(program: &Program) -> Vec<u32> {
         .iter()
         .flat_map(|block| block.instructions.iter())
         .filter_map(|instruction| {
-            let InstructionKind::Arm(ArmOp) = instruction.kind else {
-                return None;
-            };
             let InstructionKind::Arm(op) = instruction.kind else {
                 return None;
             };
             match op {
-                crate::decoder::ArmOp::Extended(ArmExtended::DataProcessing {
+                ArmOp::Extended(ArmExtended::DataProcessing {
                     op,
                     rd: 15,
                     set_flags: true,
@@ -183,7 +180,6 @@ pub fn analyze_exception_graph(
 mod tests {
     use super::*;
     use crate::address_space::{ImageKind, ImageMapping};
-    use crate::decoder::Mode;
 
     fn arm_image(words: &[(u32, u32)]) -> Vec<u8> {
         let mut image = vec![0u8; 0x20];
@@ -209,10 +205,7 @@ mod tests {
         let graph = analyze_exception_graph(&image, mapping).unwrap();
 
         assert_eq!(graph.nodes.len(), 6);
-        assert_eq!(
-            graph.vector_keys().len(),
-            ExceptionVectorKind::ALL.len()
-        );
+        assert_eq!(graph.vector_keys().len(), ExceptionVectorKind::ALL.len());
         assert!(graph.node(ExceptionVectorKind::Irq).is_some());
         assert!(graph.node(ExceptionVectorKind::Fiq).is_some());
     }
@@ -220,10 +213,8 @@ mod tests {
     #[test]
     fn records_exception_return_sites_as_graph_edges() {
         let image = arm_image(&[(0x18, 0xe25e_f004)]);
-        let mut padded = image;
-        padded.resize(0x20, 0);
-        let mapping = ImageMapping::new(ImageKind::Bios, 0, padded.len() as u32, 0, Mode::Arm);
-        let graph = analyze_exception_graph(&padded, mapping).unwrap();
+        let mapping = ImageMapping::new(ImageKind::Bios, 0, image.len() as u32, 0, Mode::Arm);
+        let graph = analyze_exception_graph(&image, mapping).unwrap();
 
         let irq = graph.node(ExceptionVectorKind::Irq).unwrap();
         assert_eq!(irq.exception_return_sites, vec![0x18]);
