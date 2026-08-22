@@ -42,17 +42,12 @@ pub const IRQ_GAMEPAK: u16 = 1 << 13;
 const CPSR_I: u32 = 1 << 7;
 const CPSR_T: u32 = 1 << 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PowerState {
+    #[default]
     Running,
     Halted,
     Stopped,
-}
-
-impl Default for PowerState {
-    fn default() -> Self {
-        Self::Running
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,21 +74,11 @@ impl BiosSwi {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct InterruptController {
     pub ie: u16,
     pub iflags: u16,
     pub ime: bool,
-}
-
-impl Default for InterruptController {
-    fn default() -> Self {
-        Self {
-            ie: 0,
-            iflags: 0,
-            ime: false,
-        }
-    }
 }
 
 impl InterruptController {
@@ -135,6 +120,15 @@ impl BiosResult {
     };
 }
 
+#[derive(Debug)]
+pub struct BiosMemory<'a> {
+    pub ewram: &'a mut [u8],
+    pub iwram: &'a mut [u8],
+    pub palette: &'a mut [u8],
+    pub vram: &'a mut [u8],
+    pub oam: &'a mut [u8],
+}
+
 pub fn swi_number(raw: u32, thumb: bool) -> u8 {
     if thumb {
         (raw & 0xff) as u8
@@ -164,16 +158,12 @@ pub fn execute_swi(
     cpu: &mut crate::cpu::Cpu,
     power: &mut PowerState,
     interrupts: &mut InterruptController,
-    ewram: &mut [u8],
-    iwram: &mut [u8],
-    palette: &mut [u8],
-    vram: &mut [u8],
-    oam: &mut [u8],
+    memory: &mut BiosMemory<'_>,
     swi: BiosSwi,
 ) -> BiosResult {
     match swi {
         BiosSwi::SoftReset => {
-            let target_flag = iwram.get(0x7ffa).copied().unwrap_or(0);
+            let target_flag = memory.iwram.get(0x7ffa).copied().unwrap_or(0);
             reset_state(cpu, power);
             cpu.r[REG_PC] = if target_flag == 0 {
                 0x0800_0000
@@ -185,20 +175,20 @@ pub fn execute_swi(
         BiosSwi::RegisterRamReset => {
             let flags = cpu.r[0];
             if flags & 1 != 0 {
-                ewram.fill(0);
+                memory.ewram.fill(0);
             }
             if flags & 2 != 0 {
-                let reset_len = 0x7e00.min(iwram.len());
-                iwram[..reset_len].fill(0);
+                let reset_len = 0x7e00.min(memory.iwram.len());
+                memory.iwram[..reset_len].fill(0);
             }
             if flags & 4 != 0 {
-                palette.fill(0);
+                memory.palette.fill(0);
             }
             if flags & 8 != 0 {
-                vram.fill(0);
+                memory.vram.fill(0);
             }
             if flags & 16 != 0 {
-                oam.fill(0);
+                memory.oam.fill(0);
             }
             if flags & 32 != 0 {
                 interrupts.ie = 0;
@@ -235,17 +225,7 @@ pub fn execute_swi(
         BiosSwi::VBlankIntrWait => {
             cpu.r[0] = 1;
             cpu.r[1] = IRQ_VBLANK as u32;
-            execute_swi(
-                cpu,
-                power,
-                interrupts,
-                ewram,
-                iwram,
-                palette,
-                vram,
-                oam,
-                BiosSwi::IntrWait,
-            )
+            execute_swi(cpu, power, interrupts, memory, BiosSwi::IntrWait)
         }
     }
 }
@@ -274,8 +254,26 @@ mod tests {
     use super::*;
     use crate::cpu::{Cpu, CpuMode, REG_PC, REG_SP};
 
-    fn memory() -> ([u8; 0x100], [u8; 0x8000], [u8; 0x400], [u8; 0x18000], [u8; 0x400]) {
+    type TestMemory = ([u8; 0x100], [u8; 0x8000], [u8; 0x400], [u8; 0x18000], [u8; 0x400]);
+
+    fn memory() -> TestMemory {
         ([0; 0x100], [0; 0x8000], [0; 0x400], [0; 0x18000], [0; 0x400])
+    }
+
+    fn bios_memory<'a>(
+        ewram: &'a mut [u8],
+        iwram: &'a mut [u8],
+        palette: &'a mut [u8],
+        vram: &'a mut [u8],
+        oam: &'a mut [u8],
+    ) -> BiosMemory<'a> {
+        BiosMemory {
+            ewram,
+            iwram,
+            palette,
+            vram,
+            oam,
+        }
     }
 
     #[test]
@@ -304,15 +302,12 @@ mod tests {
         cpu.r[0] = 0x02;
         let mut power = PowerState::Running;
         let mut interrupts = InterruptController::default();
+        let mut memory = bios_memory(&mut ewram, &mut iwram, &mut palette, &mut vram, &mut oam);
         execute_swi(
             &mut cpu,
             &mut power,
             &mut interrupts,
-            &mut ewram,
-            &mut iwram,
-            &mut palette,
-            &mut vram,
-            &mut oam,
+            &mut memory,
             BiosSwi::RegisterRamReset,
         );
         assert_eq!(iwram[0x7dff], 0);
@@ -326,15 +321,12 @@ mod tests {
         let mut cpu = Cpu::default();
         let mut power = PowerState::Running;
         let mut interrupts = InterruptController::default();
+        let mut memory = bios_memory(&mut ewram, &mut iwram, &mut palette, &mut vram, &mut oam);
         let result = execute_swi(
             &mut cpu,
             &mut power,
             &mut interrupts,
-            &mut ewram,
-            &mut iwram,
-            &mut palette,
-            &mut vram,
-            &mut oam,
+            &mut memory,
             BiosSwi::SoftReset,
         );
         assert_eq!(result, BiosResult::NON_RETURNING);
@@ -353,15 +345,12 @@ mod tests {
             iflags: IRQ_VBLANK,
             ime: false,
         };
+        let mut memory = bios_memory(&mut ewram, &mut iwram, &mut palette, &mut vram, &mut oam);
         let result = execute_swi(
             &mut cpu,
             &mut power,
             &mut interrupts,
-            &mut ewram,
-            &mut iwram,
-            &mut palette,
-            &mut vram,
-            &mut oam,
+            &mut memory,
             BiosSwi::IntrWait,
         );
         assert_eq!(result, BiosResult::RETURNED);
