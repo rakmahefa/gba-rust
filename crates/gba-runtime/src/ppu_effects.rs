@@ -97,6 +97,7 @@ impl Ppu {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn window_mask(dispcnt: u16, x: u16, y: u16, win0h: u16, win1h: u16, win0v: u16, win1v: u16, winin: u16, winout: u16, obj_window: bool) -> u8 {
     if dispcnt & DISPCNT_WIN0 != 0 && inside_window(x, y, win0h, win0v) {
         return (winin & 0x3f) as u8;
