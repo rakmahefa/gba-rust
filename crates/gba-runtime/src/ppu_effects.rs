@@ -99,6 +99,9 @@ impl Ppu {
 
 #[allow(clippy::too_many_arguments)]
 fn window_mask(dispcnt: u16, x: u16, y: u16, win0h: u16, win1h: u16, win0v: u16, win1v: u16, winin: u16, winout: u16, obj_window: bool) -> u8 {
+    if dispcnt & (DISPCNT_WIN0 | DISPCNT_WIN1 | DISPCNT_OBJWIN) == 0 {
+        return 0x3f;
+    }
     if dispcnt & DISPCNT_WIN0 != 0 && inside_window(x, y, win0h, win0v) {
         return (winin & 0x3f) as u8;
     }
@@ -153,6 +156,11 @@ mod tests {
         assert!(axis_inside(250, 240, 10));
         assert!(axis_inside(5, 240, 10));
         assert!(!axis_inside(100, 240, 10));
+    }
+
+    #[test]
+    fn disabled_windows_leave_layers_visible() {
+        assert_eq!(window_mask(0, 0, 0, 0, 0, 0, 0, 0, 0, false), 0x3f);
     }
 
     #[test]
