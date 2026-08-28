@@ -1,6 +1,6 @@
 # gba-rust — Roadmap
 
-> Living roadmap. Phase C is active: deterministic audio/serial runtime contracts are established and APU timing/FIFO integration is now underway; full hardware fidelity remains incremental.
+> Living roadmap. Phase C is active: deterministic audio/serial runtime contracts are established and APU timing/FIFO integration is progressing toward PSG, Direct Sound mixing and DMA-trigger fidelity.
 
 ## Current direction
 
@@ -176,6 +176,7 @@ Phase B is **complete for its deterministic renderer/compositor scope**, not a c
 - [x] Keep APU clocking on the central runtime scheduler rather than introducing a second clock.
 - [x] Keep FIFO state deterministic and independently testable.
 - [x] Preserve existing `-D warnings` / Clippy policy.
+- [x] C2 timing/FIFO changes maintain workspace format/check/test/clippy CI gates.
 - [ ] Keep PSG, Direct Sound refill, SIO transfer timing and DMA special-trigger behavior covered by deterministic runtime fixtures.
 
 ### Phase C boundary
