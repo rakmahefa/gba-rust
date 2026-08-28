@@ -41,15 +41,11 @@ impl Fifo {
     pub fn is_full(&self) -> bool { self.len == FIFO_CAPACITY }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ApuChannel {
     pub enabled: bool,
     pub frequency: u16,
     pub volume: u8,
-}
-
-impl Default for ApuChannel {
-    fn default() -> Self { Self { enabled: false, frequency: 0, volume: 0 } }
 }
 
 #[derive(Debug, Clone, Default)]
