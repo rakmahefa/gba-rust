@@ -6,6 +6,7 @@ use thiserror::Error;
 const GBA_HEADER_MIN_SIZE: usize = 0xc0;
 const GBA_HEADER_FIXED_BYTE: u8 = 0x96;
 const GBA_CARTRIDGE_BASE: u32 = 0x0800_0000;
+const FLASH_SECTOR_SIZE: usize = 0x1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveType {
@@ -43,12 +44,27 @@ pub struct CartridgeHeader {
     pub checksum: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum FlashCommandState {
+    #[default]
+    Ready,
+    Unlock1,
+    Unlock2,
+    Program,
+    EraseUnlock1,
+    EraseUnlock2,
+    EraseCommand,
+    BankSwitch,
+}
+
 #[derive(Debug, Clone)]
 pub struct SaveRam {
     kind: SaveType,
     data: Vec<u8>,
     path: Option<PathBuf>,
     dirty: bool,
+    flash_state: FlashCommandState,
+    flash_bank: usize,
 }
 
 impl SaveRam {
@@ -74,6 +90,8 @@ impl SaveRam {
             data,
             path,
             dirty: false,
+            flash_state: FlashCommandState::Ready,
+            flash_bank: 0,
         }
     }
 
@@ -82,19 +100,128 @@ impl SaveRam {
     }
 
     pub fn read(&self, addr: usize) -> u8 {
-        self.data
-            .get(addr % self.data.len().max(1))
-            .copied()
-            .unwrap_or(0xff)
+        if self.data.is_empty() {
+            return 0xff;
+        }
+        let index = match self.kind {
+            SaveType::Flash128K => self.flash_bank * 0x10000 + (addr & 0xffff),
+            _ => addr % self.data.len(),
+        };
+        self.data.get(index).copied().unwrap_or(0xff)
     }
 
     pub fn write(&mut self, addr: usize, value: u8) {
-        if !self.data.is_empty() {
-            let i = addr % self.data.len();
-            if self.data[i] != value {
-                self.data[i] = value;
+        match self.kind {
+            SaveType::Sram32K | SaveType::Eeprom512B | SaveType::Eeprom8K => {
+                self.write_storage(addr, value)
+            }
+            SaveType::Flash64K | SaveType::Flash128K => self.write_flash(addr, value),
+            SaveType::None => {}
+        }
+    }
+
+    fn write_storage(&mut self, addr: usize, value: u8) {
+        if self.data.is_empty() {
+            return;
+        }
+        let index = addr % self.data.len();
+        if self.data[index] != value {
+            self.data[index] = value;
+            self.dirty = true;
+        }
+    }
+
+    fn write_flash(&mut self, addr: usize, value: u8) {
+        let address = addr & 0xffff;
+        match self.flash_state {
+            FlashCommandState::Ready => {
+                if address == 0x5555 && value == 0xaa {
+                    self.flash_state = FlashCommandState::Unlock1;
+                }
+            }
+            FlashCommandState::Unlock1 => {
+                self.flash_state = if address == 0x2aaa && value == 0x55 {
+                    FlashCommandState::Unlock2
+                } else {
+                    FlashCommandState::Ready
+                };
+            }
+            FlashCommandState::Unlock2 => {
+                self.flash_state = match value {
+                    0xa0 => FlashCommandState::Program,
+                    0x80 => FlashCommandState::EraseUnlock1,
+                    0xb0 if self.kind == SaveType::Flash128K => FlashCommandState::BankSwitch,
+                    _ => FlashCommandState::Ready,
+                };
+            }
+            FlashCommandState::Program => {
+                self.write_flash_storage(addr, value);
+                self.flash_state = FlashCommandState::Ready;
+            }
+            FlashCommandState::EraseUnlock1 => {
+                self.flash_state = if address == 0x5555 && value == 0xaa {
+                    FlashCommandState::EraseUnlock2
+                } else {
+                    FlashCommandState::Ready
+                };
+            }
+            FlashCommandState::EraseUnlock2 => {
+                self.flash_state = if address == 0x2aaa && value == 0x55 {
+                    FlashCommandState::EraseCommand
+                } else {
+                    FlashCommandState::Ready
+                };
+            }
+            FlashCommandState::EraseCommand => {
+                match value {
+                    0x10 if address == 0x5555 => self.erase_all(),
+                    0x30 => self.erase_sector(addr),
+                    _ => {}
+                }
+                self.flash_state = FlashCommandState::Ready;
+            }
+            FlashCommandState::BankSwitch => {
+                if self.kind == SaveType::Flash128K && value <= 1 {
+                    self.flash_bank = usize::from(value);
+                }
+                self.flash_state = FlashCommandState::Ready;
+            }
+        }
+    }
+
+    fn write_flash_storage(&mut self, addr: usize, value: u8) {
+        let index = if self.kind == SaveType::Flash128K {
+            self.flash_bank * 0x10000 + (addr & 0xffff)
+        } else {
+            addr % self.data.len().max(1)
+        };
+        if let Some(byte) = self.data.get_mut(index) {
+            let next = *byte & value;
+            if next != *byte {
+                *byte = next;
                 self.dirty = true;
             }
+        }
+    }
+
+    fn erase_sector(&mut self, addr: usize) {
+        let bank_base = if self.kind == SaveType::Flash128K {
+            self.flash_bank * 0x10000
+        } else {
+            0
+        };
+        let start = bank_base + (addr & 0xffff) / FLASH_SECTOR_SIZE * FLASH_SECTOR_SIZE;
+        let end = (start + FLASH_SECTOR_SIZE).min(self.data.len());
+        if start < end && self.data[start..end].iter().any(|&byte| byte != 0xff) {
+            self.data[start..end].fill(0xff);
+            self.dirty = true;
+        }
+    }
+
+    fn erase_all(&mut self) {
+        if self.data.iter().any(|&byte| byte != 0xff) {
+            self.data.fill(0xff);
+            self.dirty = true;
         }
     }
 
@@ -160,11 +287,9 @@ pub fn validate_header(rom: &[u8]) -> Result<CartridgeHeader, CartridgeHeaderErr
     if rom.len() < GBA_HEADER_MIN_SIZE {
         return Err(CartridgeHeaderError::TooSmall(rom.len()));
     }
-
     if rom[0xb2] != GBA_HEADER_FIXED_BYTE {
         return Err(CartridgeHeaderError::InvalidFixedByte(rom[0xb2]));
     }
-
     let expected_checksum = (0u8).wrapping_sub(
         0x19u8.wrapping_add(rom[0xa0..=0xbc].iter().copied().fold(0u8, u8::wrapping_add)),
     );
@@ -174,7 +299,6 @@ pub fn validate_header(rom: &[u8]) -> Result<CartridgeHeader, CartridgeHeaderErr
             expected: expected_checksum,
         });
     }
-
     let entry_opcode = u32::from_le_bytes([rom[0], rom[1], rom[2], rom[3]]);
     if (entry_opcode & 0x0e00_0000) != 0x0a00_0000 {
         return Err(CartridgeHeaderError::InvalidEntryOpcode(entry_opcode));
@@ -192,7 +316,6 @@ pub fn validate_header(rom: &[u8]) -> Result<CartridgeHeader, CartridgeHeaderErr
             size: rom.len(),
         });
     }
-
     let game_code = String::from_utf8_lossy(&rom[0xac..0xb0]).to_string();
     if !game_code
         .bytes()
@@ -200,7 +323,6 @@ pub fn validate_header(rom: &[u8]) -> Result<CartridgeHeader, CartridgeHeaderErr
     {
         return Err(CartridgeHeaderError::InvalidGameCode);
     }
-
     Ok(CartridgeHeader {
         entry_target,
         title: String::from_utf8_lossy(&rom[0xa0..0xac])
@@ -279,5 +401,77 @@ mod tests {
             validate_header(&rom),
             Err(CartridgeHeaderError::InvalidChecksum { .. })
         ));
+    }
+
+    #[test]
+    fn sram_writes_and_wraps() {
+        let mut save = SaveRam::new(SaveType::Sram32K, None);
+        save.write(0x0000, 0x12);
+        save.write(0x8000, 0x34);
+        assert_eq!(save.read(0x0000), 0x34);
+    }
+
+    #[test]
+    fn flash_requires_unlock_before_programming() {
+        let mut save = SaveRam::new(SaveType::Flash64K, None);
+        save.write(0x0000, 0x12);
+        assert_eq!(save.read(0), 0xff);
+
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x5555, 0xa0);
+        save.write(0x0000, 0x12);
+        assert_eq!(save.read(0), 0x12);
+
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x5555, 0xa0);
+        save.write(0x0000, 0xff);
+        assert_eq!(save.read(0), 0x12);
+    }
+
+    #[test]
+    fn flash_sector_erase_restores_erased_bytes() {
+        let mut save = SaveRam::new(SaveType::Flash64K, None);
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x5555, 0xa0);
+        save.write(0x1234, 0x00);
+        assert_eq!(save.read(0x1234), 0x00);
+
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x5555, 0x80);
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x1234, 0x30);
+        assert_eq!(save.read(0x1234), 0xff);
+    }
+
+    #[test]
+    fn flash128_bank_switch_isolated() {
+        let mut save = SaveRam::new(SaveType::Flash128K, None);
+
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x5555, 0xa0);
+        save.write(0x0010, 0x11);
+
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x5555, 0xb0);
+        save.write(0x0000, 0x01);
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x5555, 0xa0);
+        save.write(0x0010, 0x22);
+
+        assert_eq!(save.read(0x0010), 0x22);
+
+        save.write(0x5555, 0xaa);
+        save.write(0x2aaa, 0x55);
+        save.write(0x5555, 0xb0);
+        save.write(0x0000, 0x00);
+        assert_eq!(save.read(0x0010), 0x11);
     }
 }

@@ -1,6 +1,6 @@
 # gba-rust — Roadmap
 
-> Living roadmap. Phase C is complete for the deterministic architectural audio/serial runtime scope; Phase D is next.
+> Living roadmap. Phase C and Phase D are complete for their deterministic architectural runtime scopes; Phase E is next.
 
 ## Current direction
 
@@ -64,10 +64,27 @@
 
 Phase C is complete for the project's **deterministic architectural audio/serial scope**. This is not a claim of cycle-perfect analog/audio hardware emulation, external multiplayer transport, or host audio backend fidelity. Those remain outside the runtime contract.
 
-## Phase D — Cartridge and external memory — NEXT
-- [ ] SRAM/Flash/EEPROM behavior.
-- [ ] Cartridge waitstates and prefetch fidelity.
-- [ ] Save-device protocol regression tests.
+## Phase D — Cartridge and external memory — COMPLETE
+- [x] Deterministic SRAM read/write and address mirroring foundation.
+- [x] Flash command-state foundation: unlock, byte program, sector erase, chip erase.
+- [x] Flash128K bank switching foundation.
+- [x] Deterministic EEPROM serial protocol foundation for 512B and 8KiB devices.
+- [x] Deterministic WAITCNT decode for SRAM and WS0/WS1/WS2 ROM timings.
+- [x] Deterministic eight-halfword Game Pak prefetch buffer model.
+- [x] Save-device regression coverage across SRAM, Flash and EEPROM protocol fixtures.
+- [x] Phase D implementation keeps cartridge timing/save semantics isolated from CPU/codegen concerns.
+
+### Phase D engineering gate — MET
+- [x] SRAM mirroring is deterministic and independently tested.
+- [x] Flash programming, sector/chip erase and 128 KiB bank selection are deterministic and regression-tested.
+- [x] EEPROM 512B and 8KiB command/data transactions are independently regression-tested.
+- [x] WAITCNT timing fields are decoded into explicit ROM/SRAM wait-state parameters.
+- [x] Prefetch state is deterministic, bounded to eight halfwords and explicitly invalidatable.
+- [x] Repository `cargo test`, `cargo check`, `cargo clippy -D warnings` and rustfmt CI gates remain the phase acceptance criteria.
+
+### Phase D boundary
+
+Phase D is complete for the project's **deterministic cartridge/external-memory architectural baseline**. This does not claim cycle-perfect cartridge bus arbitration, silicon-specific prefetch refill behavior, or every vendor-specific EEPROM/Flash command extension. Those remain compatibility refinements to be driven by real-ROM validation in Phase F.
 
 ## Phase E — Generated execution performance
 - [ ] Direct generated-block linking.
