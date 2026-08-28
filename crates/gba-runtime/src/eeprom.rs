@@ -43,7 +43,8 @@ impl Eeprom {
     }
 
     pub fn write_byte(&mut self, address: usize, value: u8) {
-        self.data[address % self.data.len()] = value;
+        let index = address % self.data.len();
+        self.data[index] = value;
     }
 
     pub fn transfer(&mut self, input: &[bool]) -> Vec<bool> {
