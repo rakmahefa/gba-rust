@@ -38,11 +38,11 @@ impl WaitStateConfig {
         Self {
             sram_cycles: decode_wait(waitcnt & WAITCNT_SRAM_MASK),
             ws0_first: decode_wait((waitcnt & WAITCNT_WS0_MASK) >> 2),
-            ws0_second: decode_second(waitcnt & WAITCNT_WS0_N_MASK),
+            ws0_second: decode_second(waitcnt & WAITCNT_WS0_N_MASK, 0),
             ws1_first: decode_wait((waitcnt & WAITCNT_WS1_MASK) >> 5),
-            ws1_second: decode_second(waitcnt & WAITCNT_WS1_N_MASK),
+            ws1_second: decode_second(waitcnt & WAITCNT_WS1_N_MASK, 1),
             ws2_first: decode_wait((waitcnt & WAITCNT_WS2_MASK) >> 8),
-            ws2_second: decode_second(waitcnt & WAITCNT_WS2_N_MASK),
+            ws2_second: decode_second(waitcnt & WAITCNT_WS2_N_MASK, 2),
             prefetch: waitcnt & WAITCNT_PREFETCH != 0,
         }
     }
@@ -87,8 +87,17 @@ fn decode_wait(value: u16) -> u8 {
     }
 }
 
-fn decode_second(value: u16) -> u8 {
-    if value & 1 == 0 { 2 } else { 1 }
+fn decode_second(value: u16, bank: u8) -> u8 {
+    if value & 1 != 0 {
+        1
+    } else {
+        match bank {
+            0 => 2,
+            1 => 4,
+            2 => 8,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
