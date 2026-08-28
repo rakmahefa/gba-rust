@@ -1,6 +1,6 @@
 # gba-rust — Roadmap
 
-> Living roadmap. Phase C is now active: the first deterministic audio/serial runtime contracts are established; full hardware fidelity remains incremental.
+> Living roadmap. Phase C is active: deterministic audio/serial runtime contracts are established and APU timing/FIFO integration is now underway; full hardware fidelity remains incremental.
 
 ## Current direction
 
@@ -139,19 +139,24 @@ Phase B is **complete for its deterministic renderer/compositor scope**, not a c
 
 ## Phase C — Input, audio and serial — IN PROGRESS
 
-### C1. Audio/serial architectural baseline
+### C1. Audio/serial architectural baseline — COMPLETE
 - [x] Deterministic APU sample-clock accumulator using the GBA master clock.
 - [x] Sound FIFO A/B state with architectural capacity and deterministic byte ordering.
 - [x] APU FIFO reset primitives for later timer/FIFO trigger integration.
 - [x] Sound MMIO register descriptors with explicit width/access/mask policy.
 - [x] SIO control/data register descriptors and a deterministic serial state model.
 
-### C2. APU timing and channels
-- [ ] Integrate APU advancement into `Runtime::advance_cycles` across scheduler boundaries.
+### C2. APU timing and Direct Sound — IN PROGRESS
+- [x] Integrate APU sample-clock advancement into `Runtime::advance_cycles` across scheduler boundaries.
+- [x] Connect SOUNDCNT_H MMIO state to the APU runtime model.
+- [x] Connect 32-bit FIFO A/B MMIO writes directly to the architectural FIFOs.
+- [x] Consume Direct Sound FIFO samples on the selected timer overflow.
+- [x] Track deterministic FIFO consumption and underrun counts.
+- [x] Add runtime regression fixtures for sample-clock advancement and timer/FIFO selection.
 - [ ] Implement PSG channel state evolution and frame-sequencer timing.
-- [ ] Implement Direct Sound FIFO consumption driven by timer overflows.
+- [ ] Implement exact Direct Sound refill/trigger semantics and DMA interaction.
 - [ ] Implement SOUNDCNT routing/volume semantics and SOUNDBIAS behavior.
-- [ ] Add deterministic audio regression fixtures.
+- [ ] Add deterministic audio waveform/mixing regression fixtures.
 
 ### C3. Serial/SIO behavior
 - [ ] Integrate SIO registers into the runtime MMIO read/write path.
@@ -165,6 +170,13 @@ Phase B is **complete for its deterministic renderer/compositor scope**, not a c
 - [ ] Timer-driven FIFO special-trigger requests.
 - [ ] PPU HBlank/VBlank special-trigger arbitration with audio sources.
 - [ ] DMA FIFO underrun/priority regression coverage.
+
+### Phase C engineering gate — ACTIVE
+- [x] Keep host audio output outside the architectural runtime layer.
+- [x] Keep APU clocking on the central runtime scheduler rather than introducing a second clock.
+- [x] Keep FIFO state deterministic and independently testable.
+- [x] Preserve existing `-D warnings` / Clippy policy.
+- [ ] Keep PSG, Direct Sound refill, SIO transfer timing and DMA special-trigger behavior covered by deterministic runtime fixtures.
 
 ### Phase C boundary
 
