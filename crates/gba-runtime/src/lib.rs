@@ -13,6 +13,7 @@ pub mod cpu;
 pub mod mmio;
 pub mod mmio_devices;
 pub mod ppu;
+pub mod ppu_sprites;
 pub mod runtime;
 pub mod scheduler;
 pub mod timers;

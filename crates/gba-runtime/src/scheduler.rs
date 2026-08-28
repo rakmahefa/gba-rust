@@ -3,14 +3,22 @@
 //! CPU execution advances the scheduler clock. Device state is advanced up to
 //! each queued architectural event boundary, so timers and asynchronous
 //! hardware events observe the same monotonic cycle timeline.
+//!
+//! The display timing constants model the nominal GBA LCD timing: 160 visible
+//! lines + 68 VBlank lines, with each line split into 1004 HDraw cycles and
+//! 228 HBlank cycles.
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-pub const CYCLES_PER_SCANLINE: u64 = 1_232;
-pub const SCANLINES_PER_FRAME: u16 = 228;
-pub const HBLANK_START_CYCLES: u64 = 1_006;
-pub const VBLANK_START_LINE: u16 = 160;
+pub const HDRAW_CYCLES: u64 = 1_004;
+pub const HBLANK_CYCLES: u64 = 228;
+pub const CYCLES_PER_SCANLINE: u64 = HDRAW_CYCLES + HBLANK_CYCLES;
+pub const VISIBLE_SCANLINES: u16 = 160;
+pub const VBLANK_SCANLINES: u16 = 68;
+pub const SCANLINES_PER_FRAME: u16 = VISIBLE_SCANLINES + VBLANK_SCANLINES;
+pub const HBLANK_START_CYCLES: u64 = HDRAW_CYCLES;
+pub const VBLANK_START_LINE: u16 = VISIBLE_SCANLINES;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventKind {
@@ -114,5 +122,20 @@ mod tests {
         scheduler.advance_to(100);
         scheduler.schedule_in(25, EventKind::IrqSample);
         assert_eq!(scheduler.next_event().unwrap().cycle, 125);
+    }
+
+    #[test]
+    fn display_timing_matches_nominal_gba_scanline_and_frame_lengths() {
+        assert_eq!(HDRAW_CYCLES, 1_004);
+        assert_eq!(HBLANK_CYCLES, 228);
+        assert_eq!(CYCLES_PER_SCANLINE, 1_232);
+        assert_eq!(SCANLINES_PER_FRAME, 228);
+        assert_eq!(CYCLES_PER_SCANLINE * u64::from(SCANLINES_PER_FRAME), 280_896);
+    }
+
+    #[test]
+    fn vblank_starts_after_the_160_visible_scanlines() {
+        assert_eq!(VBLANK_START_LINE, 160);
+        assert_eq!(VISIBLE_SCANLINES + VBLANK_SCANLINES, SCANLINES_PER_FRAME);
     }
 }
