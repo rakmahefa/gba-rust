@@ -1,6 +1,6 @@
 # gba-rust — Roadmap
 
-> Living roadmap. Phase C and Phase D are complete for their deterministic architectural runtime scopes; Phase E is next.
+> Living roadmap. Phase C and Phase D are complete for their deterministic architectural runtime scopes; Phase E is in progress.
 
 ## Current direction
 
@@ -86,11 +86,21 @@ Phase C is complete for the project's **deterministic architectural audio/serial
 
 Phase D is complete for the project's **deterministic cartridge/external-memory architectural baseline**. This does not claim cycle-perfect cartridge bus arbitration, silicon-specific prefetch refill behavior, or every vendor-specific EEPROM/Flash command extension. Those remain compatibility refinements to be driven by real-ROM validation in Phase F.
 
-## Phase E — Generated execution performance
-- [ ] Direct generated-block linking.
-- [ ] Block chaining/hot-path dispatch reduction.
-- [ ] Runtime boundary minimization without weakening architectural correctness.
-- [ ] Deterministic performance benchmarks.
+## Phase E — Generated execution performance — IN PROGRESS
+- [x] E0: deterministic generated-dispatch benchmark baseline.
+- [x] E1: static CFG transitions skip redundant runtime CFG-membership probes while retaining alignment validation.
+- [ ] E2: direct generated-block linking.
+- [ ] E3: block chaining/hot-path dispatch reduction.
+- [ ] E4: runtime boundary minimization without weakening architectural correctness.
+- [ ] deterministic performance comparison across E1–E4.
+
+### Phase E engineering gate — E1 COMPLETE
+- [x] `GeneratedBlockExit::Continue` represents statically proven generated CFG transitions.
+- [x] Static transitions retain architectural alignment validation.
+- [x] Dynamic targets retain runtime CFG-membership validation.
+- [x] BIOS-provided dynamic targets use the dynamic validation path.
+- [x] Regression coverage proves static transitions do not invoke the CFG-membership predicate.
+- [x] Benchmark exposes `cfg_membership_probes` for the static-link path.
 
 ## Phase F — Real game execution
 - [ ] Boot a real ROM through BIOS/runtime initialization.
