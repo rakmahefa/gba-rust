@@ -50,22 +50,14 @@ impl WaitStateConfig {
     pub fn rom_cycles_for_address(self, address: u32, sequential: bool) -> Option<u8> {
         let bank = Self::bank_for_address(address)?;
         Some(match bank {
-            0 => {
-                if sequential { self.ws0_second } else { self.ws0_first }
-            }
-            1 => {
-                if sequential { self.ws1_second } else { self.ws1_first }
-            }
-            2 => {
-                if sequential { self.ws2_second } else { self.ws2_first }
-            }
+            0 => if sequential { self.ws0_second } else { self.ws0_first },
+            1 => if sequential { self.ws1_second } else { self.ws1_first },
+            2 => if sequential { self.ws2_second } else { self.ws2_first },
             _ => unreachable!(),
         })
     }
 
-    pub fn save_cycles(self) -> u8 {
-        self.sram_cycles
-    }
+    pub fn save_cycles(self) -> u8 { self.sram_cycles }
 
     pub fn bank_for_address(address: u32) -> Option<u8> {
         match address {
@@ -88,7 +80,7 @@ fn decode_wait(value: u16) -> u8 {
 }
 
 fn decode_second(value: u16, bank: u8) -> u8 {
-    if value & 1 != 0 {
+    if value != 0 {
         1
     } else {
         match bank {
@@ -111,16 +103,10 @@ impl PrefetchBuffer {
     pub const CAPACITY: u8 = 8;
 
     pub fn new(enabled: bool) -> Self {
-        Self {
-            enabled,
-            next_address: None,
-            words: 0,
-        }
+        Self { enabled, next_address: None, words: 0 }
     }
 
-    pub fn enabled(&self) -> bool {
-        self.enabled
-    }
+    pub fn enabled(&self) -> bool { self.enabled }
 
     pub fn invalidate(&mut self) {
         self.next_address = None;
@@ -128,9 +114,7 @@ impl PrefetchBuffer {
     }
 
     pub fn observe_fetch(&mut self, address: u32) -> bool {
-        if !self.enabled {
-            return false;
-        }
+        if !self.enabled { return false; }
         let hit = self.next_address == Some(address) && self.words != 0;
         if hit {
             self.next_address = Some(address.wrapping_add(2));
@@ -148,9 +132,7 @@ impl PrefetchBuffer {
         }
     }
 
-    pub fn available_words(&self) -> u8 {
-        self.words
-    }
+    pub fn available_words(&self) -> u8 { self.words }
 }
 
 #[cfg(test)]
@@ -191,15 +173,17 @@ mod tests {
     }
 
     #[test]
-    fn prefetch_buffer_is_eight_halfwords_and_invalidates_cleanly() {
-        let mut prefetch = PrefetchBuffer::new(true);
-        prefetch.refill(0x0800_0100);
-        assert_eq!(prefetch.available_words(), 8);
-        assert!(prefetch.observe_fetch(0x0800_0100));
-        assert_eq!(prefetch.available_words(), 7);
-        assert!(!prefetch.observe_fetch(0x0800_0200));
-        assert_eq!(prefetch.available_words(), 7);
-        prefetch.invalidate();
-        assert_eq!(prefetch.available_words(), 0);
+    fn prefetch_buffer_is_eight_halfwords_and_tracks_sequential_hits() {
+        let mut buffer = PrefetchBuffer::new(true);
+        buffer.refill(0x0800_0100);
+        assert_eq!(buffer.available_words(), 8);
+        assert!(buffer.observe_fetch(0x0800_0100));
+        assert_eq!(buffer.available_words(), 7);
+        assert!(buffer.observe_fetch(0x0800_0102));
+        assert_eq!(buffer.available_words(), 6);
+        assert!(!buffer.observe_fetch(0x0800_0200));
+        assert_eq!(buffer.available_words(), 6);
+        buffer.invalidate();
+        assert_eq!(buffer.available_words(), 0);
     }
 }
