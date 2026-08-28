@@ -1,7 +1,7 @@
 use super::*;
 
 impl Ppu {
-    fn render_mode0_scanline(
+    pub(super) fn render_mode0_scanline(
         &mut self,
         dispcnt: u16,
         y: usize,
@@ -114,7 +114,7 @@ impl Ppu {
         }
     }
 
-    fn render_mode3_scanline(&mut self, y: usize, vram: &[u8]) {
+    pub(super) fn render_mode3_scanline(&mut self, y: usize, vram: &[u8]) {
         let row = y * VISIBLE_WIDTH;
         let base = y * VISIBLE_WIDTH * 2;
         if base + VISIBLE_WIDTH * 2 > vram.len() {
@@ -127,7 +127,7 @@ impl Ppu {
         }
     }
 
-    fn render_mode4_scanline(&mut self, y: usize, frame1: bool, vram: &[u8], palette: &[u8]) {
+    pub(super) fn render_mode4_scanline(&mut self, y: usize, frame1: bool, vram: &[u8], palette: &[u8]) {
         let row = y * VISIBLE_WIDTH;
         let frame_offset = if frame1 { 0xA000 } else { 0 };
         let base = frame_offset + y * VISIBLE_WIDTH;
@@ -142,7 +142,7 @@ impl Ppu {
         }
     }
 
-    fn render_mode5_scanline(&mut self, y: usize, frame1: bool, vram: &[u8]) {
+    pub(super) fn render_mode5_scanline(&mut self, y: usize, frame1: bool, vram: &[u8]) {
         let row = y * VISIBLE_WIDTH;
         for pixel in &mut self.framebuffer[row..row + VISIBLE_WIDTH] {
             *pixel = 0;
