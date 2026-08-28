@@ -27,17 +27,26 @@ fn max_steps_counts_blocks_not_runtime_cycles() {
 }
 
 #[test]
-fn continue_target_must_be_linked() {
+fn continue_target_is_statically_linked_without_cfg_probe() {
     let mut runtime = Runtime::new();
-    let error = runtime.run_generated_contract(
-        0x0800_0000,
-        false,
-        Some(1),
-        |_, address, thumb| Ok(GeneratedBlockExit::continue_to(address + 4, thumb)),
-        |address, thumb| address == 0x0800_0000 && !thumb,
-    );
+    let result = runtime
+        .run_generated_contract(
+            0x0800_0000,
+            false,
+            Some(1),
+            |_, address, thumb| Ok(GeneratedBlockExit::continue_to(address + 4, thumb)),
+            |_, _| panic!("static continue transitions must not probe CFG membership"),
+        )
+        .expect("statically linked continue target should dispatch directly");
 
-    assert_eq!(error, Err(gba_runtime::GENERATED_TARGET_OUTSIDE_CFG));
+    assert_eq!(result.steps, 1);
+    assert!(matches!(
+        result.exit,
+        GeneratedExecutionExit::StepLimitExceeded {
+            address: 0x0800_0004,
+            thumb: false,
+        }
+    ));
 }
 
 #[test]
