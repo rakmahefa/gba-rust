@@ -1,10 +1,10 @@
-use crate::{GeneratedBlockExit, GeneratedExecutionExit, GeneratedExecutionResult, Runtime, RuntimeContract, ArchitecturalState, GeneratedBlockKey, REG_PC};
+use crate::{ArchitecturalState, GeneratedBlockKey, GeneratedExecutionExit, GeneratedExecutionResult, Runtime, RuntimeContract, REG_PC};
 
 /// A statically generated block that can be invoked directly by its predecessor.
 pub type GeneratedLinkedBlock =
     fn(&mut Runtime) -> Result<LinkedBlockExit, &'static str>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum LinkedBlockExit {
     Next {
         block: GeneratedLinkedBlock,
