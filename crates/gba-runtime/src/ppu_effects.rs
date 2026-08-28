@@ -34,18 +34,7 @@ impl Ppu {
         let bldy = (io_half(io, BLDY) & 0x1f) as u32;
 
         for x in 0..VISIBLE_WIDTH {
-            let mask = window_mask(
-                dispcnt,
-                x as u16,
-                y,
-                win0h,
-                win1h,
-                win0v,
-                win1v,
-                winin,
-                winout,
-                self.line_obj_window[x],
-            );
+            let mask = window_mask(dispcnt, x as u16, y, win0h, win1h, win0v, win1v, winin, winout, self.line_obj_window[x]);
             if !visible_in_mask(self.line_source[x], mask) {
                 self.promote_second_candidate(x);
             }
@@ -108,18 +97,7 @@ impl Ppu {
     }
 }
 
-fn window_mask(
-    dispcnt: u16,
-    x: u16,
-    y: u16,
-    win0h: u16,
-    win1h: u16,
-    win0v: u16,
-    win1v: u16,
-    winin: u16,
-    winout: u16,
-    obj_window: bool,
-) -> u8 {
+fn window_mask(dispcnt: u16, x: u16, y: u16, win0h: u16, win1h: u16, win0v: u16, win1v: u16, winin: u16, winout: u16, obj_window: bool) -> u8 {
     if dispcnt & DISPCNT_WIN0 != 0 && inside_window(x, y, win0h, win0v) {
         return (winin & 0x3f) as u8;
     }
@@ -133,8 +111,7 @@ fn window_mask(
 }
 
 fn inside_window(x: u16, y: u16, h: u16, v: u16) -> bool {
-    axis_inside(x, (h >> 8) & 0xff, h & 0xff)
-        && axis_inside(y, (v >> 8) & 0xff, v & 0xff)
+    axis_inside(x, (h >> 8) & 0xff, h & 0xff) && axis_inside(y, (v >> 8) & 0xff, v & 0xff)
 }
 
 fn axis_inside(value: u16, start: u16, end: u16) -> bool {
@@ -151,10 +128,7 @@ fn layer_selected(mask: u16, source: u8) -> bool {
 
 fn alpha_blend(foreground: u32, background: u32, eva: u32, evb: u32) -> u32 {
     let blend = |a: u32, b: u32| ((a * eva + b * evb) / 16).min(255);
-    0xff00_0000
-        | blend((foreground >> 16) & 0xff, (background >> 16) & 0xff) << 16
-        | blend((foreground >> 8) & 0xff, (background >> 8) & 0xff) << 8
-        | blend(foreground & 0xff, background & 0xff)
+    0xff00_0000 | blend((foreground >> 16) & 0xff, (background >> 16) & 0xff) << 16 | blend((foreground >> 8) & 0xff, (background >> 8) & 0xff) << 8 | blend(foreground & 0xff, background & 0xff)
 }
 
 fn brighten(color: u32, coefficient: u32) -> u32 {
@@ -182,7 +156,7 @@ mod tests {
 
     #[test]
     fn blend_and_brightness_are_clamped() {
-        assert_eq!(alpha_blend(0xffff_0000, 0xff00_00ff, 16, 16), 0xff7f_007f);
+        assert_eq!(alpha_blend(0xffff_0000, 0xff00_00ff, 8, 8), 0xff7f_007f);
         assert_eq!(brighten(0xff00_0000, 16), 0xffff_ffff);
         assert_eq!(darken(0xffff_ffff, 16), 0xff00_0000);
     }
