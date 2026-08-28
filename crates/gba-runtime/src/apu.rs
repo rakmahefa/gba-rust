@@ -135,6 +135,8 @@ mod tests {
         apu.write_fifo_b(2);
         apu.reset_fifos(true, false);
         assert_eq!(apu.fifo_a_len(), 0);
-        assert_eq!(apu.fifo_b_len(), 1);
+        // FIFO writes are 32-bit architectural writes, so each write enqueues
+        // four signed PCM bytes in the corresponding FIFO.
+        assert_eq!(apu.fifo_b_len(), 4);
     }
 }
