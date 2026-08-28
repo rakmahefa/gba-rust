@@ -1,6 +1,6 @@
 # gba-rust — Roadmap
 
-> Living roadmap. Phase C is complete for the deterministic architectural audio/serial runtime scope; Phase D is next.
+> Living roadmap. Phase C is complete for the deterministic architectural audio/serial runtime scope; Phase D is in progress.
 
 ## Current direction
 
@@ -64,10 +64,17 @@
 
 Phase C is complete for the project's **deterministic architectural audio/serial scope**. This is not a claim of cycle-perfect analog/audio hardware emulation, external multiplayer transport, or host audio backend fidelity. Those remain outside the runtime contract.
 
-## Phase D — Cartridge and external memory — NEXT
-- [ ] SRAM/Flash/EEPROM behavior.
+## Phase D — Cartridge and external memory — IN PROGRESS
+- [x] Deterministic SRAM read/write and address mirroring foundation.
+- [x] Flash command-state foundation: unlock, byte program, sector erase, chip erase.
+- [x] Flash128K bank switching foundation.
+- [ ] EEPROM serial protocol behavior.
 - [ ] Cartridge waitstates and prefetch fidelity.
-- [ ] Save-device protocol regression tests.
+- [ ] Save-device protocol regression tests across SRAM/Flash/EEPROM.
+
+### Phase D engineering boundary
+
+The initial Phase D increment keeps save-device semantics inside `gba-runtime::cartridge` and preserves the existing CPU bus classification. EEPROM command transport and cartridge waitstate/prefetch timing remain intentionally separate follow-up increments.
 
 ## Phase E — Generated execution performance
 - [ ] Direct generated-block linking.
