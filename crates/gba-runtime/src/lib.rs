@@ -5,6 +5,7 @@ mod contract;
 mod dma;
 mod eeprom;
 mod execution;
+mod generated_link;
 mod ppu_affine;
 
 pub mod apu;
@@ -43,6 +44,7 @@ pub use cpu::{
 };
 pub use dma::{DmaAddressMode, DmaChannel, DmaController, DmaTrigger, DmaTransfer};
 pub use eeprom::{Eeprom, EepromSize};
+pub use generated_link::{run_generated_linked, GeneratedLinkedBlock, LinkedBlockExit};
 pub use mmio::{DISPSTAT_HBLANK, DISPSTAT_VBLANK, DISPSTAT_VCOUNT_IRQ, VCOUNT};
 pub use ppu::Ppu;
 pub use runtime::Runtime;
