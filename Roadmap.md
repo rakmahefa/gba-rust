@@ -79,7 +79,7 @@ Phase A establishes **runtime correctness infrastructure**, not complete GBA har
 
 ## Phase B — Video / PPU fidelity
 
-**Current focus:** build the PPU as small, testable modules. `ppu.rs` owns scanline orchestration/register synchronization; display-mode rendering lives in `ppu_modes.rs`, while OBJ rendering is isolated in `ppu_sprites.rs`.
+**Current focus:** keep PPU rendering modular and deterministic. `ppu.rs` owns scanline orchestration/register synchronization; `ppu_modes.rs` owns bitmap/text display-mode rendering; `ppu_affine.rs` owns affine BG modes 1/2; `ppu_sprites.rs` owns OBJ/OAM rendering.
 
 ### B1. Timing and scanline state
 
@@ -90,9 +90,9 @@ Phase A establishes **runtime correctness infrastructure**, not complete GBA har
 
 - [ ] DISPCNT/BG/affine/window/blending semantics.
 - [ ] Modes 0–5.
-- [ ] Text BG baseline: Mode 0 BG0/BG1 tile maps, scrolling, 4bpp/8bpp and tile flips.
-- [ ] Bitmap baseline: Modes 3, 4 and 5.
-- [ ] Affine BG rendering for Modes 1/2.
+- [x] Text BG baseline: Mode 0 BG0/BG1 tile maps, scrolling, 4bpp/8bpp and tile flips.
+- [x] Bitmap baseline: Modes 3, 4 and 5.
+- [x] Affine BG baseline for Modes 1/2, including signed affine parameters, reference points, map-size handling and 8bpp tile lookup.
 
 ### B3. OBJ / OAM
 
@@ -115,7 +115,8 @@ Phase A establishes **runtime correctness infrastructure**, not complete GBA har
 
 ### Phase B engineering gate
 
-- [ ] Keep PPU modules focused; split a renderer module before it becomes a monolithic implementation.
+- [x] Split display-mode rendering out of `ppu.rs` before adding further PPU complexity.
+- [x] Keep affine rendering isolated in `ppu_affine.rs` rather than growing the scanline orchestrator.
 - [ ] No compiler IR/codegen expansion for PPU work unless a concrete compatibility requirement demands it.
 - [ ] Every new display feature gets deterministic scanline or frame-level regression coverage.
 
