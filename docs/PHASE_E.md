@@ -1,31 +1,44 @@
 # Phase E — Generated execution performance
 
-Phase E starts on `feat/phase-e-generated-execution` after Phase D cartridge/external-memory completion.
+Phase E runs on `feat/phase-e-generated-execution` after Phase D cartridge/external-memory completion.
 
-## E0 — Baseline — COMPLETE
+## E0 — Deterministic baseline — COMPLETE
 
-The branch adds `gba-cli/src/bin/phase-e-dispatch-benchmark.rs`, an explicit host-side benchmark for generated execution. It reports total execution time, steps and CFG-membership probes so later linking work can be compared against a reproducible baseline.
+`gba-cli/src/bin/phase-e-dispatch-benchmark.rs` provides a reproducible host-side benchmark for generated execution. It reports total time, steps and CFG-membership probes.
 
 ## E1 — Static linking — COMPLETE
 
-Static CFG transitions now use the existing `GeneratedBlockExit::Continue` path as a statically proven edge. The runtime still validates architectural alignment, but no longer performs a redundant CFG-membership probe for that edge.
+Statically proven `GeneratedBlockExit::Continue` transitions retain architectural alignment validation while skipping redundant runtime CFG-membership probes. Runtime-resolved `Dynamic` targets continue to validate CFG membership, and BIOS-provided dynamic targets remain on the dynamic path.
 
-Runtime-resolved `GeneratedBlockExit::Dynamic` targets continue to require CFG membership validation. BIOS-provided dynamic return targets are emitted through the dynamic path as well. Exception vectors and normal returns retain their existing boundary semantics.
+Regression coverage locks this distinction down and the benchmark reports zero CFG probes for the static-link transition path.
 
-The Phase E benchmark now measures the static-link path and exposes `cfg_membership_probes`; the expected E1 invariant is zero probes for the statically proven transition.
+## E2 — Direct generated-block linking — COMPLETE
 
-## E2 — Direct block linking
+`gba-runtime::run_generated_linked` executes a `GeneratedLinkedBlock` entry and follows `LinkedBlockExit::Next { block, ... }` directly through a function pointer. This removes address/mode lookup between statically linked successors while retaining alignment checks at the link boundary.
 
-Move from address/mode redispatch toward direct generated-block linkage for safe static edges. IRQ sampling and architectural exception boundaries remain explicit and cannot be bypassed by optimization.
+The generated-link primitive is deliberately independent from the generic `RuntimeContract`: the generic dispatcher remains available for dynamic targets and compatibility boundaries.
 
-## E3 — Block chaining
+## E3 — Block chaining / hot-path dispatch reduction — COMPLETE
 
-Hot static paths can then be chained to reduce generic dispatcher re-entry. Chain construction and invalidation must remain deterministic and must respect boundaries where asynchronous hardware state can become CPU-visible.
+`LinkedBlockExit::Next` carries the next generated block itself, so a static hot path stays inside the generated-block loop instead of re-entering the address-based dispatcher on every successor. The chain is deterministic and explicit; exceptions, returns and halts terminate the chain at architectural boundaries.
 
-## E4 — Runtime boundary minimization
+The direct-link benchmark exercises a multi-step chain rather than a one-shot call, so the hot-path dispatch reduction is measured over sustained block execution.
 
-Finally, proven CPU-local paths can reduce generated-to-runtime crossings without weakening memory, timing, exception or ARM/Thumb architectural contracts.
+## E4 — Runtime boundary minimization — COMPLETE
+
+The direct-link path avoids the generic `run_generated_contract` membership callback on every static transition. Architectural alignment remains checked, while dynamic target validation, exception entry, return semantics and timing remain explicit.
+
+No memory, timing, ARM/Thumb, IRQ or exception contract was weakened to obtain the optimization.
+
+## Benchmark comparison
+
+The Phase E benchmark compares two equivalent sustained paths:
+
+- `contract`: generic generated execution with CFG-membership validation.
+- `linked`: direct generated-block chaining with zero CFG-membership probes.
+
+It prints `ns/step` for both paths and a `direct_link_speedup` ratio. Absolute host timings are treated as machine-dependent; the structural invariants (same step count and zero linked-path probes) are deterministic.
 
 ## Acceptance gate
 
-Every Phase E increment is accepted only with `cargo fmt --check`, `cargo check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and a deterministic benchmark comparison where applicable.
+Phase E is accepted only when `cargo fmt --check`, `cargo check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and the deterministic benchmark contract all pass.
