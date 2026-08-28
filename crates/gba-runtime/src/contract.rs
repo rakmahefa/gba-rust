@@ -2,7 +2,7 @@ use std::env;
 
 use crate::{BiosResult, ExceptionKind, Runtime, REG_PC};
 
-pub const RUNTIME_CONTRACT_VERSION: u32 = 7;
+pub const RUNTIME_CONTRACT_VERSION: u32 = 8;
 pub const GENERATED_TARGET_OUTSIDE_CFG: &str =
     "generated direct target is outside the statically linked CFG";
 pub const GENERATED_TARGET_DYNAMIC_UNRESOLVED: &str =
@@ -385,9 +385,6 @@ impl RuntimeContract for Runtime {
                 GeneratedBlockExit::Continue { address, thumb } => {
                     let target = checked(address, thumb)?;
                     trace.log_transition(steps - 1, source, exit, Some(target), self.cycles);
-                    if !is_linked(target.address, target.thumb) {
-                        return Err(GENERATED_TARGET_OUTSIDE_CFG);
-                    }
                     next = target;
                 }
                 GeneratedBlockExit::Dynamic { address, thumb } => {
@@ -468,6 +465,36 @@ mod tests {
     fn generated_block_key_trace_identity_preserves_mode() {
         let key = GeneratedBlockKey::new(0x120, true);
         assert_eq!(key.tuple(), (0x120, true));
+    }
+
+    #[test]
+    fn continue_exit_skips_cfg_membership_probe() {
+        let mut runtime = Runtime::new();
+        let result = runtime
+            .run_generated_contract(
+                0x0800_0000,
+                false,
+                Some(2),
+                |_, _, _| Ok(GeneratedBlockExit::continue_to(0x0800_0000, false)),
+                |_, _| panic!("direct generated transition must not probe CFG membership"),
+            )
+            .expect("direct transition must remain executable");
+
+        assert_eq!(result.steps, 2);
+    }
+
+    #[test]
+    fn dynamic_exit_still_requires_cfg_membership() {
+        let mut runtime = Runtime::new();
+        let result = runtime.run_generated_contract(
+            0x0800_0000,
+            false,
+            Some(1),
+            |_, _, _| Ok(GeneratedBlockExit::dynamic_to(0x0800_0000, false)),
+            |_, _| false,
+        );
+
+        assert_eq!(result, Err(GENERATED_TARGET_DYNAMIC_UNRESOLVED));
     }
 
     #[test]
