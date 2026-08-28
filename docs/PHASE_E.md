@@ -2,17 +2,21 @@
 
 Phase E starts on `feat/phase-e-generated-execution` after Phase D cartridge/external-memory completion.
 
-## E0 — Baseline
+## E0 — Baseline — COMPLETE
 
-The branch adds `gba-cli/src/bin/phase-e-dispatch-benchmark.rs`, an explicit host-side benchmark for the current generated execution contract. It reports total execution time, steps and CFG-membership probes so later linking work can be compared against a reproducible baseline.
+The branch adds `gba-cli/src/bin/phase-e-dispatch-benchmark.rs`, an explicit host-side benchmark for generated execution. It reports total execution time, steps and CFG-membership probes so later linking work can be compared against a reproducible baseline.
 
-## E1 — Static linking
+## E1 — Static linking — COMPLETE
 
-The first optimization target is the distinction between statically proven CFG transitions and runtime-resolved targets. Static edges must retain architectural alignment validation, but should not repeat a generated-CFG membership lookup that was already established during code generation.
+Static CFG transitions now use the existing `GeneratedBlockExit::Continue` path as a statically proven edge. The runtime still validates architectural alignment, but no longer performs a redundant CFG-membership probe for that edge.
+
+Runtime-resolved `GeneratedBlockExit::Dynamic` targets continue to require CFG membership validation. BIOS-provided dynamic return targets are emitted through the dynamic path as well. Exception vectors and normal returns retain their existing boundary semantics.
+
+The Phase E benchmark now measures the static-link path and exposes `cfg_membership_probes`; the expected E1 invariant is zero probes for the statically proven transition.
 
 ## E2 — Direct block linking
 
-Once the baseline is stable, the dispatcher will move from address/mode redispatch toward direct generated-block linkage for safe static edges. IRQ sampling and architectural exception boundaries remain explicit and cannot be bypassed by optimization.
+Move from address/mode redispatch toward direct generated-block linkage for safe static edges. IRQ sampling and architectural exception boundaries remain explicit and cannot be bypassed by optimization.
 
 ## E3 — Block chaining
 
