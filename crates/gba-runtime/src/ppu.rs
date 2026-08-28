@@ -133,7 +133,6 @@ impl Ppu {
         let incoming = (priority, tie_rank);
         let top = (self.line_priority[x], self.line_tie_rank[x]);
         let second = (self.line_second_priority[x], self.line_second_tie_rank[x]);
-
         if incoming < top {
             self.line_second_priority[x] = self.line_priority[x];
             self.line_second_tie_rank[x] = self.line_tie_rank[x];
@@ -144,7 +143,7 @@ impl Ppu {
             self.line_tie_rank[x] = tie_rank;
             self.line_source[x] = source;
             self.line_semi_transparent[x] = semi_transparent;
-        } else if incoming > top && incoming < second {
+        } else if incoming < second && incoming != top {
             self.line_second_priority[x] = priority;
             self.line_second_tie_rank[x] = tie_rank;
             self.line_second_color[x] = color;
@@ -156,10 +155,6 @@ impl Ppu {
         if x < VISIBLE_WIDTH {
             self.line_obj_window[x] = true;
         }
-    }
-
-    pub(super) fn apply_scanline_effects(&mut self, dispcnt: u16, y: u16, io: &HashMap<u32, u8>) {
-        self.apply_scanline_effects_impl(dispcnt, y, io);
     }
 
     pub fn render_scanline(
@@ -179,20 +174,12 @@ impl Ppu {
             bgr555_to_rgba(0)
         };
         self.begin_scanline(y, backdrop);
-
         match dispcnt & MODE_MASK {
             0 => self.render_mode0_scanline(dispcnt, y, vram, palette),
             1 | 2 => {}
             3 if dispcnt & BG2_ENABLE != 0 => self.render_mode3_scanline(y, vram),
-            4 if dispcnt & BG2_ENABLE != 0 => self.render_mode4_scanline(
-                y,
-                dispcnt & FRAME_SELECT != 0,
-                vram,
-                palette,
-            ),
-            5 if dispcnt & BG2_ENABLE != 0 => {
-                self.render_mode5_scanline(y, dispcnt & FRAME_SELECT != 0, vram)
-            }
+            4 if dispcnt & BG2_ENABLE != 0 => self.render_mode4_scanline(y, dispcnt & FRAME_SELECT != 0, vram, palette),
+            5 if dispcnt & BG2_ENABLE != 0 => self.render_mode5_scanline(y, dispcnt & FRAME_SELECT != 0, vram),
             _ => {}
         }
     }
@@ -209,10 +196,7 @@ pub(super) fn bgr555_to_rgba(value: u16) -> u32 {
 
 #[inline]
 pub(super) fn io_half(io: &HashMap<u32, u8>, address: u32) -> u16 {
-    u16::from_le_bytes([
-        *io.get(&address).unwrap_or(&0),
-        *io.get(&(address + 1)).unwrap_or(&0),
-    ])
+    u16::from_le_bytes([*io.get(&address).unwrap_or(&0), *io.get(&(address + 1)).unwrap_or(&0)])
 }
 
 #[cfg(test)]
@@ -263,10 +247,7 @@ mod tests {
         let palette = vec![0; 0x400];
         vram[0] = 0x1f;
         ppu.render_scanline(BG2_ENABLE | 5, MODE5_Y_OFFSET as u16, &vram, &palette);
-        assert_eq!(
-            ppu.framebuffer[MODE5_Y_OFFSET * VISIBLE_WIDTH + MODE5_X_OFFSET],
-            0xffff_0000
-        );
+        assert_eq!(ppu.framebuffer[MODE5_Y_OFFSET * VISIBLE_WIDTH + MODE5_X_OFFSET], 0xffff_0000);
         assert_eq!(ppu.framebuffer[0], 0);
     }
 
