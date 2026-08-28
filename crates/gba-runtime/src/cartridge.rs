@@ -44,8 +44,9 @@ pub struct CartridgeHeader {
     pub checksum: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum FlashCommandState {
+    #[default]
     Ready,
     Unlock1,
     Unlock2,
@@ -54,12 +55,6 @@ enum FlashCommandState {
     EraseUnlock2,
     EraseCommand,
     BankSwitch,
-}
-
-impl Default for FlashCommandState {
-    fn default() -> Self {
-        Self::Ready
-    }
 }
 
 #[derive(Debug, Clone)]
