@@ -16,6 +16,7 @@ pub mod ppu;
 pub mod ppu_sprites;
 pub mod runtime;
 pub mod scheduler;
+pub mod sio;
 pub mod timers;
 
 pub use apu::Apu;
@@ -45,6 +46,7 @@ pub use scheduler::{
     EventKind, ScheduledEvent, TimingScheduler, CYCLES_PER_SCANLINE, HBLANK_START_CYCLES,
     SCANLINES_PER_FRAME, VBLANK_START_LINE,
 };
+pub use sio::{Sio, SioMode};
 pub use timers::{Timer, TimerControl, TimerState, TIMER_COUNT};
 
 pub use arm7tdmi::Nzcv;
