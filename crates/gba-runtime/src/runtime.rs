@@ -6,6 +6,7 @@ use super::cartridge::Cartridge;
 use super::cpu::Cpu;
 use super::dma::DmaController;
 use super::scheduler::TimingScheduler;
+use super::sio::Sio;
 use super::timers::{Timer, TIMER_COUNT};
 use super::{Apu, Ppu};
 
@@ -22,18 +23,37 @@ const KEYCNT_DEFAULT: u16 = 0;
 #[path = "runtime_execution.rs"] mod runtime_execution;
 #[path = "runtime_memory.rs"] mod runtime_memory;
 #[path = "runtime_dma.rs"] mod runtime_dma;
-
 #[cfg(test)] #[path = "runtime_tests.rs"] mod tests;
 #[cfg(test)] #[path = "mmio_tests.rs"] mod mmio_tests;
 #[cfg(test)] #[path = "timer_tests.rs"] mod timer_tests;
 
 #[derive(Debug)]
 pub struct Runtime {
-    pub cpu: Cpu, pub bios: Bios, pub ppu: Ppu, pub apu: Apu, pub cartridge: Option<Cartridge>, pub io: HashMap<u32, u8>,
-    pub ewram: [u8; EWRAM_LEN], pub iwram: [u8; IWRAM_LEN], pub palette: [u8; PALETTE_LEN], pub vram: [u8; VRAM_LEN], pub oam: [u8; OAM_LEN],
-    pub interrupts: InterruptController, pub timers: [Timer; TIMER_COUNT], pub dma: DmaController, pub power: PowerState,
-    pub dispcnt: u16, pub waitcnt: u16, pub postflg: u8, pub keyinput: u16, pub keycnt: u16, pub dispstat: u16, pub vcount: u16,
-    pub scheduler: TimingScheduler, pub cycles: u64,
+    pub cpu: Cpu,
+    pub bios: Bios,
+    pub ppu: Ppu,
+    pub apu: Apu,
+    pub sio: Sio,
+    pub cartridge: Option<Cartridge>,
+    pub io: HashMap<u32, u8>,
+    pub ewram: [u8; EWRAM_LEN],
+    pub iwram: [u8; IWRAM_LEN],
+    pub palette: [u8; PALETTE_LEN],
+    pub vram: [u8; VRAM_LEN],
+    pub oam: [u8; OAM_LEN],
+    pub interrupts: InterruptController,
+    pub timers: [Timer; TIMER_COUNT],
+    pub dma: DmaController,
+    pub power: PowerState,
+    pub dispcnt: u16,
+    pub waitcnt: u16,
+    pub postflg: u8,
+    pub keyinput: u16,
+    pub keycnt: u16,
+    pub dispstat: u16,
+    pub vcount: u16,
+    pub scheduler: TimingScheduler,
+    pub cycles: u64,
 }
 
 impl Default for Runtime {
@@ -41,10 +61,12 @@ impl Default for Runtime {
         let mut scheduler = TimingScheduler::new();
         scheduler.schedule_at(super::scheduler::HBLANK_START_CYCLES, super::scheduler::EventKind::PpuHBlankStart);
         scheduler.schedule_at(super::scheduler::CYCLES_PER_SCANLINE, super::scheduler::EventKind::PpuScanline);
-        Self { cpu: Cpu::default(), bios: Bios::default(), ppu: Ppu::default(), apu: Apu::default(), cartridge: None, io: HashMap::new(),
+        Self {
+            cpu: Cpu::default(), bios: Bios::default(), ppu: Ppu::default(), apu: Apu::default(), sio: Sio::default(), cartridge: None, io: HashMap::new(),
             ewram: [0; EWRAM_LEN], iwram: [0; IWRAM_LEN], palette: [0; PALETTE_LEN], vram: [0; VRAM_LEN], oam: [0; OAM_LEN],
             interrupts: InterruptController::default(), timers: std::array::from_fn(|_| Timer::default()), dma: DmaController::default(), power: PowerState::default(),
-            dispcnt: 0, waitcnt: 0, postflg: 0, keyinput: KEYINPUT_DEFAULT, keycnt: KEYCNT_DEFAULT, dispstat: 0, vcount: 0, scheduler, cycles: 0 }
+            dispcnt: 0, waitcnt: 0, postflg: 0, keyinput: KEYINPUT_DEFAULT, keycnt: KEYCNT_DEFAULT, dispstat: 0, vcount: 0, scheduler, cycles: 0,
+        }
     }
 }
 
