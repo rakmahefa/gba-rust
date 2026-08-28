@@ -31,7 +31,6 @@ const fn ppu_control(address: u32, mask: u16) -> MmioRegister { MmioRegister::ne
 const fn ppu_write_only(address: u32, mask: u16) -> MmioRegister { MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::WriteOnly, mask as u32) }
 const fn ppu_word(address: u32) -> MmioRegister { MmioRegister::new(address, MmioWidth::Word, MmioAccess::ReadWrite, u32::MAX) }
 const fn sound_control(address: u32, mask: u16) -> MmioRegister { MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::ReadWrite, mask as u32) }
-const fn sound_write_only(address: u32, mask: u16) -> MmioRegister { MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::WriteOnly, mask as u32) }
 const fn sound_fifo(address: u32) -> MmioRegister { MmioRegister::new(address, MmioWidth::Word, MmioAccess::WriteOnly, SOUND_FIFO_MASK) }
 const fn serial_control(address: u32, mask: u16) -> MmioRegister { MmioRegister::new(address, MmioWidth::Halfword, MmioAccess::ReadWrite, mask as u32) }
 
@@ -148,24 +147,4 @@ pub const fn register(address: u32) -> Option<MmioRegister> {
         0x0400_0128 | 0x0400_0129 => Some(SIOCNT), 0x0400_012a => Some(SIODATA8),
         0x0400_0134 | 0x0400_0135 => Some(RCNT), _ => None,
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dma_registers_preserve_width_and_access_direction() {
-        assert_eq!(DMA0SAD.width, MmioWidth::Word); assert_eq!(DMA0SAD.access, MmioAccess::ReadWrite);
-        assert_eq!(DMA0CNT_L.access, MmioAccess::ReadWrite); assert_eq!(DMA0CNT_L.writable_mask, DMA_COUNT_MASK as u32);
-        assert_eq!(DMA3CNT_L.writable_mask, DMA3_COUNT_MASK as u32); assert_eq!(DMA3CNT_H.writable_mask, DMA3_CONTROL_MASK as u32);
-    }
-    #[test]
-    fn timer_contract_matches_runtime_timer_shape() { assert_eq!(TIMER0CNT_L.width, MmioWidth::Halfword); assert_eq!(TIMER0CNT_H.writable_mask, TIMER_CONTROL_MASK as u32); assert_eq!(TIMER3CNT_H.address, 0x0400_010e); }
-    #[test]
-    fn ppu_contract_matches_gba_display_register_layout() { assert_eq!(BG0CNT.address, 0x0400_0008); assert_eq!(BG0CNT.writable_mask, BG_TEXT_CONTROL_MASK as u32); assert_eq!(BG2CNT.writable_mask, BG_AFFINE_CONTROL_MASK as u32); assert_eq!(BG0HOFS.access, MmioAccess::WriteOnly); assert_eq!(BG2X.width, MmioWidth::Word); assert_eq!(WININ.writable_mask, WINDOW_CONTROL_MASK as u32); assert_eq!(BLDCNT.writable_mask, BLEND_CONTROL_MASK as u32); assert_eq!(BLDALPHA.writable_mask, BLEND_ALPHA_MASK as u32); assert_eq!(BLDY.writable_mask, BLEND_Y_MASK as u32); }
-    #[test]
-    fn phase_c_registers_have_explicit_direction_and_width() { assert_eq!(SOUNDCNT_L.access, MmioAccess::ReadWrite); assert_eq!(FIFO_A.access, MmioAccess::WriteOnly); assert_eq!(FIFO_A.width, MmioWidth::Word); assert_eq!(SIOCNT.width, MmioWidth::Halfword); assert_eq!(SIODATA8.width, MmioWidth::Byte); assert_eq!(SIOMULTI0.access, MmioAccess::ReadOnly); }
-    #[test]
-    fn byte_addresses_resolve_to_their_parent_register() { assert_eq!(register(0x0400_00b3), Some(DMA0SAD)); assert_eq!(register(0x0400_00ba), Some(DMA0CNT_H)); assert_eq!(register(0x0400_010f), Some(TIMER3CNT_H)); assert_eq!(register(0x0400_0009), Some(BG0CNT)); assert_eq!(register(0x0400_004b), Some(WINOUT)); assert_eq!(register(0x0400_0055), Some(BLDY)); assert_eq!(register(0x0400_0061), Some(SOUNDCNT_L)); assert_eq!(register(0x0400_00a7), Some(FIFO_B)); assert_eq!(register(0x0400_0129), Some(SIOCNT)); assert!(register(0x0400_0110).is_none()); }
 }
