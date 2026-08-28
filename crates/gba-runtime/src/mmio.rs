@@ -20,9 +20,7 @@ impl MmioAccess {
 pub struct MmioRegister { pub address: u32, pub width: MmioWidth, pub access: MmioAccess, pub writable_mask: u32 }
 
 impl MmioRegister {
-    pub const fn new(address: u32, width: MmioWidth, access: MmioAccess, writable_mask: u32) -> Self {
-        Self { address, width, access, writable_mask }
-    }
+    pub const fn new(address: u32, width: MmioWidth, access: MmioAccess, writable_mask: u32) -> Self { Self { address, width, access, writable_mask } }
     #[inline]
     pub const fn allows_bus_width(self, width: MmioWidth) -> bool {
         match self.width { MmioWidth::Byte => matches!(width, MmioWidth::Byte), MmioWidth::Halfword => matches!(width, MmioWidth::Byte | MmioWidth::Halfword), MmioWidth::Word => true }
@@ -38,6 +36,19 @@ impl MmioRegister {
 pub const DISPCNT: u32 = 0x0400_0000;
 pub const DISPSTAT: u32 = 0x0400_0004;
 pub const VCOUNT: u32 = 0x0400_0006;
+pub const SOUNDCNT_L: u32 = 0x0400_0060;
+pub const SOUNDCNT_H: u32 = 0x0400_0062;
+pub const SOUNDCNT_X: u32 = 0x0400_0064;
+pub const SOUNDBIAS: u32 = 0x0400_0088;
+pub const FIFO_A: u32 = 0x0400_00a0;
+pub const FIFO_B: u32 = 0x0400_00a4;
+pub const SIOMULTI0: u32 = 0x0400_0120;
+pub const SIOMULTI1: u32 = 0x0400_0122;
+pub const SIOMULTI2: u32 = 0x0400_0124;
+pub const SIOMULTI3: u32 = 0x0400_0126;
+pub const SIOCNT: u32 = 0x0400_0128;
+pub const SIODATA8: u32 = 0x0400_012a;
+pub const RCNT: u32 = 0x0400_0134;
 pub const KEYINPUT: u32 = 0x0400_0130;
 pub const KEYCNT: u32 = 0x0400_0132;
 pub const IE: u32 = 0x0400_0200;
@@ -50,8 +61,14 @@ pub const HALTCNT: u32 = 0x0400_0301;
 pub const DISPCNT_HI: u32 = DISPCNT + 1;
 pub const DISPSTAT_HI: u32 = DISPSTAT + 1;
 pub const VCOUNT_HI: u32 = VCOUNT + 1;
+pub const SOUNDCNT_L_HI: u32 = SOUNDCNT_L + 1;
+pub const SOUNDCNT_H_HI: u32 = SOUNDCNT_H + 1;
+pub const SOUNDCNT_X_HI: u32 = SOUNDCNT_X + 1;
+pub const SOUNDBIAS_HI: u32 = SOUNDBIAS + 1;
 pub const KEYINPUT_HI: u32 = KEYINPUT + 1;
 pub const KEYCNT_HI: u32 = KEYCNT + 1;
+pub const SIOCNT_HI: u32 = SIOCNT + 1;
+pub const RCNT_HI: u32 = RCNT + 1;
 pub const IE_HI: u32 = IE + 1;
 pub const IF_HI: u32 = IF + 1;
 pub const WAITCNT_HI: u32 = WAITCNT + 1;
@@ -67,6 +84,13 @@ pub const KEYCNT_WRITABLE_MASK: u16 = 0xc3ff;
 pub const KEYCNT_KEY_MASK: u16 = 0x03ff;
 pub const KEYCNT_IRQ_ENABLE: u16 = 1 << 14;
 pub const KEYCNT_AND: u16 = 1 << 15;
+
+pub const SOUNDCNT_L_WRITABLE_MASK: u16 = 0x7777;
+pub const SOUNDCNT_H_WRITABLE_MASK: u16 = 0xff0f;
+pub const SOUNDCNT_X_WRITABLE_MASK: u16 = 0x0080;
+pub const SOUNDBIAS_WRITABLE_MASK: u16 = 0xc3ff;
+pub const SIOCNT_WRITABLE_MASK: u16 = 0xc1ff;
+pub const RCNT_WRITABLE_MASK: u16 = 0x800f;
 
 pub const DISPSTAT_VBLANK: u16 = 1 << 0;
 pub const DISPSTAT_HBLANK: u16 = 1 << 1;
@@ -107,8 +131,9 @@ pub const fn register(address: u32) -> Option<MmioRegister> {
 mod tests {
     use super::*;
     #[test] fn dispstat_vcount_compare_round_trips_without_touching_status_bits() { let value = DISPSTAT_VBLANK | DISPSTAT_HBLANK; let updated = with_dispstat_vcount(value, 123); assert_eq!(dispstat_vcount(updated), 123); assert_eq!(updated & DISPSTAT_STATUS_MASK, value); }
-    #[test] fn architectural_mmio_addresses_are_in_the_io_window() { for address in [DISPCNT, DISPSTAT, VCOUNT, KEYINPUT, KEYCNT, IE, IF, WAITCNT, IME, POSTFLG, HALTCNT] { assert!((0x0400_0000..=0x0400_03ff).contains(&address)); } }
+    #[test] fn architectural_mmio_addresses_are_in_the_io_window() { for address in [DISPCNT, DISPSTAT, VCOUNT, SOUNDCNT_L, SOUNDCNT_H, SOUNDCNT_X, SOUNDBIAS, FIFO_A, FIFO_B, SIOMULTI0, SIOCNT, SIODATA8, KEYINPUT, KEYCNT, RCNT, IE, IF, WAITCNT, IME, POSTFLG, HALTCNT] { assert!((0x0400_0000..=0x0400_03ff).contains(&address)); } }
     #[test] fn dispstat_irq_enables_are_distinct_from_status_bits() { assert_eq!(DISPSTAT_STATUS_MASK & (DISPSTAT_VBLANK_IRQ | DISPSTAT_HBLANK_IRQ | DISPSTAT_VCOUNT_IRQ), 0); }
+    #[test] fn phase_c_register_contract_masks_and_access_widths() { assert_eq!(SOUNDCNT_L_WRITABLE_MASK, 0x7777); assert_eq!(SOUNDCNT_H_WRITABLE_MASK, 0xff0f); assert_eq!(SOUNDCNT_X_WRITABLE_MASK, 0x0080); assert_eq!(register(0x0400_0200), Some(IE_REGISTER)); assert_eq!(RCNT_WRITABLE_MASK, 0x800f); }
     #[test] fn register_contract_exposes_access_policy_and_masks() { assert_eq!(register(DISPCNT), Some(DISPCNT_REGISTER)); assert_eq!(register(KEYCNT_HI), Some(KEYCNT_REGISTER)); assert_eq!(register(VCOUNT).unwrap().access, MmioAccess::ReadOnly); assert_eq!(register(HALTCNT).unwrap().access, MmioAccess::WriteOnly); assert_eq!(register(KEYCNT).unwrap().writable_mask, 0xc3ff); assert!(register(0x0400_001f).is_none()); }
     #[test] fn register_contract_derives_cpu_byte_accesses_from_storage_width() { assert!(DISPCNT_REGISTER.allows_bus_width(MmioWidth::Byte)); assert!(DISPCNT_REGISTER.allows_bus_width(MmioWidth::Halfword)); assert!(!DISPCNT_REGISTER.allows_bus_width(MmioWidth::Word)); assert!(HALTCNT_REGISTER.allows_bus_width(MmioWidth::Byte)); assert!(!HALTCNT_REGISTER.allows_bus_width(MmioWidth::Halfword)); }
     #[test] fn writable_byte_mask_selects_the_correct_register_byte() { assert_eq!(DISPCNT_REGISTER.writable_byte_mask(DISPCNT), 0xf7); assert_eq!(DISPCNT_REGISTER.writable_byte_mask(DISPCNT_HI), 0xff); assert_eq!(WAITCNT_REGISTER.writable_byte_mask(WAITCNT_HI), 0x5f); assert_eq!(KEYCNT_REGISTER.writable_byte_mask(KEYCNT_HI), 0xc3); }
