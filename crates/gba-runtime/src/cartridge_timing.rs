@@ -38,11 +38,11 @@ impl WaitStateConfig {
         Self {
             sram_cycles: decode_wait(waitcnt & WAITCNT_SRAM_MASK),
             ws0_first: decode_wait((waitcnt & WAITCNT_WS0_MASK) >> 2),
-            ws0_second: decode_second(waitcnt & WAITCNT_WS0_N_MASK, 2),
+            ws0_second: decode_second(waitcnt & WAITCNT_WS0_N_MASK),
             ws1_first: decode_wait((waitcnt & WAITCNT_WS1_MASK) >> 5),
-            ws1_second: decode_second(waitcnt & WAITCNT_WS1_N_MASK, 4),
+            ws1_second: decode_second(waitcnt & WAITCNT_WS1_N_MASK),
             ws2_first: decode_wait((waitcnt & WAITCNT_WS2_MASK) >> 8),
-            ws2_second: decode_second(waitcnt & WAITCNT_WS2_N_MASK, 8),
+            ws2_second: decode_second(waitcnt & WAITCNT_WS2_N_MASK),
             prefetch: waitcnt & WAITCNT_PREFETCH != 0,
         }
     }
@@ -87,8 +87,8 @@ fn decode_wait(value: u16) -> u8 {
     }
 }
 
-fn decode_second(value: u16, default_cycles: u8) -> u8 {
-    if value & 1 == 0 { default_cycles } else { 1 }
+fn decode_second(value: u16) -> u8 {
+    if value & 1 == 0 { 2 } else { 1 }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn waitcnt_decodes_fastest_second_waitstates_and_prefetch() {
-        let config = WaitStateConfig::from_waitcnt(0x0554 | WAITCNT_PREFETCH);
+        let config = WaitStateConfig::from_waitcnt(0x06d8 | WAITCNT_PREFETCH);
         assert_eq!(config.ws0_second, 1);
         assert_eq!(config.ws1_second, 1);
         assert_eq!(config.ws2_second, 1);
