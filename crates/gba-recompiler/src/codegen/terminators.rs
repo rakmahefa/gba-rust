@@ -131,7 +131,7 @@ fn emit_software_interrupt(
     let _ = writeln!(out, "    }}");
     let _ = writeln!(
         out,
-        "    if let Some(next_pc) = bios_result.next_pc {{ return Ok(GeneratedBlockExit::continue_to(next_pc, bios_result.next_thumb)); }}"
+        "    if let Some(next_pc) = bios_result.next_pc {{ return Ok(GeneratedBlockExit::dynamic_to(next_pc, bios_result.next_thumb)); }}"
     );
     let _ = writeln!(
         out,
@@ -301,5 +301,6 @@ mod tests {
         assert!(generated.contains("as &'static str"));
         assert!(generated.contains("bios_result.returned"));
         assert!(!generated.contains("software interrupt execution is not implemented"));
+        assert!(generated.contains("GeneratedBlockExit::dynamic_to(next_pc, bios_result.next_thumb)"));
     }
 }
