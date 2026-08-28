@@ -131,6 +131,9 @@ impl Timer {
             return 0;
         }
 
+        // The first overflow is measured from the current counter. Every
+        // subsequent overflow starts from the reload value, so its distance is
+        // 0x1_0000 - reload rather than a fixed 0x1_0000.
         let first_overflow_at = 0x1_0000u32 - self.counter as u32;
         if increments < first_overflow_at {
             self.counter = self.counter.wrapping_add(increments as u16);
@@ -138,9 +141,14 @@ impl Timer {
         }
 
         let remaining = increments - first_overflow_at;
-        let extra_overflows = remaining / 0x1_0000;
-        let remainder = remaining % 0x1_0000;
-        self.counter = self.reload.wrapping_add(remainder as u16);
+        let period_after_reload = 0x1_0000u32 - self.reload as u32;
+        let extra_overflows = remaining / period_after_reload;
+        let remainder = remaining % period_after_reload;
+        self.counter = if remainder == 0 {
+            self.reload
+        } else {
+            self.reload.wrapping_add(remainder as u16)
+        };
         1 + extra_overflows
     }
 }
@@ -203,6 +211,15 @@ mod tests {
         assert_eq!(timer.tick_cycles(1), 0);
         assert_eq!(timer.counter(), 0xffff);
         assert_eq!(timer.tick_cycles(1), 1);
+        assert_eq!(timer.counter(), 0xfffe);
+    }
+
+    #[test]
+    fn multiple_ticks_after_reload_use_reload_based_overflow_period() {
+        let mut timer = Timer::default();
+        timer.write_reload(0xfffe);
+        timer.write_control(CONTROL_ENABLE);
+        assert_eq!(timer.tick_cycles(4), 2);
         assert_eq!(timer.counter(), 0xfffe);
     }
 
