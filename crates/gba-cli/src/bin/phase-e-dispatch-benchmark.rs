@@ -49,8 +49,8 @@ fn main() {
     }
 
     let ns_per_step = total.as_nanos() as f64 / total_steps as f64;
-    println!("generated-dispatch baseline");
+    println!("generated-dispatch static-link benchmark");
     println!("samples={SAMPLES} iterations/sample={ITERATIONS}");
-    println!("steps={total_steps} linked_probes={total_probes}");
+    println!("steps={total_steps} cfg_membership_probes={total_probes}");
     println!("elapsed={total:?} ns/step={ns_per_step:.2}");
 }
