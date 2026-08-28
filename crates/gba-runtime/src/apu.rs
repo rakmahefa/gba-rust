@@ -157,7 +157,9 @@ mod tests {
     #[test]
     fn timer_overflow_consumes_only_the_selected_enabled_fifo() {
         let mut apu = Apu::default();
-        apu.soundcnt_h = 0x0300 | 0x4000;
+        // Enable both Direct Sound channels. Bit 10 selects timer 0 for A;
+        // bit 14 selects timer 1 for B.
+        apu.soundcnt_h = 0x0300 | 0x3000 | 0x4000;
         apu.write_fifo_a(0x0403_0201);
         apu.write_fifo_b(0x0807_0605);
         apu.on_timer_overflow(0);
