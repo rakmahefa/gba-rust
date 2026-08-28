@@ -84,6 +84,7 @@ Phase A establishes **runtime correctness infrastructure**, not complete GBA har
 ### B1. Timing and scanline state
 
 - [ ] PPU timing and scanline state.
+- [x] Nominal scheduler timing: 1004 HDraw + 228 HBlank cycles per scanline, 160 VDraw + 68 VBlank lines per frame, with deterministic regression coverage.
 - [ ] VBlank/HBlank/VCOUNT IRQ behavior.
 
 ### B2. Display modes and backgrounds
