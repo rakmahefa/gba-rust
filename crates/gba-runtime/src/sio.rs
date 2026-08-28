@@ -3,7 +3,9 @@
 //! The model keeps the architectural control register and a small transmit /
 //! receive state. Link protocols and multiplayer timing build on this boundary.
 
-pub const SIOCNT_MASK: u16 = 0xc1ff;
+// SIOCNT exposes the serial mode in bits 12-13 and the IRQ/busy controls in
+// bits 14-15. Bits 9-11 are reserved in this baseline and are masked out.
+pub const SIOCNT_MASK: u16 = 0xf1ff;
 pub const SIODATA8_MASK: u8 = 0xff;
 pub const RCNT_MASK: u16 = 0x800f;
 
