@@ -191,7 +191,10 @@ mod tests {
 
         // OBJ 0: x=0, y=0, 8x8, normal OBJ, 4bpp, tile 0, priority 0.
         oam[4] = 1;
-        vram[0x10000] = 0x11;
+        // One 4bpp tile row is four bytes. Fill the complete first row so
+        // every pixel asserted below contains palette index 1 rather than
+        // only the first two pixels.
+        vram[0x10000..0x10004].fill(0x11);
         palette[2] = 0x1f;
         ppu.render_sprites(1 << 12, 0, &vram, &palette, &oam);
 
