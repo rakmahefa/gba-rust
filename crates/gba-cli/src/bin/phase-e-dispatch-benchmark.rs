@@ -9,7 +9,6 @@ use gba_runtime::{
 
 const ENTRY: u32 = 0x0800_0000;
 const NEXT: u32 = 0x0800_0004;
-const HALT: u32 = 0x0800_0008;
 const ITERATIONS: u64 = 100_000;
 const SAMPLES: usize = 5;
 
@@ -106,5 +105,4 @@ fn main() {
     println!("linked:   steps={linked_steps} cfg_membership_probes=0");
     println!("linked:   elapsed={linked_total:?} ns/step={linked_ns_per_step:.2}");
     println!("direct_link_speedup={speedup:.3}x");
-    let _ = HALT;
 }
