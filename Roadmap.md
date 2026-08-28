@@ -79,13 +79,45 @@ Phase A establishes **runtime correctness infrastructure**, not complete GBA har
 
 ## Phase B — Video / PPU fidelity
 
+**Current focus:** build the PPU as small, testable modules. `ppu.rs` owns scanline orchestration/register synchronization; display-mode rendering lives in `ppu_modes.rs`, while OBJ rendering is isolated in `ppu_sprites.rs`.
+
+### B1. Timing and scanline state
+
 - [ ] PPU timing and scanline state.
+- [ ] VBlank/HBlank/VCOUNT IRQ behavior.
+
+### B2. Display modes and backgrounds
+
 - [ ] DISPCNT/BG/affine/window/blending semantics.
 - [ ] Modes 0–5.
+- [ ] Text BG baseline: Mode 0 BG0/BG1 tile maps, scrolling, 4bpp/8bpp and tile flips.
+- [ ] Bitmap baseline: Modes 3, 4 and 5.
+- [ ] Affine BG rendering for Modes 1/2.
+
+### B3. OBJ / OAM
+
 - [ ] Sprite/OAM behavior.
-- [ ] VBlank/HBlank/VCOUNT IRQ behavior.
-- [x] Frame-level regression fixtures.
+- [x] OBJ renderer isolated from scanline orchestration.
+- [x] Normal 4bpp/8bpp OBJ decoding, flips, palette transparency and priority baseline.
+
+### B4. Window and blending
+
+- [ ] WIN0/WIN1/OBJWIN masking semantics.
+- [ ] BLDCNT layer targeting.
+- [ ] BLDALPHA alpha blending.
+- [ ] BLDY brightness increase/decrease.
+
+### B5. Regression and DMA integration
+
+- [x] Frame-level deterministic regression fixtures for Modes 3 and 4.
+- [ ] Frame-level regression fixtures for all implemented display modes.
 - [ ] DMA1/DMA2 FIFO/special-trigger integration with PPU timing.
+
+### Phase B engineering gate
+
+- [ ] Keep PPU modules focused; split a renderer module before it becomes a monolithic implementation.
+- [ ] No compiler IR/codegen expansion for PPU work unless a concrete compatibility requirement demands it.
+- [ ] Every new display feature gets deterministic scanline or frame-level regression coverage.
 
 ## Phase C — Input, audio and serial
 
