@@ -1,6 +1,6 @@
 # gba-rust — Roadmap
 
-> Living roadmap. Phase C and Phase D are complete for their deterministic architectural runtime scopes; Phase E is in progress.
+> Living roadmap. Phase C and Phase D are complete for their deterministic architectural runtime scopes; Phase E is complete.
 
 ## Current direction
 
@@ -86,21 +86,26 @@ Phase C is complete for the project's **deterministic architectural audio/serial
 
 Phase D is complete for the project's **deterministic cartridge/external-memory architectural baseline**. This does not claim cycle-perfect cartridge bus arbitration, silicon-specific prefetch refill behavior, or every vendor-specific EEPROM/Flash command extension. Those remain compatibility refinements to be driven by real-ROM validation in Phase F.
 
-## Phase E — Generated execution performance — IN PROGRESS
+## Phase E — Generated execution performance — COMPLETE
 - [x] E0: deterministic generated-dispatch benchmark baseline.
 - [x] E1: static CFG transitions skip redundant runtime CFG-membership probes while retaining alignment validation.
-- [ ] E2: direct generated-block linking.
-- [ ] E3: block chaining/hot-path dispatch reduction.
-- [ ] E4: runtime boundary minimization without weakening architectural correctness.
-- [ ] deterministic performance comparison across E1–E4.
+- [x] E2: direct generated-block linking via `GeneratedLinkedBlock` / `run_generated_linked`.
+- [x] E3: block chaining/hot-path dispatch reduction through direct successor function pointers.
+- [x] E4: runtime boundary minimization for proven static paths without weakening architectural correctness.
+- [x] Deterministic benchmark comparison between contract dispatch and direct linked execution.
 
-### Phase E engineering gate — E1 COMPLETE
-- [x] `GeneratedBlockExit::Continue` represents statically proven generated CFG transitions.
-- [x] Static transitions retain architectural alignment validation.
-- [x] Dynamic targets retain runtime CFG-membership validation.
-- [x] BIOS-provided dynamic targets use the dynamic validation path.
-- [x] Regression coverage proves static transitions do not invoke the CFG-membership predicate.
-- [x] Benchmark exposes `cfg_membership_probes` for the static-link path.
+### Phase E engineering gate — MET
+- [x] Static generated transitions avoid redundant CFG membership probes.
+- [x] Direct linked successors bypass address/mode redispatch.
+- [x] Multi-step hot paths remain inside the linked execution loop.
+- [x] Alignment checks remain enforced at static link boundaries.
+- [x] Dynamic/exceptional boundaries remain explicit and architecturally validated.
+- [x] Benchmark reports identical step counts, zero linked-path CFG probes, and host `ns/step` comparison.
+- [x] CI acceptance gates remain green for Phase E changes.
+
+### Phase E boundary
+
+Phase E completes the project's **generated execution dispatch optimization scope**. It does not claim global host-performance optimality or eliminate architectural runtime crossings where timing, memory, IRQ, exception, or dynamic-target semantics require them. Absolute benchmark timings remain host-dependent.
 
 ## Phase F — Real game execution
 - [ ] Boot a real ROM through BIOS/runtime initialization.
