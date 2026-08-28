@@ -9,10 +9,14 @@ pub const SIOCNT_MASK: u16 = 0xf1ff;
 pub const SIODATA8_MASK: u8 = 0xff;
 pub const RCNT_MASK: u16 = 0x800f;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SioMode { Normal8, Normal32, Multiplayer, Uart }
-
-impl Default for SioMode { fn default() -> Self { Self::Normal8 } }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SioMode {
+    #[default]
+    Normal8,
+    Normal32,
+    Multiplayer,
+    Uart,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Sio {
