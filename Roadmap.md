@@ -84,7 +84,7 @@ Phase A establishes **runtime correctness infrastructure**, not complete GBA har
 - [ ] Modes 0–5.
 - [ ] Sprite/OAM behavior.
 - [ ] VBlank/HBlank/VCOUNT IRQ behavior.
-- [ ] Frame-level regression fixtures.
+- [x] Frame-level regression fixtures.
 - [ ] DMA1/DMA2 FIFO/special-trigger integration with PPU timing.
 
 ## Phase C — Input, audio and serial
