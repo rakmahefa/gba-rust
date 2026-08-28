@@ -30,7 +30,24 @@ pub struct ApuChannel { pub enabled: bool, pub frequency: u16, pub volume: u8, p
 impl ApuChannel {
     fn new(kind: PsgKind) -> Self { Self { enabled: false, frequency: 0, volume: 0, duty: if matches!(kind, PsgKind::Square1 | PsgKind::Square2) { 2 } else { 0 }, length_counter: 0, envelope_period: 0, envelope_increase: false, envelope_timer: 0, sweep_period: 0, sweep_shift: 0, sweep_negate: false, phase: 0, lfsr: 0x7fff } }
     fn frame_length_tick(&mut self) { if self.length_counter != 0 { self.length_counter = self.length_counter.saturating_sub(1); if self.length_counter == 0 { self.enabled = false; } } }
-    fn frame_envelope_tick(&mut self) { if self.envelope_period == 0 || !self.enabled { return; } if self.envelope_timer > 0 { self.envelope_timer -= 1; } if self.envelope_timer == 0 { self.envelope_timer = self.envelope_period; if self.envelope_increase { self.volume = self.volume.saturating_add(1).min(15); } else { self.volume = self.volume.saturating_sub(1); } } }
+    fn frame_envelope_tick(&mut self) {
+        if self.envelope_period == 0 || !self.enabled {
+            return;
+        }
+        if self.envelope_timer > 0 {
+            self.envelope_timer -= 1;
+        } else {
+            self.envelope_timer = self.envelope_period;
+        }
+        if self.envelope_timer == 0 {
+            self.envelope_timer = self.envelope_period;
+            if self.envelope_increase {
+                self.volume = self.volume.saturating_add(1).min(15);
+            } else {
+                self.volume = self.volume.saturating_sub(1);
+            }
+        }
+    }
     fn frame_sweep_tick(&mut self, kind: PsgKind) { if !matches!(kind, PsgKind::Square1) || self.sweep_period == 0 || self.sweep_shift == 0 || !self.enabled { return; } self.frequency = if self.sweep_negate { self.frequency.saturating_sub(self.frequency >> self.sweep_shift) } else { self.frequency.saturating_add(self.frequency >> self.sweep_shift) }; if self.frequency >= 2048 { self.enabled = false; } }
     fn sample(&mut self, kind: PsgKind) -> i16 { if !self.enabled { return 0; } match kind { PsgKind::Square1 | PsgKind::Square2 => { let duty_threshold = match self.duty & 3 { 0 => 32, 1 => 64, 2 => 128, _ => 192 }; let value = if (self.phase & 0xff) < duty_threshold { 1 } else { -1 }; self.phase = self.phase.wrapping_add((2048u16.saturating_sub(self.frequency)).max(1)); value * i16::from(self.volume) * 256 }, PsgKind::Wave => { const WAVE: [i16; 16] = [1, 3, 5, 7, 7, 5, 3, 1, -1, -3, -5, -7, -7, -5, -3, -1]; let value = WAVE[((self.phase >> 8) & 15) as usize]; self.phase = self.phase.wrapping_add((2048u16.saturating_sub(self.frequency)).max(1)); value * i16::from(self.volume.saturating_mul(2)) * 32 }, PsgKind::Noise => { let bit = ((self.lfsr ^ (self.lfsr >> 1)) & 1) != 0; self.lfsr = (self.lfsr >> 1) | if bit { 0x4000 } else { 0 }; if bit { i16::from(self.volume) * 256 } else { -(i16::from(self.volume) * 256) } } } }
 }
@@ -41,7 +58,23 @@ impl Default for Apu { fn default() -> Self { Self { samples_generated: 0, cycle
 impl Apu {
     pub fn tick(&mut self, samples: u64) { self.samples_generated = self.samples_generated.wrapping_add(samples); for _ in 0..samples { let _ = self.mix_sample(); } }
     pub fn advance_cycles(&mut self, cycles: u64) -> u64 { self.cycles_accumulated = self.cycles_accumulated.saturating_add(cycles); self.frame_step_accumulated = self.frame_step_accumulated.saturating_add(cycles); let frame_steps = self.frame_step_accumulated / CYCLES_PER_FRAME_STEP; self.frame_step_accumulated %= CYCLES_PER_FRAME_STEP; for _ in 0..frame_steps { self.step_frame_sequence(); } let samples = self.cycles_accumulated / CYCLES_PER_SAMPLE; self.cycles_accumulated %= CYCLES_PER_SAMPLE; self.tick(samples); samples }
-    fn step_frame_sequence(&mut self) { let step = self.frame_sequence_step; if step % 2 == 0 { for channel in &mut self.channel { channel.frame_length_tick(); } } if step == 7 { for (index, channel) in self.channel.iter_mut().enumerate() { channel.frame_envelope_tick(); channel.frame_sweep_tick(match index { 0 => PsgKind::Square1, 1 => PsgKind::Square2, 2 => PsgKind::Wave, _ => PsgKind::Noise }); } } self.frame_sequence_step = (step + 1) & 7; }
+    fn step_frame_sequence(&mut self) {
+        let step = self.frame_sequence_step;
+        if step % 2 == 0 {
+            for channel in &mut self.channel { channel.frame_length_tick(); }
+        } else {
+            // Length counters are intentionally idle on odd frame-sequencer steps.
+        }
+        if step == 7 {
+            for (index, channel) in self.channel.iter_mut().enumerate() {
+                channel.frame_envelope_tick();
+                channel.frame_sweep_tick(match index { 0 => PsgKind::Square1, 1 => PsgKind::Square2, 2 => PsgKind::Wave, _ => PsgKind::Noise });
+            }
+        } else {
+            // Envelope and sweep advance only on frame-sequencer step seven.
+        }
+        self.frame_sequence_step = (step + 1) & 7;
+    }
     pub fn write_fifo_a(&mut self, value: u32) { for sample in value.to_le_bytes().map(|byte| byte as i8) { let _ = self.fifo_a.push(sample); } self.fifo_a_refill_pending = false; }
     pub fn write_fifo_b(&mut self, value: u32) { for sample in value.to_le_bytes().map(|byte| byte as i8) { let _ = self.fifo_b.push(sample); } self.fifo_b_refill_pending = false; }
     pub fn pop_fifo_a(&mut self) -> Option<i8> { self.fifo_a.pop() }
