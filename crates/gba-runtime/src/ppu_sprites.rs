@@ -39,10 +39,8 @@ impl Ppu {
             let Some((sprite_width, sprite_height)) = sprite_dimensions(shape, size) else {
                 continue;
             };
-            let mut x0 = attr1 & 0x01ff;
-            let y0 = attr0 & 0x00ff;
-            let x0 = wrap_coordinate(x0 as i32, 512);
-            let y0 = wrap_coordinate(y0 as i32, 256);
+            let x0 = wrap_coordinate((attr1 & 0x01ff) as i32, 512);
+            let y0 = wrap_coordinate((attr0 & 0x00ff) as i32, 256);
             let mut local_y = y - y0;
             if local_y < 0 {
                 local_y += 256;
@@ -194,7 +192,7 @@ mod tests {
         oam[4] = 1;
         vram[0x10000..0x10004].fill(0x11);
         palette[2] = 0x1f;
-        let matrix_base = 0x0000 + 4;
+        let matrix_base = 4;
         oam[matrix_base] = 0x00;
         oam[matrix_base + 1] = 0x01;
         oam[matrix_base + 8] = 0;
@@ -212,7 +210,7 @@ mod tests {
         let mut ppu = Ppu::default();
         let vram = vec![0; 0x18000];
         let palette = vec![0; 0x400];
-        let mut oam = vec![0; 0x400];
+        let oam = vec![0; 0x400];
         ppu.framebuffer[0] = 0xff00_ff00;
         ppu.render_sprites(1 << 12, 0, &vram, &palette, &oam);
         assert_eq!(ppu.framebuffer[0], 0xff00_ff00);
