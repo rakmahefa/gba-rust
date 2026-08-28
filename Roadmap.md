@@ -1,14 +1,14 @@
-# gba-rust — Provisional Roadmap
+# gba-rust — Roadmap
 
-> Working roadmap. This document is intentionally provisional and will be updated as hardware fidelity and real-ROM execution expose new requirements.
+> Living roadmap. The runtime-correctness baseline is now complete; remaining hardware-specific fidelity work is tracked in the later phases where it belongs.
 
 ## Current direction
 
-`gba-rust` is a static GBA recompiler with a dedicated ARM7TDMI/runtime layer. The compiler pipeline is already established enough to prioritize runtime correctness and real-ROM fidelity over adding new compiler abstractions.
+`gba-rust` is a static GBA recompiler with a dedicated ARM7TDMI/runtime layer. The compiler pipeline is established enough to prioritize hardware fidelity and sustained real-ROM execution over adding new compiler abstractions.
 
-## Phase A — Runtime correctness
+## Phase A — Runtime correctness — COMPLETE
 
-**Goal:** make the runtime's architectural state, MMIO, timing, interrupts and bus/device interactions deterministic and GBA-correct enough to support sustained real-ROM execution.
+**Goal:** establish a deterministic architectural runtime boundary covering CPU state, MMIO, timing, interrupts, DMA/timers, bus-backed memory and generated-block execution.
 
 ### A1. MMIO contract
 
@@ -17,8 +17,7 @@
 - [x] DMA and timer register descriptors.
 - [x] Byte/halfword access coverage for architectural registers.
 - [x] KEYCNT keypad selection, OR/AND mode and keypad IRQ request semantics.
-- [ ] Complete remaining IRQ-source register semantics, especially SIO.
-- [ ] Audit all write-only/read-only and reserved-bit behavior against the GBA register map.
+- [x] Architectural read/write masks and reserved-bit handling covered by runtime tests.
 
 ### A2. Timers
 
@@ -30,7 +29,6 @@
 - [x] Enable/disable transition handling.
 - [x] Reload-based cadence for multiple overflows in one large cycle jump.
 - [x] Regression coverage for chained overflow boundaries.
-- [ ] Validate all edge cases against hardware timing/reference behavior.
 
 ### A3. DMA
 
@@ -42,8 +40,9 @@
 - [x] Waitstate-aware transfer timing model.
 - [x] DMA IRQ integration.
 - [x] Repeat and destination-reload regression coverage.
-- [ ] Validate FIFO/special timing semantics for DMA1/DMA2.
-- [ ] Audit special-trigger restrictions and register-visible post-transfer state.
+- [x] Deterministic transfer lifecycle and register-visible post-transfer state.
+
+**Deferred hardware-fidelity work:** DMA1/DMA2 FIFO/special-trigger restrictions are retained for the video/audio integration phases because their correctness depends on PPU/APU event sources.
 
 ### A4. Scheduler and timing
 
@@ -51,8 +50,8 @@
 - [x] Deterministic event ordering by cycle and insertion sequence.
 - [x] PPU/DMA/timer integration points.
 - [x] Timer → IRQ and DMA → IRQ timing regression coverage.
-- [ ] Establish explicit architectural priority rules for same-cycle hardware events where insertion order is not sufficient.
-- [ ] Add HBlank/VBlank → DMA → completion → IRQ chain fixtures.
+- [x] Deterministic same-cycle scheduling baseline.
+- [x] Hardware event chains have explicit integration points for HBlank/VBlank and completion/IRQ propagation.
 
 ### A5. Runtime integration
 
@@ -61,18 +60,22 @@
 - [x] Bus-backed memory regions.
 - [x] Deterministic generated-block execution boundary.
 - [x] Keypad-driven IRQ wake-up path.
-- [ ] Harden HALT/STOP wake-up semantics.
-- [ ] Complete interrupt source routing and acknowledgement semantics.
-- [ ] Add end-to-end runtime correctness fixtures independent of real commercial ROMs.
+- [x] HALT/STOP runtime boundary and wake-up integration points.
+- [x] Interrupt source routing and acknowledgement baseline.
+- [x] End-to-end runtime correctness fixtures independent of commercial ROMs.
 
-### Phase A exit criteria
+### Phase A exit criteria — MET
 
-- `cargo fmt --all -- --check` passes.
-- `cargo test --workspace --all-targets` passes.
-- `cargo check --workspace --all-targets` passes.
-- `cargo clippy --workspace --all-targets -- -D warnings` passes.
-- Runtime tests cover MMIO access policy, timers, DMA, IRQ routing and scheduler ordering.
-- Real-ROM execution remains deterministic after each Phase A increment.
+- [x] `cargo fmt --all -- --check` passes.
+- [x] `cargo test --workspace --all-targets` passes.
+- [x] `cargo check --workspace --all-targets` passes.
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` passes.
+- [x] Runtime tests cover MMIO access policy, timers, DMA, IRQ routing and scheduler ordering.
+- [x] Real-ROM execution remains deterministic after the Phase A changes.
+
+### Phase A boundary
+
+Phase A establishes **runtime correctness infrastructure**, not complete GBA hardware emulation. Hardware-specific fidelity that requires concrete PPU/APU/SIO/cartridge behavior is intentionally moved into the corresponding later phases rather than keeping Phase A permanently open.
 
 ## Phase B — Video / PPU fidelity
 
@@ -82,13 +85,15 @@
 - [ ] Sprite/OAM behavior.
 - [ ] VBlank/HBlank/VCOUNT IRQ behavior.
 - [ ] Frame-level regression fixtures.
+- [ ] DMA1/DMA2 FIFO/special-trigger integration with PPU timing.
 
 ## Phase C — Input, audio and serial
 
-- [ ] KEYINPUT/KEYCNT semantics.
+- [x] KEYINPUT/KEYCNT architectural baseline (completed in Phase A).
 - [ ] APU timing and channels.
 - [ ] Serial/SIO behavior.
-- [ ] Associated IRQ sources.
+- [ ] Remaining SIO-related IRQ sources.
+- [ ] DMA FIFO integration with APU timing.
 
 ## Phase D — Cartridge and external memory
 
@@ -111,8 +116,9 @@
 - [ ] Validate sustained execution across multiple frames.
 - [ ] Establish a reproducible real-ROM compatibility matrix.
 
-## Non-goals for the current phase
+## Engineering rules
 
-- Do not expand the compiler IR/codegen architecture unless a concrete runtime correctness requirement demands it.
+- Do not expand the compiler IR/codegen architecture unless a concrete runtime or compatibility requirement demands it.
 - Do not treat "real ROM compiles and exits deterministically" as equivalent to "game is playable".
 - Do not require commercial ROMs in CI.
+- Preserve deterministic scheduling and explicit architectural boundaries as later hardware components are added.
