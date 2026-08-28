@@ -16,7 +16,8 @@
 - [x] Core interrupt, display, keypad, WAITCNT, IME, POSTFLG and HALTCNT contracts.
 - [x] DMA and timer register descriptors.
 - [x] Byte/halfword access coverage for architectural registers.
-- [ ] Complete remaining IRQ-source register semantics, especially KEYCNT/SIO.
+- [x] KEYCNT keypad selection, OR/AND mode and keypad IRQ request semantics.
+- [ ] Complete remaining IRQ-source register semantics, especially SIO.
 - [ ] Audit all write-only/read-only and reserved-bit behavior against the GBA register map.
 
 ### A2. Timers
@@ -26,7 +27,10 @@
 - [x] Cascade overflow propagation.
 - [x] Timer MMIO integration.
 - [x] Timer IRQ generation through runtime scheduling.
-- [ ] Exhaustive edge-case tests for enable transitions, large cycle jumps and chained overflows.
+- [x] Enable/disable transition handling.
+- [x] Reload-based cadence for multiple overflows in one large cycle jump.
+- [x] Regression coverage for chained overflow boundaries.
+- [ ] Validate all edge cases against hardware timing/reference behavior.
 
 ### A3. DMA
 
@@ -37,16 +41,18 @@
 - [x] Zero-count architectural expansion without mutating CNT_L.
 - [x] Waitstate-aware transfer timing model.
 - [x] DMA IRQ integration.
+- [x] Repeat and destination-reload regression coverage.
 - [ ] Validate FIFO/special timing semantics for DMA1/DMA2.
-- [ ] Audit repeat/reload behavior and register-visible post-transfer state.
+- [ ] Audit special-trigger restrictions and register-visible post-transfer state.
 
 ### A4. Scheduler and timing
 
 - [x] Monotonic cycle clock.
-- [x] Deterministic event ordering.
+- [x] Deterministic event ordering by cycle and insertion sequence.
 - [x] PPU/DMA/timer integration points.
-- [ ] Establish explicit event-ordering invariants for same-cycle hardware events.
-- [ ] Add timing regression tests covering timer → IRQ, HBlank/VBlank → DMA and DMA → IRQ chains.
+- [x] Timer → IRQ and DMA → IRQ timing regression coverage.
+- [ ] Establish explicit architectural priority rules for same-cycle hardware events where insertion order is not sufficient.
+- [ ] Add HBlank/VBlank → DMA → completion → IRQ chain fixtures.
 
 ### A5. Runtime integration
 
@@ -54,6 +60,7 @@
 - [x] BIOS exception/IRQ path.
 - [x] Bus-backed memory regions.
 - [x] Deterministic generated-block execution boundary.
+- [x] Keypad-driven IRQ wake-up path.
 - [ ] Harden HALT/STOP wake-up semantics.
 - [ ] Complete interrupt source routing and acknowledgement semantics.
 - [ ] Add end-to-end runtime correctness fixtures independent of real commercial ROMs.
