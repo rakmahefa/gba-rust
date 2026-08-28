@@ -5,7 +5,9 @@
 
 pub const CPU_HZ: u64 = 16_777_216;
 pub const SAMPLE_HZ: u64 = 32_768;
+pub const FRAME_SEQUENCER_HZ: u64 = 512;
 pub const CYCLES_PER_SAMPLE: u64 = CPU_HZ / SAMPLE_HZ;
+pub const CYCLES_PER_FRAME_STEP: u64 = CPU_HZ / FRAME_SEQUENCER_HZ;
 pub const FIFO_CAPACITY: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,12 +48,18 @@ pub struct ApuChannel {
     pub enabled: bool,
     pub frequency: u16,
     pub volume: u8,
+    pub length_counter: u8,
+    pub envelope_period: u8,
+    pub envelope_increase: bool,
+    pub envelope_timer: u8,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Apu {
     pub samples_generated: u64,
     pub cycles_accumulated: u64,
+    pub frame_sequencer_cycles: u64,
+    pub frame_sequencer_step: u8,
     pub soundcnt_l: u16,
     pub soundcnt_h: u16,
     pub soundcnt_x: u16,
@@ -69,10 +77,50 @@ impl Apu {
 
     pub fn advance_cycles(&mut self, cycles: u64) -> u64 {
         self.cycles_accumulated = self.cycles_accumulated.saturating_add(cycles);
+        self.advance_frame_sequencer(cycles);
         let samples = self.cycles_accumulated / CYCLES_PER_SAMPLE;
         self.cycles_accumulated %= CYCLES_PER_SAMPLE;
         self.tick(samples);
         samples
+    }
+
+    fn advance_frame_sequencer(&mut self, cycles: u64) {
+        self.frame_sequencer_cycles = self.frame_sequencer_cycles.saturating_add(cycles);
+        let steps = self.frame_sequencer_cycles / CYCLES_PER_FRAME_STEP;
+        self.frame_sequencer_cycles %= CYCLES_PER_FRAME_STEP;
+        for _ in 0..steps { self.clock_frame_sequencer(); }
+    }
+
+    fn clock_frame_sequencer(&mut self) {
+        self.frame_sequencer_step = (self.frame_sequencer_step + 1) & 7;
+        if self.frame_sequencer_step & 1 == 0 { self.clock_length_counters(); }
+        if self.frame_sequencer_step == 2 || self.frame_sequencer_step == 6 { self.clock_sweep(); }
+        if self.frame_sequencer_step == 7 { self.clock_envelopes(); }
+    }
+
+    fn clock_length_counters(&mut self) {
+        for channel in &mut self.channel {
+            if channel.length_counter != 0 {
+                channel.length_counter -= 1;
+                if channel.length_counter == 0 { channel.enabled = false; }
+            }
+        }
+    }
+
+    fn clock_sweep(&mut self) {
+        // Sweep register/state is not modelled yet; keeping this explicit makes
+        // the frame-sequencer boundary deterministic without inventing state.
+    }
+
+    fn clock_envelopes(&mut self) {
+        for channel in &mut self.channel {
+            if !channel.enabled || channel.envelope_period == 0 { continue; }
+            channel.envelope_timer += 1;
+            if channel.envelope_timer < channel.envelope_period { continue; }
+            channel.envelope_timer = 0;
+            if channel.envelope_increase { channel.volume = channel.volume.saturating_add(1).min(15); }
+            else { channel.volume = channel.volume.saturating_sub(1); }
+        }
     }
 
     pub fn write_fifo_a(&mut self, value: u32) {
@@ -121,6 +169,44 @@ mod tests {
         assert_eq!(apu.samples_generated, 0);
         assert_eq!(apu.advance_cycles(1), 1);
         assert_eq!(apu.samples_generated, 1);
+    }
+
+    #[test]
+    fn frame_sequencer_advances_on_512_hz_boundaries() {
+        let mut apu = Apu::default();
+        assert_eq!(apu.frame_sequencer_step, 0);
+        apu.advance_cycles(CYCLES_PER_FRAME_STEP - 1);
+        assert_eq!(apu.frame_sequencer_step, 0);
+        apu.advance_cycles(1);
+        assert_eq!(apu.frame_sequencer_step, 1);
+        apu.advance_cycles(CYCLES_PER_FRAME_STEP * 7);
+        assert_eq!(apu.frame_sequencer_step, 0);
+    }
+
+    #[test]
+    fn frame_sequencer_clocks_length_and_disables_expired_channels() {
+        let mut apu = Apu::default();
+        apu.channel[0] = ApuChannel { enabled: true, length_counter: 2, ..Default::default() };
+        apu.advance_cycles(CYCLES_PER_FRAME_STEP * 2);
+        assert_eq!(apu.channel[0].length_counter, 1);
+        assert!(apu.channel[0].enabled);
+        apu.advance_cycles(CYCLES_PER_FRAME_STEP * 2);
+        assert_eq!(apu.channel[0].length_counter, 0);
+        assert!(!apu.channel[0].enabled);
+    }
+
+    #[test]
+    fn frame_sequencer_clocks_envelope_at_step_seven() {
+        let mut apu = Apu::default();
+        apu.channel[0] = ApuChannel {
+            enabled: true,
+            volume: 3,
+            envelope_period: 1,
+            envelope_increase: true,
+            ..Default::default()
+        };
+        apu.advance_cycles(CYCLES_PER_FRAME_STEP * 7);
+        assert_eq!(apu.channel[0].volume, 4);
     }
 
     #[test]
