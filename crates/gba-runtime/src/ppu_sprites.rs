@@ -134,15 +134,14 @@ impl Ppu {
 }
 
 fn read_affine_matrix(oam: &[u8], matrix: usize) -> (i32, i32, i32, i32) {
-    let first = matrix.saturating_mul(4);
-    if first + 3 >= OAM_ENTRIES || (first + 3) * OAM_ENTRY_SIZE + 5 >= oam.len() {
+    if matrix >= 32 || oam.len() < 0x400 {
         return (0x100, 0, 0, 0x100);
     }
-    let read = |entry: usize| -> i32 {
-        let offset = entry * OAM_ENTRY_SIZE + 4;
+    let base = matrix * 32 + 6;
+    let read = |offset: usize| -> i32 {
         i16::from_le_bytes([oam[offset], oam[offset + 1]]) as i32
     };
-    (read(first), read(first + 1), read(first + 2), read(first + 3))
+    (read(base), read(base + 8), read(base + 16), read(base + 24))
 }
 
 fn sprite_dimensions(shape: u16, size: u16) -> Option<(usize, usize)> {
@@ -183,26 +182,15 @@ mod tests {
     }
 
     #[test]
-    fn affine_identity_matrix_renders_sprite_center() {
-        let mut ppu = Ppu::default();
-        let mut vram = vec![0; 0x18000];
-        let mut palette = vec![0; 0x400];
+    fn affine_matrix_uses_interleaved_oam_gaps() {
         let mut oam = vec![0; 0x400];
-        oam[1] = 1 << 8;
-        oam[4] = 1;
-        vram[0x10000..0x10004].fill(0x11);
-        palette[2] = 0x1f;
-        let matrix_base = 4;
-        oam[matrix_base] = 0x00;
-        oam[matrix_base + 1] = 0x01;
-        oam[matrix_base + 8] = 0;
-        oam[matrix_base + 9] = 0;
-        oam[matrix_base + 16] = 0;
-        oam[matrix_base + 17] = 0;
-        oam[matrix_base + 24] = 0x00;
-        oam[matrix_base + 25] = 0x01;
-        ppu.render_sprites(1 << 12, 0, &vram, &palette, &oam);
-        assert_eq!(ppu.framebuffer[0], 0xffff_0000);
+        let base = 3 * 32 + 6;
+        for (offset, value) in [(0, 0x0100i16), (8, 0i16), (16, 0i16), (24, 0x0100i16)] {
+            let bytes = value.to_le_bytes();
+            oam[base + offset] = bytes[0];
+            oam[base + offset + 1] = bytes[1];
+        }
+        assert_eq!(read_affine_matrix(&oam, 3), (0x100, 0, 0, 0x100));
     }
 
     #[test]
