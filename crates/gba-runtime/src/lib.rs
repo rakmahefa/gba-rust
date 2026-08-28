@@ -5,6 +5,7 @@ mod contract;
 mod dma;
 mod eeprom;
 mod execution;
+mod generated_link;
 mod ppu_affine;
 
 pub mod apu;
@@ -25,7 +26,7 @@ pub use apu::Apu;
 pub use bios::{
     execute_swi, service_pending_irq, BiosMemory, BiosResult, BiosSwi, InterruptController,
     PowerState, BIOS_END, BIOS_START, DISPSTAT, EWRAM_END, EWRAM_START, HALTCNT, IE, IF, IME,
-    IO_END, IO_START, IRQ_DMA0, IRQ_DMA1, IRQ_DMA2, IRQ_DMA3, IRQ_GAMEPAK, IRQ_HBLANK, IRQ_KEYPAD,
+    IO_END, IO_START, IRQ_DMA0, IRQ_DMA1, IRQ_DMA2, IRQ_GAMEPAK, IRQ_HBLANK, IRQ_KEYPAD,
     IRQ_SERIAL, IRQ_TIMER0, IRQ_TIMER1, IRQ_TIMER2, IRQ_TIMER3, IRQ_VBLANK, IRQ_VCOUNT, IWRAM_END,
     IWRAM_START, KEYINPUT, OAM_END, OAM_START, PALETTE_END, PALETTE_START, POSTFLG, VRAM_END,
     VRAM_START, WAITCNT,
@@ -43,6 +44,7 @@ pub use cpu::{
 };
 pub use dma::{DmaAddressMode, DmaChannel, DmaController, DmaTrigger, DmaTransfer};
 pub use eeprom::{Eeprom, EepromSize};
+pub use generated_link::{run_generated_linked, GeneratedLinkedBlock, LinkedBlockExit};
 pub use mmio::{DISPSTAT_HBLANK, DISPSTAT_VBLANK, DISPSTAT_VCOUNT_IRQ, VCOUNT};
 pub use ppu::Ppu;
 pub use runtime::Runtime;
