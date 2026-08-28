@@ -37,7 +37,7 @@
 - [x] Implement deterministic Normal 32-bit transfer timing.
 - [x] Implement deterministic multiplayer local-peer state abstraction.
 - [x] Implement deterministic UART baseline.
-- [x] Implement serial receive state and transfer completion state.
+- [x] Implement deterministic serial receive and transfer-completion state.
 - [x] Route serial transfer completion to the GBA serial IRQ source.
 - [x] Add deterministic SIO/runtime regression fixtures.
 
@@ -58,7 +58,7 @@
 - [x] DMA audio special triggers remain explicit and restricted to the architectural FIFO destinations.
 - [x] Existing `-D warnings` / Clippy policy is preserved.
 - [x] Phase C carries runtime unit/integration coverage for audio, serial and DMA interaction.
-- [x] Phase C branch maintained the repository CI format/check/test/clippy gates.
+- [x] Phase C branch maintained the repository CI format/check/test/clippy gates before finalization.
 
 ### Phase C boundary
 
