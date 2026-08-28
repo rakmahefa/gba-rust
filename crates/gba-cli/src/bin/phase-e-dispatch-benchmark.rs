@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use gba_runtime::{GeneratedBlockExit, GeneratedExecutionExit, Runtime, RuntimeContract};
@@ -9,7 +10,7 @@ const SAMPLES: usize = 5;
 
 fn run_sample(iterations: u64) -> (Duration, u64, u64) {
     let mut runtime = Runtime::new();
-    let mut linked_probes = 0u64;
+    let linked_probes = AtomicU64::new(0);
     let start = Instant::now();
     let result = runtime
         .run_generated_contract(
@@ -18,7 +19,7 @@ fn run_sample(iterations: u64) -> (Duration, u64, u64) {
             Some(iterations),
             |_, _, _| Ok(GeneratedBlockExit::continue_to(NEXT, false)),
             |address, thumb| {
-                linked_probes = linked_probes.saturating_add(1);
+                linked_probes.fetch_add(1, Ordering::Relaxed);
                 address == NEXT && !thumb
             },
         )
@@ -28,7 +29,11 @@ fn run_sample(iterations: u64) -> (Duration, u64, u64) {
         GeneratedExecutionExit::StepLimitExceeded { .. } => result.steps,
         _ => panic!("benchmark must terminate through the step limit"),
     };
-    (start.elapsed(), steps, linked_probes)
+    (
+        start.elapsed(),
+        steps,
+        linked_probes.load(Ordering::Relaxed),
+    )
 }
 
 fn main() {
