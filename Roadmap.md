@@ -68,13 +68,14 @@ Phase C is complete for the project's **deterministic architectural audio/serial
 - [x] Deterministic SRAM read/write and address mirroring foundation.
 - [x] Flash command-state foundation: unlock, byte program, sector erase, chip erase.
 - [x] Flash128K bank switching foundation.
-- [ ] EEPROM serial protocol behavior.
+- [x] Deterministic EEPROM serial protocol foundation for 512B and 8KiB devices.
+- [ ] Integrate EEPROM transport with the cartridge save-device abstraction.
 - [ ] Cartridge waitstates and prefetch fidelity.
 - [ ] Save-device protocol regression tests across SRAM/Flash/EEPROM.
 
 ### Phase D engineering boundary
 
-The initial Phase D increment keeps save-device semantics inside `gba-runtime::cartridge` and preserves the existing CPU bus classification. EEPROM command transport and cartridge waitstate/prefetch timing remain intentionally separate follow-up increments.
+Phase D keeps save-device semantics deterministic and isolated from CPU/codegen concerns. EEPROM now has an independently testable serial protocol foundation; cartridge integration and waitstate/prefetch timing remain separate follow-up increments.
 
 ## Phase E — Generated execution performance
 - [ ] Direct generated-block linking.
