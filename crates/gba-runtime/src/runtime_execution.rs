@@ -14,6 +14,7 @@ impl Runtime {
             if event.cycle > target { break; }
             let delta = event.cycle.saturating_sub(self.scheduler.now());
             self.tick_timers(delta as u32);
+            self.apu.advance_cycles(delta);
             self.scheduler.advance_to(event.cycle);
             self.cycles = event.cycle;
             let event = self.scheduler.pop_event().expect("peeked event must exist");
@@ -21,6 +22,7 @@ impl Runtime {
         }
         let delta = target.saturating_sub(self.scheduler.now());
         self.tick_timers(delta as u32);
+        self.apu.advance_cycles(delta);
         self.scheduler.advance_to(target);
         self.cycles = target;
     }
@@ -37,7 +39,11 @@ impl Runtime {
             let cascade = index != 0 && self.timers[index].control().cascade;
             let overflows = if cascade { self.timers[index].tick_cascade(cascade_edges) } else { self.timers[index].tick_cycles(cycles) };
             cascade_edges = overflows;
-            if overflows != 0 && self.timers[index].control().irq { self.raise_hardware_interrupt(1 << (3 + index)); }
+            if overflows != 0 {
+                self.apu.soundcnt_h = self.read16(crate::mmio_devices::SOUNDCNT_H.address);
+                for _ in 0..overflows { self.apu.on_timer_overflow(index); }
+                if self.timers[index].control().irq { self.raise_hardware_interrupt(1 << (3 + index)); }
+            }
         }
     }
 
@@ -126,20 +132,15 @@ mod timing_tests {
     use crate::scheduler::HBLANK_START_CYCLES;
     use crate::timers::{CONTROL_CASCADE, CONTROL_ENABLE, CONTROL_IRQ};
 
-    #[test]
-    fn timer_advances_across_ppu_event_boundaries_without_losing_cycles() { let mut runtime = Runtime::new(); runtime.timers[0].write_reload(0); runtime.timers[0].write_control(CONTROL_ENABLE); runtime.advance_cycles(CYCLES_PER_SCANLINE as u32); assert_eq!(runtime.cycles, CYCLES_PER_SCANLINE); assert_eq!(runtime.scheduler.now(), CYCLES_PER_SCANLINE); assert_eq!(runtime.timers[0].counter(), CYCLES_PER_SCANLINE as u16); }
-    #[test]
-    fn hardware_irq_becomes_pending_until_an_irq_sample() { let mut runtime = Runtime::new(); runtime.dispstat |= DISPSTAT_HBLANK_IRQ; runtime.interrupts.ie = IRQ_HBLANK; runtime.interrupts.ime = true; runtime.advance_cycles(HBLANK_START_CYCLES as u32); assert_ne!(runtime.dispstat & crate::mmio::DISPSTAT_HBLANK, 0); assert_ne!(runtime.interrupts.iflags & IRQ_HBLANK, 0); assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::System); runtime.schedule_irq_sample(0); runtime.advance_cycles(0); assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::Irq); }
-    #[test]
-    fn generated_execution_samples_a_pending_irq_before_dispatching_next_block() { let mut runtime = Runtime::new(); runtime.interrupts.ie = IRQ_HBLANK; runtime.interrupts.ime = true; runtime.interrupts.request(IRQ_HBLANK); let mut dispatched = false; let result = runtime.run_generated(0x0800_0000, false, Some(2), |runtime, address, thumb| { dispatched = true; assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::Irq); assert_eq!(address, 0x0000_0018); assert!(!thumb); Err("irq vector reached") }); assert_eq!(result, Err("irq vector reached")); assert!(dispatched); }
-    #[test]
-    fn vblank_event_is_driven_by_scanline_timing() { let mut runtime = Runtime::new(); runtime.dispstat |= DISPSTAT_VBLANK_IRQ; runtime.interrupts.ie = IRQ_VBLANK; let cycles = CYCLES_PER_SCANLINE * VBLANK_START_LINE as u64; runtime.advance_cycles(cycles as u32); assert_eq!(runtime.vcount, VBLANK_START_LINE); assert_ne!(runtime.dispstat & crate::mmio::DISPSTAT_VBLANK, 0); assert_ne!(runtime.interrupts.iflags & IRQ_VBLANK, 0); }
-    #[test]
-    fn dma_completion_is_an_event_on_the_same_machine_clock() { let mut runtime = Runtime::new(); runtime.interrupts.ie = IRQ_DMA0; runtime.schedule_dma_completion(0, 50); runtime.advance_cycles(49); assert_eq!(runtime.interrupts.iflags & IRQ_DMA0, 0); runtime.advance_cycles(1); assert_ne!(runtime.interrupts.iflags & IRQ_DMA0, 0); assert_eq!(runtime.scheduler.now(), 50); }
-    #[test]
-    fn timer_overflow_and_cascade_share_the_same_event_boundary() { let mut runtime = Runtime::new(); runtime.interrupts.ie = IRQ_TIMER0 | IRQ_TIMER1; runtime.timers[0].write_reload(u16::MAX); runtime.timers[0].write_control(CONTROL_ENABLE | CONTROL_IRQ); runtime.timers[1].write_reload(u16::MAX); runtime.timers[1].write_control(CONTROL_ENABLE | CONTROL_CASCADE | CONTROL_IRQ); runtime.advance_cycles(2); assert_ne!(runtime.interrupts.iflags & IRQ_TIMER0, 0); assert_ne!(runtime.interrupts.iflags & IRQ_TIMER1, 0); }
-    #[test]
-    fn bitmap_ppu_renders_at_the_first_hblank_boundary() { let mut runtime = Runtime::new(); runtime.dispcnt = 3 | (1 << 10); runtime.vram[0] = 0x1f; runtime.vram[1] = 0x00; runtime.advance_cycles(HBLANK_START_CYCLES as u32); assert_eq!(runtime.ppu.framebuffer[0], 0xffff_0000); }
-    #[test]
-    fn obj_renders_at_the_hblank_boundary_after_background() { let mut runtime = Runtime::new(); runtime.dispcnt = (1 << 8) | (1 << 12); runtime.vram[0x10000..0x10004].fill(0x11); runtime.palette[2] = 0x1f; runtime.oam[4] = 1; runtime.advance_cycles(HBLANK_START_CYCLES as u32); assert_eq!(runtime.ppu.framebuffer[0], 0xffff_0000); }
+    #[test] fn timer_advances_across_ppu_event_boundaries_without_losing_cycles() { let mut runtime = Runtime::new(); runtime.timers[0].write_reload(0); runtime.timers[0].write_control(CONTROL_ENABLE); runtime.advance_cycles(CYCLES_PER_SCANLINE as u32); assert_eq!(runtime.cycles, CYCLES_PER_SCANLINE); assert_eq!(runtime.scheduler.now(), CYCLES_PER_SCANLINE); assert_eq!(runtime.timers[0].counter(), CYCLES_PER_SCANLINE as u16); }
+    #[test] fn apu_sample_clock_advances_across_scheduler_boundaries() { let mut runtime = Runtime::new(); runtime.advance_cycles((crate::apu::CYCLES_PER_SAMPLE * 2) as u32); assert_eq!(runtime.apu.samples_generated, 2); assert_eq!(runtime.apu.cycles_accumulated, 0); }
+    #[test] fn direct_sound_fifo_consumes_on_selected_timer_overflow() { let mut runtime = Runtime::new(); runtime.write16(crate::mmio_devices::SOUNDCNT_H.address, 0x0300); runtime.write32(crate::mmio_devices::FIFO_A.address, 0x0403_0201); runtime.timers[0].write_reload(u16::MAX); runtime.timers[0].write_control(CONTROL_ENABLE); runtime.advance_cycles(1); assert_eq!(runtime.apu.fifo_a_len(), 3); assert_eq!(runtime.apu.fifo_a_samples, 1); }
+    #[test] fn direct_sound_fifo_does_not_consume_from_unselected_timer() { let mut runtime = Runtime::new(); runtime.write16(crate::mmio_devices::SOUNDCNT_H.address, 0x0300 | (1 << 10)); runtime.write32(crate::mmio_devices::FIFO_A.address, 0x0403_0201); runtime.timers[0].write_reload(u16::MAX); runtime.timers[0].write_control(CONTROL_ENABLE); runtime.advance_cycles(1); assert_eq!(runtime.apu.fifo_a_len(), 4); }
+    #[test] fn hardware_irq_becomes_pending_until_an_irq_sample() { let mut runtime = Runtime::new(); runtime.dispstat |= DISPSTAT_HBLANK_IRQ; runtime.interrupts.ie = IRQ_HBLANK; runtime.interrupts.ime = true; runtime.advance_cycles(HBLANK_START_CYCLES as u32); assert_ne!(runtime.dispstat & crate::mmio::DISPSTAT_HBLANK, 0); assert_ne!(runtime.interrupts.iflags & IRQ_HBLANK, 0); assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::System); runtime.schedule_irq_sample(0); runtime.advance_cycles(0); assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::Irq); }
+    #[test] fn generated_execution_samples_a_pending_irq_before_dispatching_next_block() { let mut runtime = Runtime::new(); runtime.interrupts.ie = IRQ_HBLANK; runtime.interrupts.ime = true; runtime.interrupts.request(IRQ_HBLANK); let mut dispatched = false; let result = runtime.run_generated(0x0800_0000, false, Some(2), |runtime, address, thumb| { dispatched = true; assert_eq!(runtime.cpu.mode(), crate::cpu::CpuMode::Irq); assert_eq!(address, 0x0000_0018); assert!(!thumb); Err("irq vector reached") }); assert_eq!(result, Err("irq vector reached")); assert!(dispatched); }
+    #[test] fn vblank_event_is_driven_by_scanline_timing() { let mut runtime = Runtime::new(); runtime.dispstat |= DISPSTAT_VBLANK_IRQ; runtime.interrupts.ie = IRQ_VBLANK; let cycles = CYCLES_PER_SCANLINE * VBLANK_START_LINE as u64; runtime.advance_cycles(cycles as u32); assert_eq!(runtime.vcount, VBLANK_START_LINE); assert_ne!(runtime.dispstat & crate::mmio::DISPSTAT_VBLANK, 0); assert_ne!(runtime.interrupts.iflags & IRQ_VBLANK, 0); }
+    #[test] fn dma_completion_is_an_event_on_the_same_machine_clock() { let mut runtime = Runtime::new(); runtime.interrupts.ie = IRQ_DMA0; runtime.schedule_dma_completion(0, 50); runtime.advance_cycles(49); assert_eq!(runtime.interrupts.iflags & IRQ_DMA0, 0); runtime.advance_cycles(1); assert_ne!(runtime.interrupts.iflags & IRQ_DMA0, 0); assert_eq!(runtime.scheduler.now(), 50); }
+    #[test] fn timer_overflow_and_cascade_share_the_same_event_boundary() { let mut runtime = Runtime::new(); runtime.interrupts.ie = IRQ_TIMER0 | IRQ_TIMER1; runtime.timers[0].write_reload(u16::MAX); runtime.timers[0].write_control(CONTROL_ENABLE | CONTROL_IRQ); runtime.timers[1].write_reload(u16::MAX); runtime.timers[1].write_control(CONTROL_ENABLE | CONTROL_CASCADE | CONTROL_IRQ); runtime.advance_cycles(2); assert_ne!(runtime.interrupts.iflags & IRQ_TIMER0, 0); assert_ne!(runtime.interrupts.iflags & IRQ_TIMER1, 0); }
+    #[test] fn bitmap_ppu_renders_at_the_first_hblank_boundary() { let mut runtime = Runtime::new(); runtime.dispcnt = 3 | (1 << 10); runtime.vram[0] = 0x1f; runtime.vram[1] = 0x00; runtime.advance_cycles(HBLANK_START_CYCLES as u32); assert_eq!(runtime.ppu.framebuffer[0], 0xffff_0000); }
+    #[test] fn obj_renders_at_the_hblank_boundary_after_background() { let mut runtime = Runtime::new(); runtime.dispcnt = (1 << 8) | (1 << 12); runtime.vram[0x10000..0x10004].fill(0x11); runtime.palette[2] = 0x1f; runtime.oam[4] = 1; runtime.advance_cycles(HBLANK_START_CYCLES as u32); assert_eq!(runtime.ppu.framebuffer[0], 0xffff_0000); }
 }
