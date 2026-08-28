@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::ppu::Ppu;
+use super::ppu::{bgr555_to_rgba, io_half, Ppu, LAYER_BG0, LAYER_BG1, LAYER_BG2, LAYER_BG3};
 
 const WIDTH: usize = 240;
 const HEIGHT: usize = 160;
@@ -69,7 +69,14 @@ impl Ppu {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct AffineRegs { pa: i32, pb: i32, pc: i32, pd: i32, x: i32, y: i32 }
+struct AffineRegs {
+    pa: i32,
+    pb: i32,
+    pc: i32,
+    pd: i32,
+    x: i32,
+    y: i32,
+}
 
 impl AffineRegs {
     fn read(io: &HashMap<u32, u8>, pa: u32, pb: u32, pc: u32, pd: u32, x: u32, y: u32) -> Self {
@@ -142,7 +149,12 @@ fn render_text_bg(
     let color_8bpp = bgcnt & (1 << 7) != 0;
     let screen_base = (((bgcnt >> 8) & 0x1f) as usize) * 0x800;
     let size = ((bgcnt >> 14) & 0x3) as usize;
-    let (width, height) = match size { 0 => (256, 256), 1 => (512, 256), 2 => (256, 512), _ => (512, 512) };
+    let (width, height) = match size {
+        0 => (256, 256),
+        1 => (512, 256),
+        2 => (256, 512),
+        _ => (512, 512),
+    };
     let tile_row = ((y + vofs as usize) % height) / 8;
     let fine_y = (y + vofs as usize) & 7;
 
@@ -194,4 +206,50 @@ fn read16(io: &HashMap<u32, u8>, address: u32) -> u16 { io_half(io, address) }
 fn read16_from_slice(bytes: &[u8], offset: usize) -> u16 { if offset + 1 < bytes.len() { u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) } else { 0 } }
 fn read32(io: &HashMap<u32, u8>, address: u32) -> u32 { u32::from_le_bytes([*io.get(&address).unwrap_or(&0), *io.get(&(address + 1)).unwrap_or(&0), *io.get(&(address + 2)).unwrap_or(&0), *io.get(&(address + 3)).unwrap_or(&0)]) }
 fn sign_extend_28(value: u32) -> i32 { let value = value & 0x0fff_ffff; if value & 0x0800_0000 != 0 { (value | 0xf000_0000) as i32 } else { value as i32 } }
-fn bgr555_to_rgba(value: u16) -> u32 { super::ppu::bgr555_to_rgba(value) }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn put_u16(io: &mut HashMap<u32, u8>, address: u32, value: u16) {
+        let [lo, hi] = value.to_le_bytes();
+        io.insert(address, lo);
+        io.insert(address + 1, hi);
+    }
+
+    fn put_u32(io: &mut HashMap<u32, u8>, address: u32, value: u32) {
+        for (offset, byte) in value.to_le_bytes().into_iter().enumerate() {
+            io.insert(address + offset as u32, byte);
+        }
+    }
+
+    #[test]
+    fn identity_affine_mapping_renders_tile_zero() {
+        let mut ppu = Ppu::default();
+        let mut vram = vec![0; 0x18000];
+        let mut palette = vec![0; 0x400];
+        let mut io = HashMap::new();
+        put_u16(&mut io, BG2CNT, 0x4000);
+        put_u16(&mut io, BG2PA, 0x0100);
+        put_u16(&mut io, BG2PB, 0);
+        put_u16(&mut io, BG2PC, 0);
+        put_u16(&mut io, BG2PD, 0x0100);
+        palette[2] = 0x1f;
+        vram[0] = 1;
+        vram[64] = 1;
+        ppu.render_affine_mode_scanline(BG2_ENABLE | 1, 0, &vram, &palette, &io);
+        assert_eq!(ppu.framebuffer[0], 0xffff_0000);
+    }
+
+    #[test]
+    fn signed_reference_point_is_sign_extended_from_28_bits() {
+        assert_eq!(sign_extend_28(0x0800_0000), -0x0800_0000);
+        assert_eq!(sign_extend_28(0x07ff_ffff), 0x07ff_ffff);
+    }
+
+    #[test]
+    fn short_palette_read_is_safe() {
+        assert_eq!(read16_from_slice(&[], 0), 0);
+        assert_eq!(read16_from_slice(&[0x1f], 0), 0);
+    }
+}
