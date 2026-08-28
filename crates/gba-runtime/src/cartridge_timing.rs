@@ -4,7 +4,7 @@
 //! wait-state setting through WAITCNT. ROM transfers are 16-bit wide; SRAM is
 //! 8-bit. WAITCNT bit 14 enables the eight-halfword prefetch buffer.
 
-use crate::bus::{BusRegion, ROM0_START, ROM1_START, ROM2_START, SAVE_START};
+use crate::bus::{ROM0_START, ROM1_START, ROM2_START, SAVE_START};
 
 const WAITCNT_SRAM_MASK: u16 = 0x0003;
 const WAITCNT_WS0_MASK: u16 = 0x000c;
@@ -36,45 +36,35 @@ impl Default for WaitStateConfig {
 impl WaitStateConfig {
     pub fn from_waitcnt(waitcnt: u16) -> Self {
         Self {
-            sram_cycles: decode_first(waitcnt & WAITCNT_SRAM_MASK),
-            ws0_first: decode_first((waitcnt & WAITCNT_WS0_MASK) >> 2),
-            ws0_second: decode_second((waitcnt & WAITCNT_WS0_N_MASK) >> 4, 2),
-            ws1_first: decode_first((waitcnt & WAITCNT_WS1_MASK) >> 5),
-            ws1_second: decode_second((waitcnt & WAITCNT_WS1_N_MASK) >> 7, 4),
-            ws2_first: decode_first((waitcnt & WAITCNT_WS2_MASK) >> 8),
-            ws2_second: decode_second((waitcnt & WAITCNT_WS2_N_MASK) >> 10, 8),
+            sram_cycles: decode_wait(waitcnt & WAITCNT_SRAM_MASK),
+            ws0_first: decode_wait((waitcnt & WAITCNT_WS0_MASK) >> 2),
+            ws0_second: decode_second(waitcnt & WAITCNT_WS0_N_MASK),
+            ws1_first: decode_wait((waitcnt & WAITCNT_WS1_MASK) >> 5),
+            ws1_second: decode_second(waitcnt & WAITCNT_WS1_N_MASK),
+            ws2_first: decode_wait((waitcnt & WAITCNT_WS2_MASK) >> 8),
+            ws2_second: decode_second(waitcnt & WAITCNT_WS2_N_MASK),
             prefetch: waitcnt & WAITCNT_PREFETCH != 0,
         }
     }
 
-    pub fn rom_cycles(self, region: BusRegion, sequential: bool) -> u8 {
-        match region {
-            BusRegion::CartridgeRom => match self.bank_for_region(region) {
-                0 => {
-                    if sequential { self.ws0_second } else { self.ws0_first }
-                }
-                1 => {
-                    if sequential { self.ws1_second } else { self.ws1_first }
-                }
-                2 => {
-                    if sequential { self.ws2_second } else { self.ws2_first }
-                }
-                _ => unreachable!(),
-            },
-            _ => 0,
-        }
+    pub fn rom_cycles_for_address(self, address: u32, sequential: bool) -> Option<u8> {
+        let bank = Self::bank_for_address(address)?;
+        Some(match bank {
+            0 => {
+                if sequential { self.ws0_second } else { self.ws0_first }
+            }
+            1 => {
+                if sequential { self.ws1_second } else { self.ws1_first }
+            }
+            2 => {
+                if sequential { self.ws2_second } else { self.ws2_first }
+            }
+            _ => unreachable!(),
+        })
     }
 
-    pub fn save_cycles(self, sequential: bool) -> u8 {
-        if sequential {
-            self.sram_cycles
-        } else {
-            self.sram_cycles
-        }
-    }
-
-    fn bank_for_region(self, _region: BusRegion) -> u8 {
-        0
+    pub fn save_cycles(self) -> u8 {
+        self.sram_cycles
     }
 
     pub fn bank_for_address(address: u32) -> Option<u8> {
@@ -88,7 +78,7 @@ impl WaitStateConfig {
     }
 }
 
-fn decode_first(value: u16) -> u8 {
+fn decode_wait(value: u16) -> u8 {
     match value & 0x3 {
         0 => 4,
         1 => 3,
@@ -97,8 +87,8 @@ fn decode_first(value: u16) -> u8 {
     }
 }
 
-fn decode_second(value: u16, slowest: u8) -> u8 {
-    if value & 1 == 0 { 2 } else { 1.min(slowest) }
+fn decode_second(value: u16) -> u8 {
+    if value & 1 == 0 { 2 } else { 1 }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,9 +118,8 @@ impl PrefetchBuffer {
         self.words = 0;
     }
 
-    pub fn observe_sequential_fetch(&mut self, address: u32) -> bool {
+    pub fn observe_fetch(&mut self, address: u32) -> bool {
         if !self.enabled {
-            self.invalidate();
             return false;
         }
         let hit = self.next_address == Some(address) && self.words != 0;
@@ -160,7 +149,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn waitcnt_decodes_default_rom_timings_and_prefetch() {
+    fn waitcnt_decodes_default_timings() {
         let config = WaitStateConfig::from_waitcnt(0);
         assert_eq!(config.sram_cycles, 4);
         assert_eq!(config.ws0_first, 4);
@@ -173,9 +162,8 @@ mod tests {
     }
 
     #[test]
-    fn waitcnt_decodes_fastest_supported_second_waitstates() {
+    fn waitcnt_decodes_fastest_second_waitstates_and_prefetch() {
         let config = WaitStateConfig::from_waitcnt(0x0554 | WAITCNT_PREFETCH);
-        assert_eq!(config.sram_cycles, 4);
         assert_eq!(config.ws0_second, 1);
         assert_eq!(config.ws1_second, 1);
         assert_eq!(config.ws2_second, 1);
@@ -184,10 +172,12 @@ mod tests {
 
     #[test]
     fn address_selects_correct_rom_waitstate_bank() {
-        assert_eq!(WaitStateConfig::bank_for_address(0x0800_0000), Some(0));
-        assert_eq!(WaitStateConfig::bank_for_address(0x0a00_0000), Some(1));
-        assert_eq!(WaitStateConfig::bank_for_address(0x0c00_0000), Some(2));
-        assert_eq!(WaitStateConfig::bank_for_address(0x0e00_0000), None);
+        let config = WaitStateConfig::default();
+        assert_eq!(config.rom_cycles_for_address(0x0800_0000, false), Some(4));
+        assert_eq!(config.rom_cycles_for_address(0x0800_0002, true), Some(2));
+        assert_eq!(config.rom_cycles_for_address(0x0a00_0000, false), Some(4));
+        assert_eq!(config.rom_cycles_for_address(0x0c00_0000, false), Some(4));
+        assert_eq!(config.rom_cycles_for_address(0x0e00_0000, false), None);
     }
 
     #[test]
@@ -195,9 +185,9 @@ mod tests {
         let mut prefetch = PrefetchBuffer::new(true);
         prefetch.refill(0x0800_0100);
         assert_eq!(prefetch.available_words(), 8);
-        assert!(prefetch.observe_sequential_fetch(0x0800_0100));
+        assert!(prefetch.observe_fetch(0x0800_0100));
         assert_eq!(prefetch.available_words(), 7);
-        assert!(!prefetch.observe_sequential_fetch(0x0800_0200));
+        assert!(!prefetch.observe_fetch(0x0800_0200));
         assert_eq!(prefetch.available_words(), 7);
         prefetch.invalidate();
         assert_eq!(prefetch.available_words(), 0);
