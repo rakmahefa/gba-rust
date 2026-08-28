@@ -214,4 +214,68 @@ mod tests {
         ppu.render_sprites(0, 0, &vram, &palette, &oam);
         assert_eq!(ppu.framebuffer[0], 0xff00_ff00);
     }
+
+    #[test]
+    fn mode3_full_frame_has_stable_regression_hash() {
+        let mut ppu = Ppu::default();
+        let mut vram = vec![0; 0x18000];
+        let palette = vec![0; 0x400];
+
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let color = (x as u16 & 0x1f)
+                    | ((y as u16 & 0x1f) << 5)
+                    | (((x + y) as u16 & 0x1f) << 10);
+                let offset = (y * WIDTH + x) * 2;
+                let bytes = color.to_le_bytes();
+                vram[offset] = bytes[0];
+                vram[offset + 1] = bytes[1];
+            }
+        }
+
+        for y in 0..HEIGHT {
+            ppu.render_scanline(1 << 10 | 3, y as u16, &vram, &palette);
+        }
+
+        assert_eq!(framebuffer_fnv1a(&ppu.framebuffer), 0x4bb9_7cf5);
+    }
+
+    #[test]
+    fn mode4_full_frame_has_stable_regression_hash() {
+        let mut ppu = Ppu::default();
+        let mut vram = vec![0; 0x18000];
+        let mut palette = vec![0; 0x400];
+
+        for index in 0..256u16 {
+            let color = (index & 0x1f)
+                | (((index * 3) & 0x1f) << 5)
+                | (((index * 7) & 0x1f) << 10);
+            let offset = index as usize * 2;
+            let bytes = color.to_le_bytes();
+            palette[offset] = bytes[0];
+            palette[offset + 1] = bytes[1];
+        }
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                vram[y * WIDTH + x] = ((x + y) & 0xff) as u8;
+            }
+        }
+
+        for y in 0..HEIGHT {
+            ppu.render_scanline(1 << 10 | 4, y as u16, &vram, &palette);
+        }
+
+        assert_eq!(framebuffer_fnv1a(&ppu.framebuffer), 0x0bf1_21cd);
+    }
+
+    fn framebuffer_fnv1a(framebuffer: &[u32]) -> u32 {
+        let mut hash = 0x811c_9dc5u32;
+        for pixel in framebuffer {
+            for byte in pixel.to_le_bytes() {
+                hash ^= u32::from(byte);
+                hash = hash.wrapping_mul(0x0100_0193);
+            }
+        }
+        hash
+    }
 }
