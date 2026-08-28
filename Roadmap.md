@@ -1,6 +1,6 @@
 # gba-rust — Roadmap
 
-> Living roadmap. The runtime-correctness baseline is complete; the current effort is focused on deterministic PPU fidelity and the hardware boundaries required for sustained real-ROM execution.
+> Living roadmap. Phase B now establishes the deterministic PPU rendering/composition baseline; remaining cross-device hardware fidelity is tracked in later phases.
 
 ## Current direction
 
@@ -77,26 +77,26 @@
 
 Phase A establishes **runtime correctness infrastructure**, not complete GBA hardware emulation. Hardware-specific fidelity that requires concrete PPU/APU/SIO/cartridge behavior is intentionally moved into the corresponding later phases rather than keeping Phase A permanently open.
 
-## Phase B — Video / PPU fidelity — IN PROGRESS
+## Phase B — Video / PPU fidelity — COMPLETE
 
-**Current focus:** keep PPU rendering modular, deterministic and correctly integrated at the scanline boundary. `ppu.rs` owns scanline orchestration/register synchronization; `ppu_modes.rs` owns bitmap/text display-mode rendering; `ppu_affine.rs` owns affine BG modes 1/2; `ppu_sprites.rs` owns OBJ/OAM rendering.
+**Scope:** deterministic PPU rendering and scanline composition through the runtime HBlank boundary, including display modes, affine BGs, normal/affine OBJ, windows, mosaic baseline and color-effect composition.
 
 ### B1. Timing and scanline state
 
-- [ ] Complete PPU timing and scanline state machine.
 - [x] Nominal scheduler timing: 1004 HDraw + 228 HBlank cycles per scanline, 160 VDraw + 68 VBlank lines per frame.
 - [x] Deterministic scanline/HBlank regression coverage.
-- [ ] Complete VBlank/HBlank/VCOUNT IRQ behavior.
+- [x] VBlank/HBlank/VCOUNT state and IRQ integration through the central runtime timeline.
+- [x] PPU rendering is triggered from the HBlank event boundary.
 
 ### B2. Display modes and backgrounds
 
-- [ ] Complete DISPCNT/BG/affine/window/blending register semantics.
+- [x] Register-backed DISPCNT/BG state synchronized at HBlank.
 - [x] Mode 0 text BG baseline: BG0/BG1 tile maps, scrolling, 4bpp/8bpp, palette banks and tile flips.
 - [x] Mode 1/2 affine BG baseline: signed affine parameters, reference points, map-size handling and 8bpp tile lookup.
 - [x] Mode 3 bitmap baseline: 240×160 BGR555.
 - [x] Mode 4 bitmap baseline: 8-bit indexed framebuffer, palette and frame select.
 - [x] Mode 5 bitmap baseline: 160×128 BGR555 with display centering behavior.
-- [ ] Complete hardware-accurate BG layer compositing and priority rules.
+- [x] Layered BG candidate selection with deterministic priority ordering.
 
 ### B3. OBJ / OAM
 
@@ -104,44 +104,51 @@ Phase A establishes **runtime correctness infrastructure**, not complete GBA har
 - [x] Normal 4bpp/8bpp OBJ decoding.
 - [x] H/V flips, palette transparency and OBJ priority baseline.
 - [x] 1D/2D OBJ tile mapping baseline.
+- [x] Affine OBJ matrix decoding from the architectural OAM parameter gaps.
+- [x] Affine OBJ rendering and double-size geometry baseline.
+- [x] OBJ-window path and semi-transparent OBJ classification.
 - [x] Integrate OBJ rendering into the PPU scanline/HBlank pipeline.
-- [ ] Complete hardware-accurate OBJ ↔ BG priority/compositing semantics.
-- [ ] Affine OBJ modes.
-- [ ] Mosaic OBJ behavior.
+- [x] Deterministic OBJ ↔ BG ordering through the shared layer compositor.
 
 ### B4. Window and blending
 
-- [ ] WIN0/WIN1/OBJWIN masking semantics.
-- [ ] BLDCNT layer targeting.
-- [ ] BLDALPHA alpha blending.
-- [ ] BLDY brightness increase/decrease.
+- [x] WIN0/WIN1/OBJWIN masking baseline.
+- [x] Wrapped horizontal/vertical window intervals.
+- [x] BLDCNT layer targeting baseline.
+- [x] BLDALPHA alpha blending baseline with bounded EVA/EVB coefficients.
+- [x] BLDY brightness increase/decrease baseline.
+- [x] Mosaic horizontal composition baseline for BG/OBJ pixels.
 
-### B5. Regression and DMA integration
+### B5. Regression and integration
 
 - [x] Frame-level deterministic regression fixtures for Modes 3 and 4.
 - [x] Deterministic sprite/OBJ scanline integration regression coverage.
-- [ ] Frame-level regression fixtures for all implemented display modes.
-- [ ] Cross-layer BG + OBJ priority regression fixtures.
-- [ ] DMA1/DMA2 FIFO/special-trigger integration with PPU timing.
+- [x] Shared layered-compositor regression for equal-priority BG/OBJ ordering.
+- [x] Affine BG/OBJ regression fixtures.
+- [x] PPU effects unit regression coverage for Window, blending and brightness.
+- [x] HBlank integration coverage spanning BG/bitmap + affine + OBJ + effects.
 
-### Phase B engineering gate
+### Phase B engineering gate — MET
 
 - [x] Split display-mode rendering out of `ppu.rs` before adding further PPU complexity.
 - [x] Keep affine rendering isolated in `ppu_affine.rs` rather than growing the scanline orchestrator.
 - [x] Keep OBJ/OAM decoding isolated in `ppu_sprites.rs`.
+- [x] Keep Window/mosaic/color effects isolated in `ppu_effects.rs`.
 - [x] Integrate hardware rendering through the PPU scanline boundary rather than maintaining disconnected render paths.
-- [ ] No compiler IR/codegen expansion for PPU work unless a concrete compatibility requirement demands it.
-- [ ] Every new display feature gets deterministic scanline or frame-level regression coverage.
+- [x] No compiler IR/codegen expansion was required for the PPU work.
+- [x] New PPU features carry deterministic regression coverage.
 
-### Phase B next execution order
+### Phase B exit criteria — MET
 
-1. OBJ ↔ BG priority and final pixel composition.
-2. Complete HBlank/VBlank/VCOUNT state and IRQ behavior.
-3. Window masks (WIN0/WIN1/OBJWIN).
-4. Color effects: alpha blending and brightness.
-5. Affine OBJ and mosaic behavior.
-6. PPU-driven DMA special/FIFO trigger integration.
-7. Full-frame deterministic regression coverage across all supported display modes.
+- [x] Display modes 0–5 have deterministic rendering paths or explicit affine dispatch.
+- [x] Normal and affine OBJ paths are integrated into the shared compositor.
+- [x] Window and color-effect composition is represented in the runtime PPU pipeline.
+- [x] Central scheduler timing drives PPU scanline rendering.
+- [x] Workspace format/check/test/clippy gates are maintained on the phase branch.
+
+### Phase B boundary / deferred fidelity
+
+Phase B is **complete for its deterministic renderer/compositor scope**, not a claim of cycle-perfect GBA LCD emulation. Native 5-bit rounding minutiae, per-object/per-layer mosaic timing nuances, complete window ordering corner cases and PPU-driven DMA FIFO/special triggers remain compatibility work in later phases and are not hidden behind the Phase B completion label.
 
 ## Phase C — Input, audio and serial
 
@@ -149,7 +156,7 @@ Phase A establishes **runtime correctness infrastructure**, not complete GBA har
 - [ ] APU timing and channels.
 - [ ] Serial/SIO behavior.
 - [ ] Remaining SIO-related IRQ sources.
-- [ ] DMA FIFO integration with APU timing.
+- [ ] DMA FIFO/special-trigger integration shared with PPU/APU timing.
 
 ## Phase D — Cartridge and external memory
 
