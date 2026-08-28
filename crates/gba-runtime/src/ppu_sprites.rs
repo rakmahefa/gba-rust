@@ -77,7 +77,7 @@ impl Ppu {
             let fine_y = source_y & 7;
             let tiles_wide = sprite_width / 8;
 
-            for screen_x in 0..WIDTH {
+            for (screen_x, priority_slot) in obj_priority.iter_mut().enumerate().take(WIDTH) {
                 let mut local_x = screen_x as i32 - x0;
                 if local_x < 0 {
                     local_x += 512;
@@ -125,14 +125,14 @@ impl Ppu {
                 if palette_index == 0 || palette_index * 2 + 1 >= palette.len() {
                     continue;
                 }
-                if priority > obj_priority[screen_x] {
+                if priority > *priority_slot {
                     continue;
                 }
 
                 let offset = palette_index * 2;
                 let color = u16::from_le_bytes([palette[offset], palette[offset + 1]]);
                 self.framebuffer[y * WIDTH + screen_x] = bgr555_to_rgba(color);
-                obj_priority[screen_x] = priority;
+                *priority_slot = priority;
             }
         }
     }
