@@ -54,6 +54,7 @@ impl Runtime {
                 if self.dispcnt & (1 << 12) != 0 {
                     self.ppu.render_sprites(self.dispcnt, self.vcount, &self.vram, &self.palette, &self.oam);
                 }
+                self.ppu.apply_scanline_effects(self.dispcnt, self.vcount, &self.io);
                 if self.dispstat & DISPSTAT_HBLANK_IRQ != 0 { self.raise_hardware_interrupt(IRQ_HBLANK); }
                 self.trigger_dma(DmaTrigger::HBlank);
                 self.scheduler.schedule_in(CYCLES_PER_SCANLINE, EventKind::PpuHBlankStart);
