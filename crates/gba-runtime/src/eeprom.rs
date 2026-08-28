@@ -127,8 +127,10 @@ mod tests {
         assert_eq!(output.len(), 68);
         assert!(output[..4].iter().all(|&bit| !bit));
         let payload = output[4..]
-            .chunks_exact(8)
-            .map(bits_to_u8)
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| bits_to_u8(chunk))
             .collect::<Vec<_>>();
         assert_eq!(payload, data);
     }
@@ -142,8 +144,10 @@ mod tests {
         eeprom.transfer(&write_transaction(address, data, 14));
         let output = eeprom.transfer(&read_transaction(address, 14));
         let payload = output[4..]
-            .chunks_exact(8)
-            .map(bits_to_u8)
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| bits_to_u8(chunk))
             .collect::<Vec<_>>();
 
         assert_eq!(payload, data);
