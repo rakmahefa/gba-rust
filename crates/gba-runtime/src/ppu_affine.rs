@@ -91,6 +91,7 @@ impl AffineRegs {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_affine_bg(
     ppu: &mut Ppu,
     row: usize,
@@ -133,6 +134,7 @@ fn render_affine_bg(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_text_bg(
     ppu: &mut Ppu,
     row: usize,
@@ -215,12 +217,6 @@ mod tests {
         let [lo, hi] = value.to_le_bytes();
         io.insert(address, lo);
         io.insert(address + 1, hi);
-    }
-
-    fn put_u32(io: &mut HashMap<u32, u8>, address: u32, value: u32) {
-        for (offset, byte) in value.to_le_bytes().into_iter().enumerate() {
-            io.insert(address + offset as u32, byte);
-        }
     }
 
     #[test]
