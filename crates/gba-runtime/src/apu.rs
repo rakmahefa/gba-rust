@@ -56,6 +56,10 @@ pub struct Apu {
     pub soundcnt_h: u16,
     pub soundcnt_x: u16,
     pub channel: [ApuChannel; 4],
+    pub fifo_a_samples: u64,
+    pub fifo_b_samples: u64,
+    pub fifo_a_underruns: u64,
+    pub fifo_b_underruns: u64,
     fifo_a: Fifo,
     fifo_b: Fifo,
 }
@@ -83,6 +87,22 @@ impl Apu {
     pub fn pop_fifo_b(&mut self) -> Option<i8> { self.fifo_b.pop() }
     pub fn fifo_a_len(&self) -> usize { self.fifo_a.len() }
     pub fn fifo_b_len(&self) -> usize { self.fifo_b.len() }
+
+    /// Consume one Direct Sound sample on a timer overflow.
+    /// Timer selection follows SOUNDCNT_H bits 10 (A) and 14 (B).
+    pub fn on_timer_overflow(&mut self, timer_index: usize) {
+        let timer_a = usize::from((self.soundcnt_h >> 10) & 1);
+        let timer_b = usize::from((self.soundcnt_h >> 14) & 1);
+        let a_enabled = self.soundcnt_h & 0x0300 != 0;
+        let b_enabled = self.soundcnt_h & 0x3000 != 0;
+
+        if a_enabled && timer_index == timer_a {
+            if self.fifo_a.pop().is_some() { self.fifo_a_samples += 1; } else { self.fifo_a_underruns += 1; }
+        }
+        if b_enabled && timer_index == timer_b {
+            if self.fifo_b.pop().is_some() { self.fifo_b_samples += 1; } else { self.fifo_b_underruns += 1; }
+        }
+    }
 
     pub fn reset_fifos(&mut self, fifo_a: bool, fifo_b: bool) {
         if fifo_a { self.fifo_a.clear(); }
@@ -131,8 +151,29 @@ mod tests {
         apu.write_fifo_b(2);
         apu.reset_fifos(true, false);
         assert_eq!(apu.fifo_a_len(), 0);
-        // FIFO writes are 32-bit architectural writes, so each write enqueues
-        // four signed PCM bytes in the corresponding FIFO.
         assert_eq!(apu.fifo_b_len(), 4);
+    }
+
+    #[test]
+    fn timer_overflow_consumes_only_the_selected_enabled_fifo() {
+        let mut apu = Apu::default();
+        apu.soundcnt_h = 0x0300 | 0x4000;
+        apu.write_fifo_a(0x0403_0201);
+        apu.write_fifo_b(0x0807_0605);
+        apu.on_timer_overflow(0);
+        assert_eq!(apu.fifo_a_len(), 3);
+        assert_eq!(apu.fifo_b_len(), 4);
+        assert_eq!(apu.fifo_a_samples, 1);
+        apu.on_timer_overflow(1);
+        assert_eq!(apu.fifo_b_len(), 3);
+        assert_eq!(apu.fifo_b_samples, 1);
+    }
+
+    #[test]
+    fn timer_overflow_records_fifo_underrun() {
+        let mut apu = Apu::default();
+        apu.soundcnt_h = 0x0300;
+        apu.on_timer_overflow(0);
+        assert_eq!(apu.fifo_a_underruns, 1);
     }
 }
