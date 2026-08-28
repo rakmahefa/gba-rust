@@ -10,6 +10,7 @@ mod ppu_affine;
 pub mod apu;
 pub mod bus;
 pub mod cartridge;
+pub mod cartridge_timing;
 pub mod cpu;
 pub mod mmio;
 pub mod mmio_devices;
@@ -35,6 +36,7 @@ pub use cartridge::{
     detect_save_type, validate_header, Cartridge, CartridgeHeader, CartridgeHeaderError, SaveRam,
     SaveType,
 };
+pub use cartridge_timing::{PrefetchBuffer, WaitStateConfig};
 pub use cpu::{
     BankedRegisters, Cpu, CpuMode, ExceptionKind, CPSR_C, CPSR_N, CPSR_V, CPSR_Z, REG_LR, REG_PC,
     REG_SP,
