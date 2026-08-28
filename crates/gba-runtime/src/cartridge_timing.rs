@@ -172,7 +172,8 @@ mod tests {
 
     #[test]
     fn waitcnt_decodes_fastest_second_waitstates_and_prefetch() {
-        let config = WaitStateConfig::from_waitcnt(0x06d8 | WAITCNT_PREFETCH);
+        let waitcnt = WAITCNT_WS0_N_MASK | WAITCNT_WS1_N_MASK | WAITCNT_WS2_N_MASK | WAITCNT_PREFETCH;
+        let config = WaitStateConfig::from_waitcnt(waitcnt);
         assert_eq!(config.ws0_second, 1);
         assert_eq!(config.ws1_second, 1);
         assert_eq!(config.ws2_second, 1);
