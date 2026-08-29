@@ -34,7 +34,7 @@ A real ROM can be loaded, statically analyzed, generated and launched through th
 
 ---
 
-### F1 — Deterministic real-ROM boot — **IN PROGRESS**
+### F1 — Deterministic real-ROM boot — **VALIDATED CHECKPOINT / REMAINING WORK**
 
 Goal: prove that the generated program can execute the ROM's reset/initialization path deterministically and establish a meaningful boot checkpoint.
 
@@ -43,17 +43,20 @@ Goal: prove that the generated program can execute the ROM's reset/initializatio
 - [x] Repeat the same boot scenario and compare checkpoints deterministically.
 - [x] Compare generated-block traces across repeated boot runs.
 - [x] Confirm execution progresses beyond the cartridge entry point.
+- [x] Validate the checkpoint address against the selected FireRed reference emulator (mGBA).
+- [x] Validate the checkpoint ARM/Thumb state against mGBA.
+- [x] Validate the checkpoint SP against mGBA.
 - [ ] Validate cartridge reset state against the intended boot behavior.
 - [ ] Validate the full reset/initialization path used by the selected ROM.
-- [ ] Validate ARM/Thumb state transitions against the expected boot path.
+- [ ] Validate ARM/Thumb state transitions across the complete boot path.
 - [ ] Validate supervisor/IRQ exception entry used by the boot sequence.
 - [ ] Validate early memory initialization against the expected boot behavior.
 - [ ] Validate the first timer/interrupt activity encountered by the ROM.
-- [ ] Distinguish compiler/code-generation divergence from runtime/hardware divergence at the boot milestone.
+- [ ] Distinguish compiler/code-generation divergence from runtime/hardware divergence beyond the current checkpoint.
 
-**Current automated evidence:**
+**Validated FireRed checkpoint:**
 
-For the selected FireRed reference ROM, the local F1 test completed two deterministic 4096-generated-block runs and produced the same checkpoint/trace:
+The local F1 test completed two deterministic 4096-generated-block runs:
 
 ```text
 size=16777216
@@ -68,19 +71,29 @@ size=16777216
  exit=StepLimitExceeded
 ```
 
-This demonstrates deterministic progression through generated execution, but it does not by itself prove that the checkpoint is the intended visual/game boot milestone.
+The selected FireRed ROM was then inspected in mGBA with a Thumb breakpoint at `0x081DC81C`. mGBA reached the same code location with:
 
-**Human validation required:**
+```text
+PC/current instruction = 0x081DC81E
+instruction address     = 0x081DC81C
+Thumb                    = true
+SP                       = 0x03007E08
+Cycle                    = 20257
+instruction              = BE00  bkpt
+```
 
-- [ ] User identifies the expected visual or execution milestone for FireRed's boot phase.
-- [ ] User compares the first observable output against a trusted reference emulator or hardware behavior.
-- [ ] User confirms whether `PC=0x081dc81c`, `SP=0x03007e08`, Thumb state and `22132` cycles represent a genuine boot milestone or an execution plateau.
+The debugger therefore confirms that the F1 checkpoint is on a real FireRed execution path and is not merely an arbitrary generated-code plateau. The mGBA and `gba-rust` cycle counts are intentionally not treated as identical timing evidence at this stage; rigorous timing comparison belongs to F3.
 
-**Acceptance gate:**
+**Human validation completed:**
 
-The same ROM reaches the same validated boot checkpoint repeatedly without nondeterministic divergence, and the execution path is still driven by generated blocks rather than instruction-by-instruction interpretation.
+- [x] User identified the selected FireRed ROM as the reference ROM.
+- [x] User compared the checkpoint against mGBA.
+- [x] User confirmed that the checkpoint corresponds to a genuine FireRed execution point.
+- [x] User confirmed: **F1 checkpoint humain : VALIDÉ.**
 
-F1 must not be marked complete solely because the test process exits successfully or because the checkpoint is deterministic.
+**Acceptance status:** **Checkpoint validated; F1 still has remaining architectural boot work.**
+
+The checkpoint is reproducible and reference-correlated, but F1 remains open until the reset/initialization, exception/IRQ, early-memory and first timer/interrupt evidence listed above are covered. F1 must not be marked fully complete solely because the checkpoint is deterministic.
 
 ---
 
