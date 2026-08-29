@@ -1,10 +1,10 @@
 # Phase F1 — Architectural boot evidence
 
-This document records the automated architectural prerequisites added after the human-validated FireRed checkpoint.
+This document records the automated architectural prerequisites and the real FireRed observations added after the human-validated deterministic checkpoint.
 
 ## Covered boundaries
 
-The `gba-cli` integration test `f1_architectural_boot.rs` covers four boundaries:
+The `gba-cli` integration test `f1_architectural_boot.rs` covers four synthetic runtime boundaries:
 
 1. **Cartridge reset contract**
    - System mode at cartridge entry.
@@ -34,18 +34,111 @@ The `gba-cli` integration test `f1_architectural_boot.rs` covers four boundaries
    - Generated execution resumes at the IRQ vector rather than silently continuing the cartridge block stream.
    - No instruction-by-instruction interpreter is introduced by this test.
 
+## Real FireRed manual evidence
+
+The same `POKEMON FIRE` / `BPRE` ROM was inspected in mGBA.
+
+### Reset and cartridge handoff
+
+At reset mGBA reported:
+
+```text
+PC    = 0x00000004
+SP    = 0x03007F00
+CPSR  = 0x0000001F
+Cycle = 0
+```
+
+The first observed cartridge instruction was:
+
+```text
+08000000: EA00007F  b 0x08000204
+```
+
+with:
+
+```text
+SP    = 0x03007F00
+CPSR  = 0x2000001F
+Thumb = false
+Cycle = 28
+```
+
+Continuing reached the ROM header's declared entry target:
+
+```text
+08000204: E3A00012  mov r0, #18
+```
+
+with `SP=0x03007F00`, ARM state and `Cycle=48`.
+
+### First ARM → Thumb transition
+
+The early boot sequence contains:
+
+```text
+08000228: E59F1014  ldr r1, =0x080003A5
+0800022C: E1A0E00F  mov lr, pc
+08000230: E12FFF11  bx r1
+```
+
+The odd target `0x080003A5` selects Thumb state, and mGBA confirmed execution at:
+
+```text
+080003A4: B5F0  stmdb sp!, {r4-r7,lr}
+```
+
+with:
+
+```text
+SP    = 0x03007E40
+LR    = 0x08000234
+CPSR  = 0x0000003F
+Thumb = true
+Cycle = 175
+```
+
+This is the first real FireRed ARM → Thumb transition captured for F1.
+
+### Reference checkpoint
+
+The deterministic generated boot reaches:
+
+```text
+PC    = 0x081DC81C
+Thumb = true
+SP    = 0x03007E08
+cycles = 22132
+steps = 4096
+exit = StepLimitExceeded
+```
+
+mGBA reaches the same instruction address with:
+
+```text
+instruction address = 0x081DC81C
+current PC           = 0x081DC81E
+Thumb                = true
+SP                   = 0x03007E08
+Cycle                = 20257
+instruction          = C008  stmia r0!, {r3}
+```
+
+The matching PC location, Thumb state and SP establish reference correlation. Cycle counts are not treated as timing-equivalence evidence; that belongs to F3.
+
 ## Evidence boundary
 
-These tests validate the runtime architectural contract. They do **not** claim that FireRed actually reaches a timer/IRQ event at this exact synthetic configuration.
+The synthetic tests validate the runtime architectural contract. The manual observations establish real-ROM behavior for FireRed at reset, cartridge handoff, first ARM → Thumb transition and the existing 4096-block checkpoint.
 
-The real-ROM requirement remains human-observable:
+These observations do **not** yet demonstrate:
 
-- execute the selected FireRed ROM through the existing static-recompiled path;
-- capture the first real timer/interrupt activity encountered beyond the current 4096-block checkpoint;
-- compare the resulting architectural boundary against the reference emulator;
-- classify any discrepancy as generated-control-flow, compiler/code-generation, runtime, or timing/hardware divergence.
+- the complete reset/initialization path;
+- the first real timer programmed and overflowing on the FireRed path;
+- the first real hardware IRQ encountered by FireRed;
+- supervisor/IRQ exception return behavior on the real ROM path;
+- the separation of compiler/code-generation divergence from runtime/hardware divergence beyond the current checkpoint.
 
-Until that real-ROM evidence is collected, F1 remains open even though its synthetic architectural prerequisites are covered.
+F1 therefore remains open.
 
 ## Canonical real-ROM command
 
@@ -53,5 +146,3 @@ Until that real-ROM evidence is collected, F1 remains open even though its synth
 GBA_REAL_ROM="roms/1636 - Pokemon Fire Red (U)(Squirrels).gba" \
 cargo test -p gba-cli --test real_rom_execution -- --nocapture
 ```
-
-The existing deterministic F1 test remains the reference checkpoint; this document only records the additional architectural test coverage.
