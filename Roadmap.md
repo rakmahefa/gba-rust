@@ -1,121 +1,285 @@
-# gba-rust — Roadmap
+# gba-rust — Phase F Roadmap
 
-> Living roadmap. Phase C and Phase D are complete for their deterministic architectural runtime scopes; Phase E is complete.
+> Phase F is the real-ROM validation phase of `gba-rust`.
+>
+> Its purpose is to prove, incrementally and measurably, that a real GBA ROM can be statically analyzed, statically recompiled into generated Rust, and then executed against the deterministic GBA runtime without turning the project into an instruction interpreter.
+>
+> Phase F is intentionally experimental and requires human validation at several milestones. A real ROM may expose architectural, timing, compiler, runtime, or observability gaps that cannot be predicted reliably from isolated unit tests.
 
-## Current direction
+## Phase F — Real Game Execution
 
-`gba-rust` is a static GBA recompiler with a dedicated ARM7TDMI/runtime layer. The compiler pipeline is established enough to prioritize hardware fidelity and sustained real-ROM execution over adding new compiler abstractions.
+### F0 — Experimental execution harness
 
-## Phase C — Input, audio and serial — COMPLETE
+Goal: establish a reproducible path from a real ROM to generated execution and make every failure observable.
 
-### C1. Audio/serial architectural baseline — COMPLETE
-- [x] Deterministic APU sample-clock accumulator using the GBA master clock.
-- [x] Sound FIFO A/B state with architectural capacity and deterministic byte ordering.
-- [x] APU FIFO reset primitives.
-- [x] Sound MMIO register descriptors with explicit width/access/mask policy.
-- [x] SIO control/data register descriptors and deterministic serial state.
+- [ ] Define the canonical real-ROM execution command and environment contract.
+- [ ] Accept a user-provided ROM path without embedding commercial ROMs in the repository.
+- [ ] Validate cartridge metadata before execution.
+- [ ] Run the existing static analysis / CFG / code-generation pipeline on the ROM.
+- [ ] Start the generated program against the `gba-runtime` contract.
+- [ ] Record execution termination reason instead of treating all exits as crashes.
+- [ ] Record ROM identity, generated block count, linked block count and execution mode.
+- [ ] Record cycles, generated-block transitions, runtime boundary crossings, IRQs, exceptions, DMA and PPU events.
+- [ ] Add a deterministic execution trace suitable for comparing repeated runs.
 
-### C2. APU / PSG / Direct Sound — COMPLETE
-- [x] Integrate APU sample-clock advancement into `Runtime::advance_cycles` across scheduler boundaries.
-- [x] Integrate the 512 Hz PSG frame sequencer on the central runtime clock.
-- [x] PSG length-counter evolution and automatic channel disable on expiry.
-- [x] PSG envelope evolution and deterministic timer state.
-- [x] Deterministic sweep evolution for the Square 1 channel.
-- [x] Deterministic square, wave and noise sample generation.
-- [x] Deterministic PSG + Direct Sound sample mixing path.
-- [x] Connect SOUNDCNT_L/H/X and SOUNDBIAS runtime state to the APU model.
-- [x] Connect 32-bit FIFO A/B MMIO writes directly to the architectural FIFOs.
-- [x] Consume Direct Sound FIFO samples on the selected timer overflow.
-- [x] Deterministic FIFO refill threshold requests at the low-water mark.
-- [x] Deterministic FIFO underrun accounting.
-- [x] Runtime regression coverage for sample clock, frame sequencer, PSG evolution, FIFO selection and mixing.
+**Human validation required:**
 
-### C3. Serial / SIO — COMPLETE
-- [x] Integrate SIO registers into runtime MMIO read/write paths.
-- [x] Preserve architectural SIOCNT mode/IRQ bits and RCNT policy.
-- [x] Implement deterministic Normal 8-bit transfer timing.
-- [x] Implement deterministic Normal 32-bit transfer timing.
-- [x] Implement deterministic multiplayer local-peer state abstraction.
-- [x] Implement deterministic UART baseline.
-- [x] Implement deterministic serial receive and transfer-completion state.
-- [x] Route serial transfer completion to the GBA serial IRQ source.
-- [x] Add deterministic SIO/runtime regression fixtures.
+- [ ] User supplies the first reference ROM and confirms that it is legally available for testing.
+- [ ] User runs the canonical command locally and provides the first real-ROM trace/result.
+- [ ] User confirms the expected boot/termination point for the selected ROM.
 
-### C4. DMA audio / special triggers — COMPLETE
-- [x] Restrict Direct Sound FIFO special triggers to DMA1/DMA2.
-- [x] Restrict audio special-trigger destinations to FIFO A/B architectural addresses.
-- [x] Generate FIFO refill requests from timer-driven Direct Sound consumption.
-- [x] Feed audio refill requests into the central DMA arbitration path.
-- [x] Preserve deterministic DMA channel priority when audio and video timing requests coincide.
-- [x] Keep PPU HBlank/VBlank DMA arbitration on the same scheduler clock as audio.
-- [x] Add DMA FIFO destination/priority regression coverage.
+**Acceptance gate:**
 
-### Phase C engineering gate — MET
-- [x] Host audio output remains outside the architectural runtime layer.
-- [x] No secondary device clock was introduced; APU and SIO advance from the central scheduler.
-- [x] FIFO state is deterministic and independently testable.
-- [x] SIO transfer timing and serial IRQ delivery are deterministic.
-- [x] DMA audio special triggers remain explicit and restricted to the architectural FIFO destinations.
-- [x] Existing `-D warnings` / Clippy policy is preserved.
-- [x] Phase C carries runtime unit/integration coverage for audio, serial and DMA interaction.
-- [x] Phase C branch maintained the repository CI format/check/test/clippy gates before finalization.
+A real ROM can be loaded, statically analyzed, generated and launched through the intended execution path, with enough telemetry to identify the first architectural divergence.
 
-### Phase C boundary
+---
 
-Phase C is complete for the project's **deterministic architectural audio/serial scope**. This is not a claim of cycle-perfect analog/audio hardware emulation, external multiplayer transport, or host audio backend fidelity. Those remain outside the runtime contract.
+### F1 — Deterministic real-ROM boot
 
-## Phase D — Cartridge and external memory — COMPLETE
-- [x] Deterministic SRAM read/write and address mirroring foundation.
-- [x] Flash command-state foundation: unlock, byte program, sector erase, chip erase.
-- [x] Flash128K bank switching foundation.
-- [x] Deterministic EEPROM serial protocol foundation for 512B and 8KiB devices.
-- [x] Deterministic WAITCNT decode for SRAM and WS0/WS1/WS2 ROM timings.
-- [x] Deterministic eight-halfword Game Pak prefetch buffer model.
-- [x] Save-device regression coverage across SRAM, Flash and EEPROM protocol fixtures.
-- [x] Phase D implementation keeps cartridge timing/save semantics isolated from CPU/codegen concerns.
+Goal: prove that the generated program can execute the ROM's reset/initialization path deterministically.
 
-### Phase D engineering gate — MET
-- [x] SRAM mirroring is deterministic and independently tested.
-- [x] Flash programming, sector/chip erase and 128 KiB bank selection are deterministic and regression-tested.
-- [x] EEPROM 512B and 8KiB command/data transactions are independently regression-tested.
-- [x] WAITCNT timing fields are decoded into explicit ROM/SRAM wait-state parameters.
-- [x] Prefetch state is deterministic, bounded to eight halfwords and explicitly invalidatable.
-- [x] Repository `cargo test`, `cargo check`, `cargo clippy -D warnings` and rustfmt CI gates remain the phase acceptance criteria.
+- [ ] Validate cartridge reset state and initial CPU state.
+- [ ] Execute BIOS/runtime initialization through generated execution and runtime services.
+- [ ] Validate ARM/Thumb state transitions encountered during boot.
+- [ ] Validate supervisor/IRQ exception entry used by the boot sequence.
+- [ ] Validate reset vector and early memory initialization.
+- [ ] Validate the first timer/interrupt activity encountered by the ROM.
+- [ ] Capture a deterministic architectural checkpoint after a defined boot interval.
+- [ ] Repeat the same run and compare checkpoints.
+- [ ] Distinguish compiler/code-generation divergence from runtime/hardware divergence.
 
-### Phase D boundary
+**Human validation required:**
 
-Phase D is complete for the project's **deterministic cartridge/external-memory architectural baseline**. This does not claim cycle-perfect cartridge bus arbitration, silicon-specific prefetch refill behavior, or every vendor-specific EEPROM/Flash command extension. Those remain compatibility refinements to be driven by real-ROM validation in Phase F.
+- [ ] User identifies the expected visual or execution milestone for the ROM's boot phase.
+- [ ] User compares the first observable output against known/reference hardware or an accepted emulator reference.
+- [ ] User confirms whether the observed state is a genuine boot milestone or an accidental execution plateau.
 
-## Phase E — Generated execution performance — COMPLETE
-- [x] E0: deterministic generated-dispatch benchmark baseline.
-- [x] E1: static CFG transitions skip redundant runtime CFG-membership probes while retaining alignment validation.
-- [x] E2: direct generated-block linking via `GeneratedLinkedBlock` / `run_generated_linked`.
-- [x] E3: block chaining/hot-path dispatch reduction through direct successor function pointers.
-- [x] E4: runtime boundary minimization for proven static paths without weakening architectural correctness.
-- [x] Deterministic benchmark comparison between contract dispatch and direct linked execution.
+**Acceptance gate:**
 
-### Phase E engineering gate — MET
-- [x] Static generated transitions avoid redundant CFG membership probes.
-- [x] Direct linked successors bypass address/mode redispatch.
-- [x] Multi-step hot paths remain inside the linked execution loop.
-- [x] Alignment checks remain enforced at static link boundaries.
-- [x] Dynamic/exceptional boundaries remain explicit and architecturally validated.
-- [x] Benchmark reports identical step counts, zero linked-path CFG probes, and host `ns/step` comparison.
-- [x] CI acceptance gates remain green for Phase E changes.
+The same ROM reaches the same boot checkpoint repeatedly without nondeterministic divergence, and the execution path is still driven by generated blocks rather than instruction-by-instruction interpretation.
 
-### Phase E boundary
+---
 
-Phase E completes the project's **generated execution dispatch optimization scope**. It does not claim global host-performance optimality or eliminate architectural runtime crossings where timing, memory, IRQ, exception, or dynamic-target semantics require them. Absolute benchmark timings remain host-dependent.
+### F2 — Real exception, BIOS and IRQ execution
 
-## Phase F — Real game execution
-- [ ] Boot a real ROM through BIOS/runtime initialization.
-- [ ] Reach a deterministic title screen.
-- [ ] Reach interactive execution with input.
-- [ ] Validate sustained execution across multiple frames.
-- [ ] Establish a reproducible real-ROM compatibility matrix.
+Goal: validate that asynchronous hardware and architectural exceptions cooperate correctly with generated control flow.
 
-## Engineering rules
-- Do not expand the compiler IR/codegen architecture unless a concrete runtime or compatibility requirement demands it.
-- Do not treat "real ROM compiles and exits deterministically" as equivalent to "game is playable".
-- Do not require commercial ROMs in CI.
-- Preserve deterministic scheduling and explicit architectural boundaries as later hardware components are added.
+- [ ] Validate BIOS SWI execution encountered by the selected ROM.
+- [ ] Validate supervisor-mode entry and return semantics required by the ROM.
+- [ ] Validate IRQ entry at generated block boundaries.
+- [ ] Validate banked register preservation across IRQ entry/return.
+- [ ] Validate SPSR/CPSR restoration on architectural exception returns.
+- [ ] Validate nested or reentrant exception paths when the ROM exercises them.
+- [ ] Validate HALT/IntrWait-style waiting paths encountered by the ROM.
+- [ ] Validate dynamic exception-vector handling when the vector belongs to generated code.
+- [ ] Record exception and IRQ traces with source cycle and generated-block identity.
+
+**Human validation required:**
+
+- [ ] User confirms that the ROM reaches the IRQ/BIOS milestone without external intervention beyond the agreed test procedure.
+- [ ] User compares the trace against an expected hardware/reference behavior where available.
+
+**Acceptance gate:**
+
+The ROM can cross real exception/IRQ boundaries without losing generated control flow, CPU mode state, or deterministic resume state.
+
+---
+
+### F3 — Timing, timers, DMA and PPU under real execution
+
+Goal: prove that the central runtime scheduler remains correct when driven continuously by a real ROM.
+
+- [ ] Validate timer progression over sustained generated execution.
+- [ ] Validate timer overflow and IRQ request timing.
+- [ ] Validate DMA requests and completion boundaries exercised by the ROM.
+- [ ] Validate DMA/IRQ interaction under real scheduler pressure.
+- [ ] Validate PPU scanline/HBlank/VBlank progression needed by the ROM.
+- [ ] Validate scheduler event ordering when multiple events coincide.
+- [ ] Validate that generated CPU execution advances the central machine clock correctly.
+- [ ] Detect scheduler stalls, runaway event loops and impossible time regressions.
+- [ ] Record per-frame timing/event summaries.
+
+**Human validation required:**
+
+- [ ] User confirms visible frame progression or another externally observable timing milestone.
+- [ ] User reports any visual/timing discrepancy against reference hardware/reference emulator.
+
+**Acceptance gate:**
+
+The ROM advances through repeated scheduler boundaries without timing deadlock, event-order instability or progressive desynchronization.
+
+---
+
+### F4 — Sustained multi-frame execution
+
+Goal: move from "the ROM boots" to "the ROM lives".
+
+- [ ] Execute a real ROM for a fixed number of complete frames.
+- [ ] Execute the same frame window repeatedly and compare deterministic checkpoints.
+- [ ] Track generated-block execution volume over time.
+- [ ] Track runtime boundary crossings per frame.
+- [ ] Track IRQ, DMA, timer and PPU event rates per frame.
+- [ ] Detect state drift, memory corruption and execution stalls.
+- [ ] Establish the first sustained-execution baseline on the chosen reference ROM.
+- [ ] Preserve the baseline trace as a regression artifact outside CI when ROM licensing prevents repository storage.
+
+**Human validation required:**
+
+- [ ] User observes the sustained execution window and confirms whether the ROM is progressing normally.
+- [ ] User supplies the next expected interaction/visual milestone.
+
+**Acceptance gate:**
+
+The selected ROM executes for a predefined multi-frame window with deterministic progression and no unexplained architectural drift.
+
+---
+
+### F5 — First deterministic title-screen milestone
+
+Goal: reach a concrete game-visible state, not merely successful code execution.
+
+- [ ] Define a title-screen or equivalent canonical milestone for the selected ROM.
+- [ ] Identify the execution evidence proving that the milestone was reached.
+- [ ] Validate graphics/memory activity required by the milestone.
+- [ ] Validate DMA/PPU activity required by the milestone.
+- [ ] Validate audio state only to the extent required by the milestone.
+- [ ] Capture a deterministic state/trace around the milestone.
+- [ ] Re-run from a clean start and reproduce the milestone.
+
+**Human validation required:**
+
+- [ ] User confirms visually that the expected title screen or equivalent milestone is correct.
+- [ ] User provides the expected next interaction milestone.
+
+**Acceptance gate:**
+
+A real ROM reaches a recognizable, deterministic game-visible milestone through the static-recompiled execution path.
+
+---
+
+### F6 — Interactive execution
+
+Goal: establish the first real user-driven interaction loop.
+
+- [ ] Integrate a deterministic input injection path for tests.
+- [ ] Validate keypad/input MMIO state transitions.
+- [ ] Inject a minimal approved input sequence.
+- [ ] Verify that generated game code reacts to the input.
+- [ ] Validate the resulting frame progression.
+- [ ] Validate that input timing is attached to the central runtime clock rather than an unrelated host clock.
+- [ ] Reproduce the same input sequence and compare checkpoints.
+- [ ] Record the interaction sequence as a replayable regression scenario.
+
+**Human validation required:**
+
+- [ ] User chooses the minimal interaction sequence that is meaningful for the selected ROM.
+- [ ] User observes and confirms the resulting game state.
+- [ ] User identifies the next interaction milestone before implementation proceeds.
+
+**Acceptance gate:**
+
+A real ROM accepts deterministic input and produces the expected game-state progression without leaving the static-recompiled execution model.
+
+---
+
+### F7 — Real-ROM compatibility matrix
+
+Goal: turn the single-ROM experiment into a reproducible compatibility program.
+
+- [ ] Define a small set of legally testable ROMs representing different runtime behaviors.
+- [ ] Classify each result by boot, frame progression, title/visible milestone, input and sustained execution.
+- [ ] Record the first failing boundary for each ROM.
+- [ ] Separate failures into compiler, generated-control-flow, runtime, device, timing and host-integration categories.
+- [ ] Keep ROM binaries outside CI unless redistribution rights explicitly permit inclusion.
+- [ ] Store portable traces, manifests and test procedures instead of copyrighted ROM data.
+- [ ] Add a compatibility report format that can be updated without changing the architecture.
+
+**Human validation required:**
+
+- [ ] User selects the next ROM after each compatibility milestone.
+- [ ] User validates the expected behavior for every new ROM before results are classified as failures.
+
+**Acceptance gate:**
+
+The project has a reproducible compatibility matrix with clear evidence for both successes and failures, and no result is marked successful solely because the process terminated cleanly.
+
+---
+
+### F8 — Performance characterization after stability
+
+Goal: measure real-ROM performance only after correctness is sufficiently stable.
+
+- [ ] Measure generated instructions/blocks and linked transitions over sustained execution.
+- [ ] Measure runtime boundary frequency.
+- [ ] Measure scheduler event density.
+- [ ] Measure host time per generated step and per frame.
+- [ ] Identify hot generated paths from real workloads.
+- [ ] Identify excessive runtime crossings caused by missing specialization.
+- [ ] Compare the Phase E linked execution path against the remaining dynamic dispatch paths.
+- [ ] Optimize only where a real-ROM profile demonstrates a bottleneck.
+- [ ] Re-run all deterministic checkpoints after every performance change.
+
+**Human validation required:**
+
+- [ ] User confirms whether measured performance is sufficient for the current milestone.
+- [ ] User decides whether the next iteration should prioritize fidelity, observability or performance.
+
+**Acceptance gate:**
+
+Performance work is data-driven by real-ROM execution and does not weaken deterministic behavior or move instruction execution into an interpreter-style runtime loop.
+
+---
+
+## Phase F global engineering rules
+
+### Static recompilation boundary
+
+- The ROM is decoded and analyzed statically.
+- Control flow and generated blocks remain the primary execution model.
+- The runtime provides dynamic GBA architectural state and hardware effects.
+- The runtime must not become the normal instruction-by-instruction ARM/Thumb interpreter.
+- Any reference CPU implementation must remain clearly separated from the production generated execution path.
+
+### Determinism
+
+- The central scheduler remains the source of machine time.
+- Real-ROM tests must be reproducible from the same ROM, configuration and input sequence.
+- Host wall-clock time must not silently become the architectural timing source.
+- Every new milestone should have an observable checkpoint or trace.
+
+### Debuggability
+
+- Every real-ROM failure must identify the last successful architectural boundary.
+- Traces should correlate cycles, generated blocks, runtime boundaries and hardware events.
+- Prefer a narrow, explainable failure over silent fallback behavior.
+- Do not hide unsupported instructions, devices or exceptional paths behind fake success.
+
+### Human-in-the-loop policy
+
+Phase F is intentionally not fully automated.
+
+The user must participate whenever a milestone depends on:
+
+- choosing or validating the reference ROM;
+- confirming expected visual/game behavior;
+- selecting the next interaction milestone;
+- distinguishing a genuine hardware/reference discrepancy from an implementation bug;
+- deciding whether fidelity, observability or performance should be prioritized next.
+
+Automation should establish evidence. Human validation decides whether the evidence corresponds to the intended real-world milestone.
+
+### Phase F completion criteria
+
+Phase F is complete only when the project can demonstrate, with reproducible evidence, that:
+
+- [ ] at least one real GBA ROM executes through the static-recompilation pipeline;
+- [ ] generated Rust blocks remain the primary CPU execution mechanism;
+- [ ] the runtime provides the required dynamic hardware contract without becoming the primary instruction interpreter;
+- [ ] execution reaches a meaningful game-visible milestone;
+- [ ] deterministic multi-frame execution is demonstrated;
+- [ ] deterministic input-driven progression is demonstrated;
+- [ ] a compatibility matrix records the scope and limits of real-ROM support;
+- [ ] performance measurements are based on real workloads;
+- [ ] all known limitations are explicit rather than hidden behind unsupported-path fallbacks.
+
+> Phase F completion does not mean "all GBA games work". It means the static recompiler has crossed the boundary from architectural validation into reproducible real-ROM execution with a documented compatibility envelope.
