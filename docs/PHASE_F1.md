@@ -1,6 +1,6 @@
 # Phase F1 — Deterministic real-ROM boot
 
-Phase F1 extends the Phase F0 real-ROM harness from pipeline validation to a reproducible boot checkpoint.
+Phase F1 extends the Phase F0 real-ROM harness from pipeline validation to a reproducible boot checkpoint and reference-correlated early boot evidence.
 
 ## Scope
 
@@ -48,9 +48,84 @@ A deterministic checkpoint is evidence of reproducibility, not by itself evidenc
 
 ## Human validation — completed
 
-The checkpoint was independently inspected with the mGBA debugger using the same FireRed ROM and a Thumb breakpoint at `0x081DC81C`.
+### Cartridge reset and handoff
 
-mGBA stopped with:
+The selected FireRed ROM was restarted in mGBA and observed from the BIOS reset boundary.
+
+At reset:
+
+```text
+PC    = 0x00000004
+SP    = 0x03007F00
+CPSR  = 0x0000001F
+Cycle = 0
+```
+
+The first cartridge execution was then observed at:
+
+```text
+PC/current instruction = 0x08000000
+PC next                = 0x08000004
+SP                     = 0x03007F00
+CPSR                   = 0x2000001F
+Thumb                  = false
+Cycle                  = 28
+instruction            = EA00007F  b 0x08000204
+```
+
+Continuing reached the declared cartridge entry target:
+
+```text
+PC/current instruction = 0x08000204
+PC next                = 0x08000208
+SP                     = 0x03007F00
+LR                     = 0x08000000
+CPSR                   = 0x2000001F
+Thumb                  = false
+Cycle                  = 48
+instruction            = E3A00012  mov r0, #18
+```
+
+This confirms that the FireRed header `entry_target=0x08000204` is not merely metadata: the ROM's actual early boot code branches from `0x08000000` to `0x08000204`.
+
+### First ARM → Thumb transition
+
+The early ARM disassembly shows:
+
+```text
+08000228:  E59F1014  ldr r1, =0x080003A5
+0800022C:  E1A0E00F  mov lr, pc
+08000230:  E12FFF11  bx r1
+```
+
+Because `r1 = 0x080003A5` is odd, the BX selects Thumb state and the architectural target is `0x080003A4`.
+
+mGBA confirmed the transition by stopping at:
+
+```text
+PC/current instruction = 0x080003A4
+PC next                = 0x080003A6
+SP                     = 0x03007E40
+LR                     = 0x08000234
+CPSR                   = 0x0000003F
+Thumb                  = true
+Cycle                  = 175
+instruction            = B5F0  stmdb sp!, {r4-r7,lr}
+```
+
+Therefore the first observed real-ROM ARM → Thumb transition is:
+
+```text
+0x08000230  BX 0x080003A5
+        ↓
+0x080003A4  Thumb
+```
+
+### F1 checkpoint reference correlation
+
+The checkpoint was independently inspected with the mGBA debugger using the same FireRed ROM and a breakpoint at `0x081DC81C`.
+
+The current observed mGBA state was:
 
 ```text
 PC/current instruction = 0x081DC81E
@@ -58,27 +133,34 @@ instruction address     = 0x081DC81C
 Thumb                    = true
 SP                       = 0x03007E08
 Cycle                    = 20257
-instruction              = BE00  bkpt
+instruction              = C008  stmia r0!, {r3}
 ```
 
 This establishes that `0x081DC81C` is a genuine execution point in FireRed's real code path, with the same Thumb state and SP as the `gba-rust` checkpoint. The differing cycle counters are intentionally not treated as equivalent timing measurements; rigorous timing comparison belongs to F3.
 
-Human validation result:
+**Human validation result so far:**
 
 **F1 checkpoint humain : VALIDÉ.**
 
-The checkpoint is therefore accepted as a reference-correlated F1 execution point rather than an arbitrary plateau.
+The reset boundary, cartridge entry, declared entry target, first observed ARM → Thumb transition and reference-correlated checkpoint are now documented as real FireRed observations.
 
 ## Remaining F1 engineering work
 
-Human checkpoint validation does not close the entire F1 phase. The following architectural work remains:
+The following items remain open because they have not yet been demonstrated from the real ROM itself:
 
 - validate the complete reset/initialization path used by the selected ROM;
-- validate ARM/Thumb transitions across the broader boot path;
 - validate supervisor/IRQ exception entry used by the boot sequence;
-- validate early memory initialization;
+- validate early memory initialization against expected boot behavior;
 - validate the first timer/interrupt activity encountered by the ROM;
 - distinguish compiler/code-generation divergence from runtime/hardware divergence beyond the current checkpoint.
+
+The first ARM → Thumb transition is now observed and documented, but this does not yet prove all subsequent state transitions across the complete boot path.
+
+## Evidence boundary
+
+The synthetic architectural tests in `crates/gba-cli/tests/f1_architectural_boot.rs` validate the runtime contract for reset, timer overflow, IRQ entry and generated-dispatch IRQ sampling. These tests do not claim that FireRed reaches the same timer/IRQ configuration.
+
+The real-ROM manual evidence above remains the authority for FireRed-specific boot observations.
 
 ## Canonical local command
 
