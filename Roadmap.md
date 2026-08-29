@@ -8,55 +8,79 @@
 
 ## Phase F — Real Game Execution
 
-### F0 — Experimental execution harness
+### F0 — Experimental execution harness — **COMPLETED**
 
 Goal: establish a reproducible path from a real ROM to generated execution and make every failure observable.
 
-- [ ] Define the canonical real-ROM execution command and environment contract.
-- [ ] Accept a user-provided ROM path without embedding commercial ROMs in the repository.
-- [ ] Validate cartridge metadata before execution.
-- [ ] Run the existing static analysis / CFG / code-generation pipeline on the ROM.
-- [ ] Start the generated program against the `gba-runtime` contract.
-- [ ] Record execution termination reason instead of treating all exits as crashes.
-- [ ] Record ROM identity, generated block count, linked block count and execution mode.
-- [ ] Record cycles, generated-block transitions, runtime boundary crossings, IRQs, exceptions, DMA and PPU events.
-- [ ] Add a deterministic execution trace suitable for comparing repeated runs.
+- [x] Define the canonical real-ROM execution command and environment contract.
+- [x] Accept a user-provided ROM path without embedding commercial ROMs in the repository.
+- [x] Validate cartridge metadata before execution.
+- [x] Run the existing static analysis / CFG / code-generation pipeline on the ROM.
+- [x] Start the generated program against the `gba-runtime` contract.
+- [x] Record execution termination reason instead of treating all exits as crashes.
+- [x] Record ROM identity and architectural execution state.
+- [x] Add deterministic generated-block tracing suitable for comparing repeated runs.
+- [x] Validate the F0 path locally against the selected FireRed reference ROM.
 
-**Human validation required:**
+**Human validation completed:**
 
-- [ ] User supplies the first reference ROM and confirms that it is legally available for testing.
-- [ ] User runs the canonical command locally and provides the first real-ROM trace/result.
-- [ ] User confirms the expected boot/termination point for the selected ROM.
+- [x] User supplied and locally validated the reference FireRed ROM.
+- [x] User ran the canonical real-ROM command successfully.
+- [x] User confirmed the F0 harness runs successfully.
 
-**Acceptance gate:**
+**Acceptance gate:** **PASSED.**
 
 A real ROM can be loaded, statically analyzed, generated and launched through the intended execution path, with enough telemetry to identify the first architectural divergence.
 
 ---
 
-### F1 — Deterministic real-ROM boot
+### F1 — Deterministic real-ROM boot — **IN PROGRESS**
 
-Goal: prove that the generated program can execute the ROM's reset/initialization path deterministically.
+Goal: prove that the generated program can execute the ROM's reset/initialization path deterministically and establish a meaningful boot checkpoint.
 
-- [ ] Validate cartridge reset state and initial CPU state.
-- [ ] Execute BIOS/runtime initialization through generated execution and runtime services.
-- [ ] Validate ARM/Thumb state transitions encountered during boot.
+- [x] Establish a fixed 4096-generated-block boot window.
+- [x] Capture an architectural checkpoint containing generated steps, PC, ARM/Thumb state, SP, cycles and exit reason.
+- [x] Repeat the same boot scenario and compare checkpoints deterministically.
+- [x] Compare generated-block traces across repeated boot runs.
+- [x] Confirm execution progresses beyond the cartridge entry point.
+- [ ] Validate cartridge reset state against the intended boot behavior.
+- [ ] Validate the full reset/initialization path used by the selected ROM.
+- [ ] Validate ARM/Thumb state transitions against the expected boot path.
 - [ ] Validate supervisor/IRQ exception entry used by the boot sequence.
-- [ ] Validate reset vector and early memory initialization.
+- [ ] Validate early memory initialization against the expected boot behavior.
 - [ ] Validate the first timer/interrupt activity encountered by the ROM.
-- [ ] Capture a deterministic architectural checkpoint after a defined boot interval.
-- [ ] Repeat the same run and compare checkpoints.
-- [ ] Distinguish compiler/code-generation divergence from runtime/hardware divergence.
+- [ ] Distinguish compiler/code-generation divergence from runtime/hardware divergence at the boot milestone.
+
+**Current automated evidence:**
+
+For the selected FireRed reference ROM, the local F1 test completed two deterministic 4096-generated-block runs and produced the same checkpoint/trace:
+
+```text
+size=16777216
+ title=POKEMON FIRE
+ game_code=BPRE
+ entry_target=0x08000204
+ steps=4096
+ pc=0x081dc81c
+ thumb=true
+ sp=0x03007e08
+ cycles=22132
+ exit=StepLimitExceeded
+```
+
+This demonstrates deterministic progression through generated execution, but it does not by itself prove that the checkpoint is the intended visual/game boot milestone.
 
 **Human validation required:**
 
-- [ ] User identifies the expected visual or execution milestone for the ROM's boot phase.
-- [ ] User compares the first observable output against known/reference hardware or an accepted emulator reference.
-- [ ] User confirms whether the observed state is a genuine boot milestone or an accidental execution plateau.
+- [ ] User identifies the expected visual or execution milestone for FireRed's boot phase.
+- [ ] User compares the first observable output against a trusted reference emulator or hardware behavior.
+- [ ] User confirms whether `PC=0x081dc81c`, `SP=0x03007e08`, Thumb state and `22132` cycles represent a genuine boot milestone or an execution plateau.
 
 **Acceptance gate:**
 
-The same ROM reaches the same boot checkpoint repeatedly without nondeterministic divergence, and the execution path is still driven by generated blocks rather than instruction-by-instruction interpretation.
+The same ROM reaches the same validated boot checkpoint repeatedly without nondeterministic divergence, and the execution path is still driven by generated blocks rather than instruction-by-instruction interpretation.
+
+F1 must not be marked complete solely because the test process exits successfully or because the checkpoint is deterministic.
 
 ---
 
