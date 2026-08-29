@@ -6,7 +6,7 @@ use std::{
 };
 
 use gba_recompiler::{analyze_with_mapping, generate, ImageKind, ImageMapping, Mode};
-use gba_runtime::{validate_header, Cartridge, GeneratedExecutionExit, Runtime};
+use gba_runtime::{validate_header, Cartridge, Runtime};
 
 const REAL_ROM_ENV: &str = "GBA_REAL_ROM";
 const DEFAULT_STEP_LIMIT: u64 = 512;
@@ -378,6 +378,7 @@ fn real_rom_boot_checkpoint_is_deterministic() {
         first_checkpoint
             .iter()
             .find(|line| line.contains("pc="))
+            .map(|line| *line)
             .expect("PC checkpoint is present"),
         "real-rom execution: pc=0x08000000"
     );
