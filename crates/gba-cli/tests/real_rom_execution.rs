@@ -352,6 +352,7 @@ fn real_rom_boot_checkpoint_is_deterministic() {
         stdout
             .lines()
             .filter(|line| line.starts_with("real-rom execution:"))
+            .map(str::to_owned)
             .collect::<Vec<_>>()
     };
     let first_checkpoint = checkpoint(&first_stdout);
@@ -378,7 +379,7 @@ fn real_rom_boot_checkpoint_is_deterministic() {
         first_checkpoint
             .iter()
             .find(|line| line.contains("pc="))
-            .map(|line| *line)
+            .map(|line| line.as_str())
             .expect("PC checkpoint is present"),
         "real-rom execution: pc=0x08000000"
     );
