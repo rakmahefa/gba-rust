@@ -1,6 +1,4 @@
-use gba_runtime::{Cartridge, Runtime};
-
-use gba_runtime::bios::{CpuMode, IRQ_TIMER0};
+use gba_runtime::{Cartridge, CpuMode, Runtime, IRQ_TIMER0};
 use gba_runtime::cpu::{REG_LR, REG_PC, REG_SP};
 use gba_runtime::timers::{CONTROL_ENABLE, CONTROL_IRQ};
 
