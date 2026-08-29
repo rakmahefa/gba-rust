@@ -6,11 +6,12 @@ use std::{
 };
 
 use gba_recompiler::{analyze_with_mapping, generate, ImageKind, ImageMapping, Mode};
-use gba_runtime::{Cartridge, Runtime};
+use gba_runtime::{validate_header, Cartridge, GeneratedExecutionExit, Runtime};
 
 const REAL_ROM_ENV: &str = "GBA_REAL_ROM";
 const DEFAULT_STEP_LIMIT: u64 = 512;
 const CARTRIDGE_BASE: u32 = 0x0800_0000;
+const TRACE_LIMIT: &str = "32";
 
 fn unique_runner_dir() -> PathBuf {
     let stamp = SystemTime::now()
@@ -36,11 +37,11 @@ fn real_rom_path() -> Option<PathBuf> {
         return Some(configured);
     }
 
-    let workspace_relative = workspace_root().join(configured);
+    let workspace_relative = workspace_root().join(&configured);
     if workspace_relative.exists() {
         Some(workspace_relative)
     } else {
-        Some(PathBuf::from(env::var_os(REAL_ROM_ENV).unwrap()))
+        Some(configured)
     }
 }
 
@@ -88,8 +89,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()?;
 
     let rom = fs::read(&rom_path)?;
+    let header = gba_runtime::validate_header(&rom)?;
     let mut runtime = gba_runtime::Runtime::new();
-    runtime.load_cartridge(gba_runtime::Cartridge::from_rom(rom, "saves"));
+    runtime.load_cartridge(gba_runtime::Cartridge::from_rom(rom.clone(), "saves"));
     assert_eq!(
         runtime.cpu.r[13], 0x0300_7f00,
         "cartridge execution must receive the BIOS-compatible system stack"
@@ -102,6 +104,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "generated execution must preserve architectural PC alignment"
     );
 
+    println!("real-rom identity: size={}", rom.len());
+    println!("real-rom identity: title={}", header.title);
+    println!("real-rom identity: game_code={}", header.game_code);
+    println!("real-rom identity: entry_target={:#010x}", header.entry_target);
     println!("real-rom execution: steps={}", result.steps);
     println!("real-rom execution: pc={:#010x}", result.state.pc());
     println!("real-rom execution: thumb={}", result.state.thumb);
@@ -130,6 +136,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .expect("write generated real-ROM runner");
 }
 
+fn run_generated_runner(root: &Path, path: &Path) -> std::process::Output {
+    Command::new("cargo")
+        .arg("run")
+        .arg("--quiet")
+        .arg("--manifest-path")
+        .arg(root.join("Cargo.toml"))
+        .arg("--")
+        .arg(path)
+        .arg(DEFAULT_STEP_LIMIT.to_string())
+        .env("GBA_GENERATED_TRACE", "1")
+        .env("GBA_GENERATED_TRACE_LIMIT", TRACE_LIMIT)
+        .output()
+        .expect("cargo must be available for real-ROM execution validation")
+}
+
 #[test]
 fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
     let Some(path) = real_rom_path() else {
@@ -145,10 +166,16 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
             path.display()
         )
     });
-    assert!(
-        rom.len() >= 0xc0,
-        "real GBA ROM must contain the minimum cartridge header"
-    );
+
+    let header = validate_header(&rom).unwrap_or_else(|error| {
+        panic!(
+            "real ROM header validation failed for {}: {error}",
+            path.display()
+        )
+    });
+    assert_eq!(header.entry_target & 3, 0);
+    assert!(!header.title.trim().is_empty());
+    assert_eq!(header.game_code.len(), 4);
 
     let mapping = real_rom_mapping(rom.len());
     let program = analyze_with_mapping(&rom, mapping).unwrap_or_else(|error| {
@@ -172,6 +199,7 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
 
     let generated = generate(&program, "gba_entry");
     assert!(generated.source.contains("GeneratedBlockExit"));
+    assert!(generated.source.contains("gba_entry_with_limit"));
 
     let mut preflight = Runtime::new();
     preflight.load_cartridge(Cartridge::from_rom(rom.clone(), "saves"));
@@ -190,32 +218,49 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
     let root = unique_runner_dir();
     write_generated_runner(&root, &generated.source);
 
-    let output = Command::new("cargo")
-        .arg("run")
-        .arg("--quiet")
-        .arg("--manifest-path")
-        .arg(root.join("Cargo.toml"))
-        .arg("--")
-        .arg(&path)
-        .arg(DEFAULT_STEP_LIMIT.to_string())
-        .output()
-        .expect("cargo must be available for real-ROM execution validation");
+    let first = run_generated_runner(&root, &path);
+    assert!(
+        first.status.success(),
+        "real-ROM generated runner failed for {}\nstdout:\n{}\nstderr:\n{}",
+        path.display(),
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let second = run_generated_runner(&root, &path);
+    assert!(
+        second.status.success(),
+        "second real-ROM generated runner failed for {}\nstdout:\n{}\nstderr:\n{}",
+        path.display(),
+        String::from_utf8_lossy(&second.stdout),
+        String::from_utf8_lossy(&second.stderr)
+    );
 
     let _ = fs::remove_dir_all(&root);
 
-    assert!(
-        output.status.success(),
-        "real-ROM generated runner failed for {}\nstdout:\n{}\nstderr:\n{}",
-        path.display(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(stdout.contains("real-rom identity: size="));
+    assert!(stdout.contains(&format!("real-rom identity: title={}", header.title)));
+    assert!(stdout.contains(&format!("real-rom identity: game_code={}", header.game_code)));
+    assert!(stdout.contains("real-rom identity: entry_target="));
     assert!(stdout.contains("real-rom execution: steps="));
     assert!(stdout.contains("real-rom execution: pc="));
     assert!(stdout.contains("real-rom execution: thumb="));
     assert!(stdout.contains("real-rom execution: sp="));
     assert!(stdout.contains("real-rom execution: cycles="));
     assert!(stdout.contains("real-rom execution: exit="));
+
+    let first_trace = String::from_utf8_lossy(&first.stderr)
+        .lines()
+        .filter(|line| line.starts_with("[generated-trace]"))
+        .collect::<Vec<_>>();
+    let second_trace = String::from_utf8_lossy(&second.stderr)
+        .lines()
+        .filter(|line| line.starts_with("[generated-trace]"))
+        .collect::<Vec<_>>();
+    assert!(!first_trace.is_empty(), "generated execution trace must be observable");
+    assert_eq!(
+        first_trace, second_trace,
+        "repeated real-ROM runs must produce an identical generated trace"
+    );
 }
