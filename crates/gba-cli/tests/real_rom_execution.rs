@@ -6,7 +6,7 @@ use std::{
 };
 
 use gba_recompiler::{analyze_with_mapping, generate, ImageKind, ImageMapping, Mode};
-use gba_runtime::{validate_header, Cartridge, GeneratedExecutionExit, Runtime};
+use gba_runtime::{validate_header, Cartridge, Runtime};
 
 const REAL_ROM_ENV: &str = "GBA_REAL_ROM";
 const DEFAULT_STEP_LIMIT: u64 = 512;
@@ -250,11 +250,14 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
     assert!(stdout.contains("real-rom execution: cycles="));
     assert!(stdout.contains("real-rom execution: exit="));
 
-    let first_trace = String::from_utf8_lossy(&first.stderr)
+    let first_stderr = String::from_utf8_lossy(&first.stderr);
+    let second_stderr = String::from_utf8_lossy(&second.stderr);
+
+    let first_trace = first_stderr
         .lines()
         .filter(|line| line.starts_with("[generated-trace]"))
         .collect::<Vec<_>>();
-    let second_trace = String::from_utf8_lossy(&second.stderr)
+    let second_trace = second_stderr
         .lines()
         .filter(|line| line.starts_with("[generated-trace]"))
         .collect::<Vec<_>>();
