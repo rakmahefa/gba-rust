@@ -6,10 +6,11 @@ use std::{
 };
 
 use gba_recompiler::{analyze_with_mapping, generate, ImageKind, ImageMapping, Mode};
-use gba_runtime::{validate_header, Cartridge, Runtime};
+use gba_runtime::{validate_header, Cartridge, GeneratedExecutionExit, Runtime};
 
 const REAL_ROM_ENV: &str = "GBA_REAL_ROM";
 const DEFAULT_STEP_LIMIT: u64 = 512;
+const BOOT_STEP_LIMIT: u64 = 4096;
 const CARTRIDGE_BASE: u32 = 0x0800_0000;
 const TRACE_LIMIT: &str = "32";
 
@@ -136,7 +137,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .expect("write generated real-ROM runner");
 }
 
-fn run_generated_runner(root: &Path, path: &Path) -> std::process::Output {
+fn run_generated_runner(
+    root: &Path,
+    path: &Path,
+    max_steps: u64,
+) -> std::process::Output {
     Command::new("cargo")
         .arg("run")
         .arg("--quiet")
@@ -144,35 +149,21 @@ fn run_generated_runner(root: &Path, path: &Path) -> std::process::Output {
         .arg(root.join("Cargo.toml"))
         .arg("--")
         .arg(path)
-        .arg(DEFAULT_STEP_LIMIT.to_string())
+        .arg(max_steps.to_string())
         .env("GBA_GENERATED_TRACE", "1")
         .env("GBA_GENERATED_TRACE_LIMIT", TRACE_LIMIT)
         .output()
         .expect("cargo must be available for real-ROM execution validation")
 }
 
-#[test]
-fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
-    let Some(path) = real_rom_path() else {
-        eprintln!(
-            "skipping real-ROM execution validation: set {REAL_ROM_ENV} to a local .gba ROM"
-        );
-        return;
-    };
-
-    let rom = fs::read(&path).unwrap_or_else(|error| {
-        panic!(
-            "{REAL_ROM_ENV} points to unreadable ROM {}: {error}",
-            path.display()
-        )
+fn build_generated_real_rom(path: &Path) -> (PathBuf, String) {
+    let rom = fs::read(path).unwrap_or_else(|error| {
+        panic!("failed to read real ROM {}: {error}", path.display())
     });
-
     let header = validate_header(&rom).unwrap_or_else(|error| {
-        panic!(
-            "real ROM header validation failed for {}: {error}",
-            path.display()
-        )
+        panic!("real ROM header validation failed for {}: {error}", path.display())
     });
+
     assert_eq!(header.entry_target & 3, 0);
     assert!(!header.title.trim().is_empty());
     assert_eq!(header.game_code.len(), 4);
@@ -202,23 +193,84 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
     assert!(generated.source.contains("gba_entry_with_limit"));
 
     let mut preflight = Runtime::new();
-    preflight.load_cartridge(Cartridge::from_rom(rom.clone(), "saves"));
+    preflight.load_cartridge(Cartridge::from_rom(rom, "saves"));
     assert_eq!(preflight.cpu.r[15], CARTRIDGE_BASE);
     assert_eq!(preflight.cpu.r[13], 0x0300_7f00);
-    assert_eq!(preflight.read8(CARTRIDGE_BASE), rom[0]);
-    assert_eq!(
-        preflight.read16(CARTRIDGE_BASE),
-        u16::from_le_bytes([rom[0], rom[1]])
+
+    let root = unique_runner_dir();
+    write_generated_runner(&root, &generated.source);
+    (
+        root,
+        format!(
+            "size={} title={} game_code={} entry_target={:#010x}",
+            preflight
+                .cartridge
+                .as_ref()
+                .expect("cartridge loaded")
+                .rom
+                .len(),
+            header.title,
+            header.game_code,
+            header.entry_target
+        ),
+    )
+}
+
+#[test]
+fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
+    let Some(path) = real_rom_path() else {
+        eprintln!(
+            "skipping real-ROM execution validation: set {REAL_ROM_ENV} to a local .gba ROM"
+        );
+        return;
+    };
+
+    let rom = fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "{REAL_ROM_ENV} points to unreadable ROM {}: {error}",
+            path.display()
+        )
+    });
+
+    let mapping = real_rom_mapping(rom.len());
+    let program = analyze_with_mapping(&rom, mapping).unwrap_or_else(|error| {
+        panic!(
+            "real ROM CFG analysis failed for {}: {error:?}",
+            path.display()
+        )
+    });
+
+    assert_eq!(program.entry.0, 0);
+    assert_eq!(program.cfg.blocks[0].key.address, CARTRIDGE_BASE);
+    assert_eq!(program.cfg.blocks[0].key.mode, Mode::Arm);
+    assert!(!program.cfg.blocks.is_empty());
+    assert!(
+        program
+            .cfg
+            .blocks
+            .iter()
+            .all(|block| block.key.address >= CARTRIDGE_BASE)
     );
-    assert_eq!(
-        preflight.read32(CARTRIDGE_BASE),
-        u32::from_le_bytes([rom[0], rom[1], rom[2], rom[3]])
-    );
+
+    let generated = generate(&program, "gba_entry");
+    assert!(generated.source.contains("GeneratedBlockExit"));
+    assert!(generated.source.contains("gba_entry_with_limit"));
+
+    let header = validate_header(&rom).unwrap_or_else(|error| {
+        panic!(
+            "real ROM header validation failed for {}: {error}",
+            path.display()
+        )
+    });
+    let mut preflight = Runtime::new();
+    preflight.load_cartridge(Cartridge::from_rom(rom, "saves"));
+    assert_eq!(preflight.cpu.r[15], CARTRIDGE_BASE);
+    assert_eq!(preflight.cpu.r[13], 0x0300_7f00);
 
     let root = unique_runner_dir();
     write_generated_runner(&root, &generated.source);
 
-    let first = run_generated_runner(&root, &path);
+    let first = run_generated_runner(&root, &path, DEFAULT_STEP_LIMIT);
     assert!(
         first.status.success(),
         "real-ROM generated runner failed for {}\nstdout:\n{}\nstderr:\n{}",
@@ -227,7 +279,7 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
         String::from_utf8_lossy(&first.stderr)
     );
 
-    let second = run_generated_runner(&root, &path);
+    let second = run_generated_runner(&root, &path, DEFAULT_STEP_LIMIT);
     assert!(
         second.status.success(),
         "second real-ROM generated runner failed for {}\nstdout:\n{}\nstderr:\n{}",
@@ -236,13 +288,10 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
         String::from_utf8_lossy(&second.stderr)
     );
 
-    let _ = fs::remove_dir_all(&root);
-
     let stdout = String::from_utf8_lossy(&first.stdout);
     assert!(stdout.contains("real-rom identity: size="));
     assert!(stdout.contains(&format!("real-rom identity: title={}", header.title)));
     assert!(stdout.contains(&format!("real-rom identity: game_code={}", header.game_code)));
-    assert!(stdout.contains("real-rom identity: entry_target="));
     assert!(stdout.contains("real-rom execution: steps="));
     assert!(stdout.contains("real-rom execution: pc="));
     assert!(stdout.contains("real-rom execution: thumb="));
@@ -252,7 +301,6 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
 
     let first_stderr = String::from_utf8_lossy(&first.stderr);
     let second_stderr = String::from_utf8_lossy(&second.stderr);
-
     let first_trace = first_stderr
         .lines()
         .filter(|line| line.starts_with("[generated-trace]"))
@@ -266,4 +314,98 @@ fn real_rom_execution_validates_cartridge_cfg_and_runtime_boundary() {
         first_trace, second_trace,
         "repeated real-ROM runs must produce an identical generated trace"
     );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn real_rom_boot_checkpoint_is_deterministic() {
+    let Some(path) = real_rom_path() else {
+        eprintln!(
+            "skipping real-ROM boot checkpoint validation: set {REAL_ROM_ENV} to a local .gba ROM"
+        );
+        return;
+    };
+
+    let (root, identity) = build_generated_real_rom(&path);
+    let first = run_generated_runner(&root, &path, BOOT_STEP_LIMIT);
+    let second = run_generated_runner(&root, &path, BOOT_STEP_LIMIT);
+
+    assert!(
+        first.status.success(),
+        "first deterministic boot run failed for {}\nstdout:\n{}\nstderr:\n{}",
+        path.display(),
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
+        second.status.success(),
+        "second deterministic boot run failed for {}\nstdout:\n{}\nstderr:\n{}",
+        path.display(),
+        String::from_utf8_lossy(&second.stdout),
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    let checkpoint = |stdout: &str| {
+        stdout
+            .lines()
+            .filter(|line| line.starts_with("real-rom execution:"))
+            .collect::<Vec<_>>()
+    };
+    let first_checkpoint = checkpoint(&first_stdout);
+    let second_checkpoint = checkpoint(&second_stdout);
+
+    assert!(!first_checkpoint.is_empty(), "boot checkpoint must be observable");
+    assert!(
+        first_checkpoint.iter().any(|line| line.contains("pc=")),
+        "boot checkpoint must contain PC"
+    );
+    assert!(
+        first_checkpoint.iter().any(|line| line.contains("thumb=")),
+        "boot checkpoint must contain ARM/Thumb state"
+    );
+    assert!(
+        first_checkpoint.iter().any(|line| line.contains("sp=")),
+        "boot checkpoint must contain stack pointer"
+    );
+    assert!(
+        first_checkpoint.iter().any(|line| line.contains("cycles=")),
+        "boot checkpoint must contain machine cycles"
+    );
+    assert_ne!(
+        first_checkpoint
+            .iter()
+            .find(|line| line.contains("pc="))
+            .expect("PC checkpoint is present"),
+        "real-rom execution: pc=0x08000000"
+    );
+    assert_eq!(
+        first_checkpoint, second_checkpoint,
+        "repeated boot runs must produce an identical architectural checkpoint"
+    );
+
+    println!("real-rom boot checkpoint: {identity}");
+    for line in &first_checkpoint {
+        println!("{line}");
+    }
+
+    let first_stderr = String::from_utf8_lossy(&first.stderr);
+    let second_stderr = String::from_utf8_lossy(&second.stderr);
+    let first_trace = first_stderr
+        .lines()
+        .filter(|line| line.starts_with("[generated-trace]"))
+        .collect::<Vec<_>>();
+    let second_trace = second_stderr
+        .lines()
+        .filter(|line| line.starts_with("[generated-trace]"))
+        .collect::<Vec<_>>();
+    assert!(!first_trace.is_empty(), "boot generated trace must be observable");
+    assert_eq!(
+        first_trace, second_trace,
+        "repeated boot runs must produce an identical generated trace"
+    );
+
+    let _ = fs::remove_dir_all(&root);
 }
