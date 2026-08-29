@@ -29,13 +29,56 @@ F1 automation proves:
 - repeated runs produce the same checkpoint;
 - repeated runs produce the same generated-block trace.
 
-A deterministic checkpoint is evidence of reproducibility, not evidence that the observed state is the intended game boot milestone.
+For the selected FireRed ROM, the local test completed two deterministic boot runs with:
 
-## Human validation boundary
+```text
+size=16777216
+ title=POKEMON FIRE
+ game_code=BPRE
+ entry_target=0x08000204
+ steps=4096
+ pc=0x081dc81c
+ thumb=true
+ sp=0x03007e08
+ cycles=22132
+ exit=StepLimitExceeded
+```
 
-Human validation is still required before declaring the boot milestone complete. The user must confirm that the observed state corresponds to the expected boot behavior of the selected ROM and distinguish a genuine milestone from an execution plateau.
+A deterministic checkpoint is evidence of reproducibility, not by itself evidence of the intended game-visible milestone.
 
-In particular, F1 must not be marked complete solely because the test process exits successfully or because the checkpoint is deterministic.
+## Human validation — completed
+
+The checkpoint was independently inspected with the mGBA debugger using the same FireRed ROM and a Thumb breakpoint at `0x081DC81C`.
+
+mGBA stopped with:
+
+```text
+PC/current instruction = 0x081DC81E
+instruction address     = 0x081DC81C
+Thumb                    = true
+SP                       = 0x03007E08
+Cycle                    = 20257
+instruction              = BE00  bkpt
+```
+
+This establishes that `0x081DC81C` is a genuine execution point in FireRed's real code path, with the same Thumb state and SP as the `gba-rust` checkpoint. The differing cycle counters are intentionally not treated as equivalent timing measurements; rigorous timing comparison belongs to F3.
+
+Human validation result:
+
+**F1 checkpoint humain : VALIDÉ.**
+
+The checkpoint is therefore accepted as a reference-correlated F1 execution point rather than an arbitrary plateau.
+
+## Remaining F1 engineering work
+
+Human checkpoint validation does not close the entire F1 phase. The following architectural work remains:
+
+- validate the complete reset/initialization path used by the selected ROM;
+- validate ARM/Thumb transitions across the broader boot path;
+- validate supervisor/IRQ exception entry used by the boot sequence;
+- validate early memory initialization;
+- validate the first timer/interrupt activity encountered by the ROM;
+- distinguish compiler/code-generation divergence from runtime/hardware divergence beyond the current checkpoint.
 
 ## Canonical local command
 
@@ -46,6 +89,8 @@ cargo test -p gba-cli --test real_rom_execution -- --nocapture
 
 The F1 test is `real_rom_boot_checkpoint_is_deterministic` and uses a fixed 4096-generated-block window.
 
-## Next boundary
+## Exit condition for F1
 
-Once the checkpoint is confirmed as a genuine boot milestone, F1 can move to the remaining reset/initialization and first timer/IRQ evidence. F2 then targets real exception, BIOS and IRQ execution as an explicit validation phase.
+F1 can be marked fully complete only after the remaining reset/initialization, exception/IRQ, early-memory and first timer/interrupt evidence is covered. The validated checkpoint is a prerequisite milestone, not a substitute for those architectural checks.
+
+F2 then targets real exception, BIOS and IRQ execution as an explicit validation phase.
